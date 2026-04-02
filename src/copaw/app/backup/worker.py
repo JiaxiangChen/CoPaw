@@ -23,6 +23,79 @@ logger = logging.getLogger(__name__)
 # Beijing timezone for consistent time handling
 BJ_TZ = ZoneInfo("Asia/Shanghai")
 
+# Encodings to try when UTF-8 fails (common for Chinese Windows systems)
+FALLBACK_ENCODINGS = ['gb18030', 'gbk', 'big5', 'cp936', 'latin-1']
+
+
+def safe_archive_name(file_path: Path, base_dir: Path) -> str | None:
+    """Safely convert file path to archive name with multi-encoding support."""
+    try:
+        relative = file_path.relative_to(base_dir)
+        name = str(relative)
+
+        try:
+            name.encode('utf-8')
+            return name
+        except UnicodeEncodeError:
+            pass
+
+        for encoding in FALLBACK_ENCODINGS:
+            try:
+                encoded = name.encode(encoding, errors='strict')
+                decoded = encoded.decode(encoding)
+                return decoded.encode('utf-8', errors='replace').decode('utf-8')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+
+        try:
+            return name.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='replace')
+        except Exception:
+            logger.warning(f"Cannot encode file name: {file_path}")
+            return None
+    except Exception as e:
+        logger.warning(f"Error processing path {file_path}: {e}")
+        return None
+
+
+def _compress_directory(
+    zf: zipfile.ZipFile,
+    source_dir: Path,
+    base_dir: Path,
+    prefix: str = "",
+    skipped: list | None = None,
+) -> None:
+    """Compress a directory into a zip file.
+
+    Args:
+        zf: ZipFile object to write to.
+        source_dir: Directory to compress.
+        base_dir: Base directory for relative paths.
+        prefix: Optional prefix for archive names (e.g., ".secret/").
+        skipped: Optional list to collect skipped file paths.
+    """
+    if not source_dir.exists():
+        return
+
+    for file in source_dir.rglob("*"):
+        try:
+            arcname = safe_archive_name(file, base_dir)
+            if not arcname:
+                if skipped is not None:
+                    skipped.append(str(file))
+                continue
+
+            if prefix:
+                arcname = f"{prefix}{arcname}"
+
+            if file.is_file():
+                zf.write(file, arcname)
+            elif file.is_dir() and not any(file.iterdir()):
+                zf.writestr(f"{arcname}/", "")
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Error accessing {file}: {e}")
+            if skipped is not None:
+                skipped.append(str(file))
+
 
 class BackupWorker:
     """Async worker for backup and restore operations."""
@@ -206,6 +279,7 @@ class BackupWorker:
             self.task_store.save(task)
 
             # Download and restore
+            restored_users = []
             for i, user_id in enumerate(user_ids):
                 task.processed_users = i + 1
                 task.progress_percent = int(((i + 1) / len(user_ids)) * 50)
@@ -251,6 +325,9 @@ class BackupWorker:
 
                 user_dir = DEFAULT_WORKING_DIR / user_id
                 await self._extract_zip(zip_path, user_dir, user_id)
+                restored_users.append(user_id)
+
+            task.restored_users = restored_users
 
             # Clean up rollback data after successful restore
             rollback_dir = DEFAULT_WORKING_DIR / ".rollback" / task.task_id
@@ -293,53 +370,27 @@ class BackupWorker:
         """Compress user directory to zip."""
 
         def _do_compress():
+            skipped_files = []
             with zipfile.ZipFile(
                 zip_path,
                 "w",
                 zipfile.ZIP_DEFLATED,
                 compresslevel=6,
             ) as zf:
-                # Compress user directory contents
-                for file in user_dir.rglob("*"):
-                    if file.is_file():
-                        zf.write(file, file.relative_to(user_dir))
-                    elif file.is_dir() and not any(file.iterdir()):
-                        # 添加空文件夹
-                        zf.writestr(
-                            str(file.relative_to(user_dir)) + "/",
-                            "",
-                        )
+                _compress_directory(zf, user_dir, user_dir, skipped=skipped_files)
+                _compress_directory(
+                    zf,
+                    get_secret_dir(user_id),
+                    get_secret_dir(user_id),
+                    prefix=".secret/",
+                    skipped=skipped_files,
+                )
 
-                # Compress secret directory contents
-                secret_dir = get_secret_dir(user_id)
-                if secret_dir.exists():
-                    for file in secret_dir.rglob("*"):
-                        try:
-                            if file.is_file():
-                                zf.write(
-                                    file,
-                                    Path(".secret")
-                                    / file.relative_to(secret_dir),
-                                )
-                            elif file.is_dir() and not any(file.iterdir()):
-                                # Add empty directory
-                                zf.writestr(
-                                    str(
-                                        Path(".secret")
-                                        / file.relative_to(secret_dir),
-                                    )
-                                    + "/",
-                                    "",
-                                )
-                        except PermissionError as e:
-                            logger.warning(
-                                "Permission denied accessing secret file "
-                                f"{file}: {e}",
-                            )
-                        except OSError as e:
-                            logger.warning(
-                                "Error accessing secret file " f"{file}: {e}",
-                            )
+            if skipped_files:
+                logger.warning(
+                    f"Skipped {len(skipped_files)} files due to encoding/access issues for user {user_id}"
+                )
+
             return str(zip_path)
 
         return await asyncio.to_thread(_do_compress)
@@ -362,47 +413,13 @@ class BackupWorker:
                 zipfile.ZIP_DEFLATED,
                 compresslevel=6,
             ) as zf:
-                # Compress user directory contents
-                for file in user_dir.rglob("*"):
-                    if file.is_file():
-                        zf.write(file, file.relative_to(user_dir))
-                    elif file.is_dir() and not any(file.iterdir()):
-                        # 添加空文件夹
-                        zf.writestr(
-                            str(file.relative_to(user_dir)) + "/",
-                            "",
-                        )
-
-                # Compress secret directory contents
-                secret_dir = get_secret_dir(user_id)
-                if secret_dir.exists():
-                    for file in secret_dir.rglob("*"):
-                        try:
-                            if file.is_file():
-                                zf.write(
-                                    file,
-                                    Path(".secret")
-                                    / file.relative_to(secret_dir),
-                                )
-                            elif file.is_dir() and not any(file.iterdir()):
-                                # Add empty directory
-                                zf.writestr(
-                                    str(
-                                        Path(".secret")
-                                        / file.relative_to(secret_dir),
-                                    )
-                                    + "/",
-                                    "",
-                                )
-                        except PermissionError as e:
-                            logger.warning(
-                                "Permission denied accessing secret file "
-                                f"{file}: {e}",
-                            )
-                        except OSError as e:
-                            logger.warning(
-                                "Error accessing secret file " f"{file}: {e}",
-                            )
+                _compress_directory(zf, user_dir, user_dir)
+                _compress_directory(
+                    zf,
+                    get_secret_dir(user_id),
+                    get_secret_dir(user_id),
+                    prefix=".secret/",
+                )
             return str(zip_path)
 
         await asyncio.to_thread(_do_compress)

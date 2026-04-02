@@ -57,6 +57,7 @@ class BackupTask(BaseModel):
     local_zip_paths: list[str] = Field(default_factory=list)
     error_message: Optional[str] = None
     rollback_data_paths: list[str] = Field(default_factory=list)
+    restored_users: list[str] = Field(default_factory=list)  # All users restored (download task)
 
     def is_terminal(self) -> bool:
         """Check if task has reached terminal state."""
