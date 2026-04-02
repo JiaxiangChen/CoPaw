@@ -36,6 +36,7 @@
     "settings": "设置",
     "models": "模型",
     "environments": "环境变量",
+    "backup": "备份管理",
     "analytics": "统计分析",
     "analyticsOverview": "总览",
     "analyticsUsers": "用户分析",

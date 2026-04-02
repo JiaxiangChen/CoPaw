@@ -32,8 +32,8 @@ class CreateBackupResponse(BaseModel):
 
 
 class CreateRestoreRequest(BaseModel):
-    date: str  # YYYY-MM-DD
-    hour: Optional[int] = None  # 0-23, required if multiple hourly backups exist
+    date: Optional[str] = None  # YYYY-MM-DD, defaults to current date
+    hour: Optional[int] = None  # 0-23, defaults to current hour
     instance_id: Optional[str] = None  # Required for multi-instance deployment
     user_ids: Optional[list[str]] = None
 

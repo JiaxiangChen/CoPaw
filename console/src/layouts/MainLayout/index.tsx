@@ -16,6 +16,7 @@ import WorkspacePage from "../../pages/Agent/Workspace";
 import MCPPage from "../../pages/Agent/MCP";
 import ModelsPage from "../../pages/Settings/Models";
 import EnvironmentsPage from "../../pages/Settings/Environments";
+import BackupPage from "../../pages/Settings/Backup";
 import AnalyticsPage from "../../pages/Analytics";
 
 const { Content } = Layout;
@@ -32,6 +33,7 @@ const pathToKey: Record<string, string> = {
   "/agents": "agents",
   "/models": "models",
   "/environments": "environments",
+  "/backup": "backup",
   "/agent-config": "agent-config",
   "/analytics/overview": "analytics-overview",
   "/analytics/users": "analytics-users",
@@ -69,6 +71,7 @@ export default function MainLayout() {
               <Route path="/workspace" element={<WorkspacePage />} />
               <Route path="/models" element={<ModelsPage />} />
               <Route path="/environments" element={<EnvironmentsPage />} />
+              <Route path="/backup" element={<BackupPage />} />
               <Route path="/agent-config" element={<AgentConfigPage />} />
               <Route path="/analytics/*" element={<AnalyticsPage />} />
               <Route path="/" element={<Chat />} />

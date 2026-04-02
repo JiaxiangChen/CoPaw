@@ -36,6 +36,7 @@ import {
   BarChart3,
   LineChart,
   FileSearch,
+  Cloud,
 } from "lucide-react";
 import api from "../api";
 import styles from "./index.module.less";
@@ -63,6 +64,7 @@ const KEY_TO_PATH: Record<string, string> = {
   workspace: "/workspace",
   models: "/models",
   environments: "/environments",
+  backup: "/backup",
   "agent-config": "/agent-config",
   "analytics-overview": "/analytics/overview",
   "analytics-users": "/analytics/users",
@@ -342,6 +344,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           key: "environments",
           label: t("nav.environments"),
           icon: <Globe size={16} />,
+        },
+        {
+          key: "backup",
+          label: t("nav.backup", "Backup"),
+          icon: <Cloud size={16} />,
         },
       ],
     },

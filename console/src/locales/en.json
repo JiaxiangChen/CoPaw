@@ -36,6 +36,7 @@
     "settings": "Settings",
     "models": "Models",
     "environments": "Environments",
+    "backup": "Backup",
     "analytics": "Analytics",
     "analyticsOverview": "Overview",
     "analyticsUsers": "Users",

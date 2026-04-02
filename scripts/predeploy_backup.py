@@ -40,6 +40,71 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Encodings to try when UTF-8 fails (common for Chinese Windows systems)
+FALLBACK_ENCODINGS = ['gb18030', 'gbk', 'big5', 'cp936', 'latin-1']
+
+
+def safe_archive_name(file_path: Path, base_dir: Path) -> str | None:
+    """Safely convert file path to archive name with multi-encoding support."""
+    try:
+        relative = file_path.relative_to(base_dir)
+        name = str(relative)
+
+        try:
+            name.encode('utf-8')
+            return name
+        except UnicodeEncodeError:
+            pass
+
+        for encoding in FALLBACK_ENCODINGS:
+            try:
+                encoded = name.encode(encoding, errors='strict')
+                decoded = encoded.decode(encoding)
+                return decoded.encode('utf-8', errors='replace').decode('utf-8')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+
+        try:
+            return name.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='replace')
+        except Exception:
+            logger.warning(f"Cannot encode file name: {file_path}")
+            return None
+    except Exception as e:
+        logger.warning(f"Error processing path {file_path}: {e}")
+        return None
+
+
+def _compress_directory(
+    zf: zipfile.ZipFile,
+    source_dir: Path,
+    base_dir: Path,
+    prefix: str = "",
+    skipped: list | None = None,
+) -> None:
+    """Compress a directory into a zip file."""
+    if not source_dir.exists():
+        return
+
+    for file in source_dir.rglob("*"):
+        try:
+            arcname = safe_archive_name(file, base_dir)
+            if not arcname:
+                if skipped is not None:
+                    skipped.append(str(file))
+                continue
+
+            if prefix:
+                arcname = f"{prefix}{arcname}"
+
+            if file.is_file():
+                zf.write(file, arcname)
+            elif file.is_dir() and not any(file.iterdir()):
+                zf.writestr(f"{arcname}/", "")
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Error accessing {file}: {e}")
+            if skipped is not None:
+                skipped.append(str(file))
+
 
 def load_backup_config(config_path: Optional[Path] = None) -> dict:
     """Load backup configuration from file."""
@@ -110,10 +175,9 @@ def create_backup_zip(
         True if successful, False otherwise
     """
     user_dir = working_dir / user_id
-    secret_base = Path(f"{working_dir}.secret").expanduser().resolve()
-    secret_dir = secret_base / user_id
+    secret_dir = Path(f"{working_dir}.secret").expanduser().resolve() / user_id
 
-    has_content = False
+    skipped_files = []
 
     try:
         with zipfile.ZipFile(
@@ -122,39 +186,17 @@ def create_backup_zip(
             zipfile.ZIP_DEFLATED,
             compresslevel=compress_level,
         ) as zf:
-            # Add files from working/{user_id}/
-            if user_dir.exists():
-                for file in user_dir.rglob("*"):
-                    if file.is_file():
-                        zf.write(file, file.relative_to(user_dir))
-                        has_content = True
-                    elif file.is_dir() and not any(file.iterdir()):
-                        # Add empty directories
-                        zf.writestr(str(file.relative_to(user_dir)) + "/", "")
-                        has_content = True
+            _compress_directory(zf, user_dir, user_dir, skipped=skipped_files)
+            _compress_directory(zf, secret_dir, secret_dir, prefix=".secret/", skipped=skipped_files)
 
-            # Add files from working.secret/{user_id}/ under .secret/
-            if secret_dir.exists():
-                for file in secret_dir.rglob("*"):
-                    try:
-                        if file.is_file():
-                            zf.write(file, Path(".secret") / file.relative_to(secret_dir))
-                            has_content = True
-                        elif file.is_dir() and not any(file.iterdir()):
-                            zf.writestr(
-                                str(Path(".secret") / file.relative_to(secret_dir)) + "/",
-                                ""
-                            )
-                            has_content = True
-                    except PermissionError as e:
-                        logger.warning(f"Permission denied: {file} - {e}")
-                    except OSError as e:
-                        logger.warning(f"Error accessing: {file} - {e}")
-
-        if not has_content:
+        # Check if any content was added
+        if not output_path.exists() or output_path.stat().st_size == 0:
             logger.warning(f"No content for user {user_id}")
             output_path.unlink(missing_ok=True)
             return False
+
+        if skipped_files:
+            logger.warning(f"Skipped {len(skipped_files)} files for user {user_id}")
 
         return True
 
