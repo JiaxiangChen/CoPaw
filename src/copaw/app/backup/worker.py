@@ -7,6 +7,7 @@ import asyncio
 import logging
 import shutil
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -116,8 +117,8 @@ class BackupWorker:
         self.task_store.save(task)
 
         try:
-            if task.target_user_id:
-                user_ids = [task.target_user_id]
+            if task.target_user_ids:
+                user_ids = task.target_user_ids
             else:
                 user_ids = self._get_all_user_ids()
 
@@ -142,22 +143,47 @@ class BackupWorker:
             hour = task.backup_hour if task.backup_hour is not None else datetime.now(BJ_TZ).hour
             instance_id = task.instance_id or "default"
 
-            for i, user_id in enumerate(user_ids):
-                # Update progress (1-indexed)
-                task.processed_users = i + 1
-                task.progress_percent = int(((i + 1) / len(user_ids)) * 50)
-                self.task_store.save(task)
-
-                # Compress user directory
+            # Prepare compression tasks
+            compress_tasks = []
+            for user_id in user_ids:
                 user_dir = DEFAULT_WORKING_DIR / user_id
                 if not user_dir.exists():
                     continue
+                zip_path = Path(tempfile.gettempdir()) / f"backup_{user_id}.zip"
+                compress_tasks.append((user_id, user_dir, zip_path))
 
-                zip_path = (
-                    Path(tempfile.gettempdir()) / f"backup_{user_id}.zip"
+            task.total_users = len(compress_tasks)
+            self.task_store.save(task)
+
+            # Parallel compression with concurrency limit
+            compress_start = time.time()
+            max_compress_concurrent = 3  # Limit to avoid high memory usage
+
+            results = []
+            for i in range(0, len(compress_tasks), max_compress_concurrent):
+                batch = compress_tasks[i:i + max_compress_concurrent]
+                batch_results = await asyncio.gather(
+                    *[self._compress_single_user(uid, ud, zp) for uid, ud, zp in batch]
                 )
-                await self._compress_user(user_id, user_dir, zip_path)
-                local_paths.append(str(zip_path))
+                results.extend(batch_results)
+
+                # Update progress
+                completed = min(i + max_compress_concurrent, len(compress_tasks))
+                task.processed_users = completed
+                task.progress_percent = int((completed / len(compress_tasks)) * 50)
+                self.task_store.save(task)
+
+            # Sort by user_id and collect paths
+            results.sort(key=lambda x: x[0])
+            local_paths = [r[1] for r in results]
+
+            compress_total_time = time.time() - compress_start
+            total_size_mb = sum(r[2] for r in results)
+            logger.info(
+                f"Total compression time (parallel, max {max_compress_concurrent}): "
+                f"{compress_total_time:.2f}s for {len(local_paths)} users, "
+                f"total size: {total_size_mb:.2f}MB"
+            )
 
             # Upload to S3
             task.current_step = "uploading"
@@ -172,25 +198,35 @@ class BackupWorker:
                 self.task_store.save(task)
                 return
 
-            for i, zip_path_str in enumerate(local_paths):
-                zip_path = Path(zip_path_str)
-                user_id = zip_path.stem.replace("backup_", "")
-                s3_key = await asyncio.to_thread(
-                    self.s3_client.upload,
-                    zip_path,
-                    instance_id,
-                    date_str,
-                    hour,
-                    user_id,
-                )
-                s3_keys.append(s3_key)
+            upload_start = time.time()
 
-                # Update progress (1-indexed)
-                task.processed_users = i + 1
-                task.progress_percent = 50 + int(
-                    ((i + 1) / len(local_paths)) * 50,
+            # Parallel upload with concurrency limit
+            max_concurrent = 5  # Limit concurrent uploads to avoid overwhelming S3
+            upload_results = []
+            for i in range(0, len(local_paths), max_concurrent):
+                batch = local_paths[i:i + max_concurrent]
+                batch_results = await asyncio.gather(
+                    *[self._upload_single_file(Path(p), instance_id, date_str, hour) for p in batch]
                 )
+                upload_results.extend(batch_results)
+
+                # Update progress
+                completed = min(i + max_concurrent, len(local_paths))
+                task.processed_users = completed
+                task.progress_percent = 50 + int((completed / len(local_paths)) * 50)
                 self.task_store.save(task)
+
+            # Sort results by user_id to maintain consistent order
+            upload_results.sort(key=lambda x: x[0])
+            s3_keys = [r[1] for r in upload_results]
+
+            upload_total_time = time.time() - upload_start
+            total_size_mb = sum(Path(p).stat().st_size for p in local_paths) / (1024 * 1024)
+            logger.info(
+                f"Total upload time (parallel, max {max_concurrent}): {upload_total_time:.2f}s, "
+                f"total size: {total_size_mb:.2f}MB, "
+                f"effective speed: {total_size_mb/upload_total_time:.2f}MB/s"
+            )
 
             task.s3_keys = s3_keys
             task.local_zip_paths = local_paths
@@ -375,7 +411,7 @@ class BackupWorker:
                 zip_path,
                 "w",
                 zipfile.ZIP_DEFLATED,
-                compresslevel=6,
+                compresslevel=1,
             ) as zf:
                 _compress_directory(zf, user_dir, user_dir, skipped=skipped_files)
                 _compress_directory(
@@ -395,6 +431,58 @@ class BackupWorker:
 
         return await asyncio.to_thread(_do_compress)
 
+    async def _compress_single_user(
+        self,
+        user_id: str,
+        user_dir: Path,
+        zip_path: Path,
+    ) -> tuple[str, str, float, float]:
+        """Compress a single user with timing log.
+
+        Returns:
+            (user_id, zip_path_str, size_mb, elapsed_time)
+        """
+        start = time.time()
+        await self._compress_user(user_id, user_dir, zip_path)
+        elapsed = time.time() - start
+        size_mb = zip_path.stat().st_size / (1024 * 1024)
+        logger.info(
+            f"Compressed user {user_id}: {size_mb:.2f}MB in {elapsed:.2f}s "
+            f"({size_mb/elapsed:.2f}MB/s)"
+        )
+        return user_id, str(zip_path), size_mb, elapsed
+
+    async def _upload_single_file(
+        self,
+        zip_path: Path,
+        instance_id: str,
+        date_str: str,
+        hour: int,
+    ) -> tuple[str, str, float]:
+        """Upload a single file to S3 with timing log.
+
+        Returns:
+            (user_id, s3_key, elapsed_time)
+        """
+        user_id = zip_path.stem.replace("backup_", "")
+        zip_size_mb = zip_path.stat().st_size / (1024 * 1024)
+
+        start = time.time()
+        s3_key = await asyncio.to_thread(
+            self.s3_client.upload,
+            zip_path,
+            instance_id,
+            date_str,
+            hour,
+            user_id,
+        )
+        elapsed = time.time() - start
+        logger.info(
+            f"Uploaded user {user_id}: {zip_size_mb:.2f}MB in {elapsed:.2f}s "
+            f"({zip_size_mb/elapsed:.2f}MB/s)"
+        )
+        return user_id, s3_key, elapsed
+
     async def _create_rollback_backup(
         self,
         task_id: str,
@@ -411,7 +499,7 @@ class BackupWorker:
                 zip_path,
                 "w",
                 zipfile.ZIP_DEFLATED,
-                compresslevel=6,
+                compresslevel=1,
             ) as zf:
                 _compress_directory(zf, user_dir, user_dir)
                 _compress_directory(

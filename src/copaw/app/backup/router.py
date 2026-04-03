@@ -15,8 +15,9 @@ router = APIRouter(prefix="/backup", tags=["backup"])
 
 
 class CreateBackupRequest(BaseModel):
-    target_user_id: Optional[str] = None
+    user_ids: Optional[list[str]] = None  # Specific users to backup, None = all users
     instance_id: Optional[str] = None  # Required for multi-instance deployment
+    backup_date: Optional[str] = None  # YYYY-MM-DD, defaults to today
     backup_hour: Optional[int] = None  # 0-23, defaults to current hour if not specified
 
 
@@ -25,6 +26,7 @@ class CreateBackupResponse(BaseModel):
     status: str
     task_type: str
     message: str
+    target_users: list[str]
     created_at: str
     instance_id: str
     backup_date: str
@@ -80,13 +82,23 @@ def get_backup_service() -> BackupService:
     "/upload",
     response_model=CreateBackupResponse,
     summary="创建备份任务",
-    description="创建备份任务，上传用户数据到 S3。支持按实例和小时粒度备份。",
+    description="创建备份任务，上传用户数据到 S3。支持按实例和小时粒度备份，可指定用户列表。",
 )
 async def create_backup(request: CreateBackupRequest) -> CreateBackupResponse:
     service = get_backup_service()
+
+    # Get target users
+    from ...constant import list_all_user_ids
+    all_users = list_all_user_ids()
+    if request.user_ids:
+        target_users = [u for u in request.user_ids if u in all_users]
+    else:
+        target_users = all_users
+
     task = await service.create_backup_task(
-        target_user_id=request.target_user_id,
+        user_ids=request.user_ids,
         instance_id=request.instance_id,
+        backup_date=request.backup_date,
         backup_hour=request.backup_hour,
     )
 
@@ -99,6 +111,7 @@ async def create_backup(request: CreateBackupRequest) -> CreateBackupResponse:
         status=task.status.value,
         task_type=task.task_type.value,
         message="Backup task created successfully",
+        target_users=target_users,
         created_at=task.created_at.isoformat(),
         instance_id=task.instance_id or "",
         backup_date=backup_date,

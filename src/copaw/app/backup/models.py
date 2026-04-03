@@ -40,8 +40,7 @@ class BackupTask(BaseModel):
     completed_at: Optional[datetime] = None
 
     # Input parameters
-    target_user_id: Optional[str] = None
-    target_user_ids: Optional[list[str]] = None
+    target_user_ids: Optional[list[str]] = None  # Users to backup/restore
     backup_date: Optional[str] = None  # YYYY-MM-DD
     backup_hour: Optional[int] = None  # 0-23, defaults to current hour
     instance_id: Optional[str] = None  # Instance identifier for multi-instance deployment

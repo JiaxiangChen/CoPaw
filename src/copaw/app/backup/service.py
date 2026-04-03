@@ -49,15 +49,17 @@ class BackupService:
 
     async def create_backup_task(
         self,
-        target_user_id: str | None = None,
+        user_ids: list[str] | None = None,
         instance_id: str | None = None,
+        backup_date: str | None = None,
         backup_hour: int | None = None,
     ) -> BackupTask:
         """Create a new backup task.
 
         Args:
-            target_user_id: Specific user to backup, or None for all users
+            user_ids: Specific users to backup, or None for all users
             instance_id: Instance identifier for multi-instance deployment
+            backup_date: Backup date (YYYY-MM-DD), defaults to today
             backup_hour: Hour of day (0-23), defaults to current hour
         """
         async with self._lock:
@@ -69,7 +71,8 @@ class BackupService:
 
         # Set backup date and hour (Beijing time)
         now = datetime.now(ZoneInfo("Asia/Shanghai"))
-        backup_date = now.strftime("%Y-%m-%d")
+        if backup_date is None:
+            backup_date = now.strftime("%Y-%m-%d")
         if backup_hour is None:
             backup_hour = now.hour
 
@@ -78,7 +81,7 @@ class BackupService:
             task_type=BackupTaskType.BACKUP,
             status=BackupTaskStatus.PENDING,
             created_at=datetime.now(ZoneInfo("Asia/Shanghai")),
-            target_user_id=target_user_id,
+            target_user_ids=user_ids,
             instance_id=instance_id,
             backup_date=backup_date,
             backup_hour=backup_hour,

@@ -157,7 +157,7 @@ def create_backup_zip(
     user_id: str,
     working_dir: Path,
     output_path: Path,
-    compress_level: int = 6,
+    compress_level: int = 1,
 ) -> bool:
     """Create a backup zip file for a single user.
 
