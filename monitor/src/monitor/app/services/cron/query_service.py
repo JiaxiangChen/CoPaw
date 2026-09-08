@@ -6,6 +6,7 @@ for the frontend overview page.
 """
 
 import asyncio
+import calendar
 import hashlib
 import json
 import logging
@@ -3631,8 +3632,13 @@ class QueryService:
         bbk_filter_params: List[Any],
         source_filter_sql: str,
         source_filter_params: List[Any],
+        sync_date: Optional[str] = None,
     ) -> List[str]:
         """获取使用统计技能的分行ID列表（技能视角）。"""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+        )
         skill_exists = self._statistics_skill_exists("j")
 
         branch_list_sql = f"""
@@ -3645,11 +3651,15 @@ class QueryService:
               AND j.bbk_id IS NOT NULL
               AND j.bbk_id != ''
               AND {skill_exists}
+              {jkh_filter_sql}
               {bbk_filter_sql}
               {source_filter_sql}
         """
         params = (
-            [start_time, end_time] + bbk_filter_params + source_filter_params
+            [start_time, end_time]
+            + jkh_filter_params
+            + bbk_filter_params
+            + source_filter_params
         )
         rows = await db.fetch_all(branch_list_sql, tuple(params))
         return [row.get("bbk_id") for row in rows if row.get("bbk_id")]
@@ -3681,8 +3691,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> int:
         """统计分行使用统计技能的任务数量（技能视角）。"""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -3695,9 +3711,11 @@ class QueryService:
               AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         row = await db.fetch_one(task_count_sql, tuple(params))
@@ -3730,8 +3748,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> list[str]:
         """获取指定分行使用统计技能的所有 job_id（技能视角）。"""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -3744,9 +3768,11 @@ class QueryService:
               AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(job_ids_sql, tuple(params))
@@ -3758,6 +3784,8 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         job_ids: list[str],
+        sync_date: Optional[str] = None,
+        bbk_id: Optional[str] = None,
     ) -> dict:
         """直接从 swe_cron_executions 统计执行指标，不 JOIN swe_cron_jobs。
 
@@ -3772,6 +3800,11 @@ class QueryService:
                 "read_tasks": 0,
                 "error_count": 0,
             }
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "swe_cron_executions.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         placeholders = ", ".join(["%s"] * len(job_ids))
         stats_sql = f"""
             SELECT
@@ -3785,8 +3818,9 @@ class QueryService:
             FROM swe_cron_executions
             WHERE actual_time >= %s AND actual_time <= %s
               AND job_id IN ({placeholders})
+              {jkh_filter_sql}
         """
-        params = [start_time, end_time] + job_ids
+        params = [start_time, end_time] + job_ids + jkh_filter_params
         row = await db.fetch_one(stats_sql, tuple(params))
         return {
             "total_executions": self._row_int(row, "total_executions"),
@@ -3867,11 +3901,17 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> int:
         """统计分行统计技能去重数量。
 
         从任务绑定技能中按市场表统计开关过滤后去重计数。
         """
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
 
         sql = f"""
@@ -3881,9 +3921,11 @@ class QueryService:
             {self._skill_binding_join("j", "s")}
             WHERE j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         row = await db.fetch_one(sql, tuple(params))
@@ -3930,11 +3972,17 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, int]:
         """统计分行使用统计技能的客户经理点击行为（技能视角）。
 
         与任务视角口径一致：按点击时间范围筛选，通过 cron_task_id 关联获取技能信息。
         """
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "c.user_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND c.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -3950,10 +3998,12 @@ class QueryService:
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
             GROUP BY CASE WHEN c.event_type = 'preview_view' AND c.template_type = 'sub' THEN 'plan' ELSE c.button_type END
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(sql, tuple(params))
@@ -4005,11 +4055,17 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, int]:
         """统计分行使用统计技能的客户点击行为（技能视角）。
 
         与任务视角口径一致：按点击时间范围筛选，通过 cron_task_id 关联获取技能信息。
         """
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "c.user_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND c.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -4026,10 +4082,12 @@ class QueryService:
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
             GROUP BY CASE WHEN c.event_type = 'preview_view' AND c.template_type = 'sub' THEN 'plan' ELSE c.button_type END
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(sql, tuple(params))
@@ -4048,8 +4106,13 @@ class QueryService:
         bbk_filter_params: List[Any],
         source_filter_sql: str,
         source_filter_params: List[Any],
+        sync_date: Optional[str] = None,
     ) -> dict[str, dict[str, Any]]:
         """统计技能视角下各分行的接触客户数和客户接触率."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "a.user_id",
+            sync_date,
+        )
         skill_exists = self._statistics_skill_exists("j")
         contact_sql = f"""
             SELECT
@@ -4079,6 +4142,7 @@ class QueryService:
               )
               AND a.bbk_id IS NOT NULL
               AND a.bbk_id != ''
+              {jkh_filter_sql}
               {bbk_filter_sql.replace('j.bbk_id', 'a.bbk_id')}
               {source_filter_sql.replace('j.source_id', 'a.source_id')}
               AND EXISTS (
@@ -4093,6 +4157,7 @@ class QueryService:
         """
         params = (
             [start_time, end_time, start_time, end_time]
+            + jkh_filter_params
             + bbk_filter_params
             + source_filter_params
         )
@@ -4149,8 +4214,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> int:
         """统计分行使用统计技能的推荐客户数（技能视角）。"""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -4163,9 +4234,11 @@ class QueryService:
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND s.custuid IS NOT NULL
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         row = await db.fetch_one(sql, tuple(params))
@@ -4202,11 +4275,17 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> int:
         """统计分行使用统计技能的涉及客户经理数（技能视角）。
 
         统计时间范围内执行过统计技能任务的客户经理数。
         """
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -4218,9 +4297,11 @@ class QueryService:
               AND j.deleted_at IS NULL
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         row = await db.fetch_one(sql, tuple(params))
@@ -4261,8 +4342,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> int:
         """统计分行使用统计技能的查看结果客户经理数（技能视角）。"""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
 
@@ -4274,9 +4361,11 @@ class QueryService:
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND e.is_read = 1
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         row = await db.fetch_one(sql, tuple(params))
@@ -4354,6 +4443,61 @@ class QueryService:
             phone_customers=phone_customers,
         )
 
+    @staticmethod
+    async def _resolve_jkh_sync_date(
+        db: DatabaseConnection,
+        end_time: datetime,
+    ) -> Optional[str]:
+        """按截止日、当月月末、最早/最新日期的优先级选择名单快照。"""
+        end_date = end_time.strftime("%Y-%m-%d")
+        month_end = end_time.replace(
+            day=calendar.monthrange(end_time.year, end_time.month)[1],
+        ).strftime("%Y-%m-%d")
+        row = await db.fetch_one(
+            """
+            SELECT
+                MAX(CASE WHEN sync_date = %s THEN sync_date END) AS exact_date,
+                MAX(CASE WHEN sync_date = %s THEN sync_date END) AS month_end_date,
+                MIN(sync_date) AS earliest_date,
+                MAX(sync_date) AS latest_date
+            FROM jkh_user_inf
+            """,
+            (end_date, month_end),
+        )
+        if not row or row.get("latest_date") is None:
+            return None
+        if row.get("exact_date") is not None:
+            return row["exact_date"]
+        if row.get("month_end_date") is not None:
+            return row["month_end_date"]
+        if row["latest_date"] > end_date:
+            return row["earliest_date"]
+        return row["latest_date"]
+
+    @staticmethod
+    def _build_jkh_filter(
+        user_column: str,
+        sync_date: Optional[str],
+        bbk_id: Optional[str] = None,
+    ) -> Tuple[str, List[str]]:
+        """为内部固定列名构建名单过滤；未指定快照时保留原查询口径。"""
+        if sync_date is None:
+            return "", []
+        branch_filter = (
+            " AND jkh.first_bbk_id = %s" if bbk_id is not None else ""
+        )
+        params = [sync_date]
+        if bbk_id is not None:
+            params.append(bbk_id)
+        return (
+            f"""AND EXISTS (
+                SELECT 1 FROM jkh_user_inf jkh
+                WHERE jkh.user_id = {user_column} AND jkh.sync_date = %s
+                  {branch_filter}
+            )""",
+            params,
+        )
+
     async def get_branch_behavior(
         self,
         start_date: Optional[str] = None,
@@ -4379,6 +4523,14 @@ class QueryService:
         start_str = start_date or start_time.strftime("%Y-%m-%d")
         end_str = end_date or end_time.strftime("%Y-%m-%d")
 
+        sync_date = await self._resolve_jkh_sync_date(db, end_time)
+        if sync_date is None:
+            return CronBranchRankingResponse(
+                start_date=start_str,
+                end_date=end_str,
+                items=[],
+            )
+
         # 构建 bbk 过滤条件
         bbk_filter_sql, bbk_filter_params = self._build_bbk_filter(bbk_ids)
 
@@ -4395,6 +4547,7 @@ class QueryService:
             bbk_filter_params,
             source_filter_sql,
             source_filter_params,
+            sync_date=sync_date,
         )
         contact_stats = await self._fetch_branch_contact_stats(
             db,
@@ -4404,6 +4557,7 @@ class QueryService:
             bbk_filter_params,
             source_filter_sql,
             source_filter_params,
+            sync_date=sync_date,
         )
 
         items = []
@@ -4414,6 +4568,7 @@ class QueryService:
                 start_time,
                 end_time,
                 source_id,
+                sync_date=sync_date,
             )
             job_ids = await self._fetch_branch_skill_job_ids(
                 db,
@@ -4421,12 +4576,15 @@ class QueryService:
                 start_time,
                 end_time,
                 source_id,
+                sync_date=sync_date,
             )
             stats = await self._fetch_branch_execution_stats(
                 db,
                 start_time,
                 end_time,
                 job_ids,
+                sync_date=sync_date,
+                bbk_id=bbk_id,
             )
             # 新增指标查询
             skill_count = await self._fetch_branch_skill_count(
@@ -4435,6 +4593,7 @@ class QueryService:
                 start_time,
                 end_time,
                 source_id,
+                sync_date=sync_date,
             )
             involved_managers = (
                 await self._fetch_branch_skill_involved_managers(
@@ -4443,6 +4602,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 )
             )
             result_view_managers = (
@@ -4452,6 +4612,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 )
             )
             manager_click_counts = (
@@ -4461,6 +4622,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 )
             )
             customer_click_counts = (
@@ -4470,6 +4632,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 )
             )
             recommended_customers = (
@@ -4479,6 +4642,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 )
             )
             branch_contact_stats = contact_stats.get(bbk_id, {})
@@ -5147,8 +5311,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> list[dict]:
         """查询客户经理基础信息."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
         sql = f"""
@@ -5164,10 +5334,12 @@ class QueryService:
                 AND e.actual_time >= %s AND e.actual_time <= %s
             WHERE j.bbk_id = %s AND j.deleted_at IS NULL AND j.status != 'deleted'
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
             GROUP BY j.tenant_id
         """
         params: list = [start_time, end_time, bbk_id]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         return await db.fetch_all(sql, tuple(params))
@@ -5179,8 +5351,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, int]:
         """查询客户经理技能数量."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         sql = f"""
             SELECT j.tenant_id AS user_id,
@@ -5189,10 +5367,12 @@ class QueryService:
             JOIN swe_cron_jobs j ON e.job_id = j.id
             {self._skill_binding_join("j", "s")}
             WHERE j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
+              {jkh_filter_sql}
               {source_where}
             GROUP BY j.tenant_id
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(sql, tuple(params))
@@ -5205,8 +5385,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, int]:
         """查询推荐客户数."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "e.tenant_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND j.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
         sql = f"""
@@ -5218,10 +5404,12 @@ class QueryService:
             WHERE j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
               AND s.custuid IS NOT NULL
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
             GROUP BY j.tenant_id
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(sql, tuple(params))
@@ -5234,8 +5422,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, dict[str, int]]:
         """查询客户点击统计."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "c.user_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND c.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
         sql = f"""
@@ -5250,10 +5444,12 @@ class QueryService:
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND {skill_exists}
+              {jkh_filter_sql}
               {source_where}
             GROUP BY c.user_id, CASE WHEN c.event_type = 'preview_view' AND c.template_type = 'sub' THEN 'plan' ELSE c.button_type END
         """
         params: list = [bbk_id, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         rows = await db.fetch_all(sql, tuple(params))
@@ -5272,8 +5468,14 @@ class QueryService:
         start_time: datetime,
         end_time: datetime,
         source_id: Optional[str],
+        sync_date: Optional[str] = None,
     ) -> dict[str, dict[str, Any]]:
         """查询客户经理维度的接触客户数和客户接触率."""
+        jkh_filter_sql, jkh_filter_params = self._build_jkh_filter(
+            "a.user_id",
+            sync_date,
+            bbk_id=bbk_id,
+        )
         source_where = " AND a.source_id = %s" if source_id else ""
         skill_exists = self._statistics_skill_exists("j")
         sql = f"""
@@ -5303,6 +5505,7 @@ class QueryService:
                 a.clicked_at >= %s AND a.clicked_at <= %s
                 OR b.clicked_at >= %s AND b.clicked_at <= %s
               )
+              {jkh_filter_sql}
               {source_where}
               AND EXISTS (
                 SELECT 1
@@ -5315,6 +5518,7 @@ class QueryService:
             GROUP BY a.user_id
         """
         params: list = [bbk_id, start_time, end_time, start_time, end_time]
+        params.extend(jkh_filter_params)
         if source_id:
             params.append(source_id)
         logger.info(
@@ -5386,6 +5590,16 @@ class QueryService:
         start_str = start_date or start_time.strftime("%Y-%m-%d")
         end_str = end_date or end_time.strftime("%Y-%m-%d")
 
+        sync_date = await self._resolve_jkh_sync_date(db, end_time)
+        if sync_date is None:
+            return BranchManagerSummaryResponse(
+                start_date=start_str,
+                end_date=end_str,
+                bbk_id=bbk_id,
+                bbk_name=get_bbk_name_by_id(bbk_id) or bbk_id,
+                items=[],
+            )
+
         # 并行查询各项数据
         base_rows, skill_count_map, recommended_map, click_map, contact_map = (
             await asyncio.gather(
@@ -5395,6 +5609,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 ),
                 self._fetch_manager_skill_count(
                     db,
@@ -5402,6 +5617,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 ),
                 self._fetch_manager_recommended_customers(
                     db,
@@ -5409,6 +5625,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 ),
                 self._fetch_manager_click_stats(
                     db,
@@ -5416,6 +5633,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 ),
                 self._fetch_manager_contact_stats(
                     db,
@@ -5423,6 +5641,7 @@ class QueryService:
                     start_time,
                     end_time,
                     source_id,
+                    sync_date=sync_date,
                 ),
             )
         )

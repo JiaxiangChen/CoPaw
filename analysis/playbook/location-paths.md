@@ -173,3 +173,10 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `async_status` 为空时继续占用名额。Agent 执行和子任务等待共用现有派发超时预算；主成功但子结果缺失的回收错误为“获取子任务状态超时”。
 - 先确认 Scheduler 与 Monitor 访问同一执行表，且 Monitor 原有子任务同步/聚合正常运行；沿用 Monitor 的无子任务成功规则，不应把这一行为误诊为 Scheduler 提前完成。
 - 首轮验证：`$env:PYTHONPATH='scheduler/src'; .\.venv\Scripts\python.exe -m pytest tests/unit/scheduler -q`。
+
+## 定时任务详情分行维度 Excel 导出
+
+- 页面与按钮入口：`console/src/pages/Analytics/CronJobOverview/index.tsx` 的 `handleBranchExport`；导出时克隆当前 `RankingTable`，保留点击时的排序、序号与展示文本。
+- 文件生成入口：`console/src/pages/Analytics/CronJobOverview/exportBranchTable.ts`。ExcelJS 按需加载，在浏览器生成 `.xlsx`，保留两层合并表头和全部 22 列；不调用 Monitor 导出接口。百分比、千分位、前导零按文本保存。
+- 加载中、无数据或导出中禁用按钮；失败显示提示并恢复重试。核对导出内容时，比较点击时的表格快照，而非导出期间再次排序后的页面。
+- 验证：`pnpm exec vitest run src/pages/Analytics/CronJobOverview`，包含实际文件生成和回读、当前排序、合并表头、特殊文本、无新增 API 请求及错误恢复。
