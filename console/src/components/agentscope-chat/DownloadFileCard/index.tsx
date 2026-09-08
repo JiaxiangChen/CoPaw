@@ -178,6 +178,7 @@ function DownloadFileCard(props: DownloadFileCardProps) {
 
     if (autoPreview === undefined && pageAutoPreviewEnabled) {
       return registerAutoPreview({
+        url,
         open: () => {
           autoPreviewOpenedRef.current = true;
           if (previewPresentation === "workspace") {
@@ -203,6 +204,7 @@ function DownloadFileCard(props: DownloadFileCardProps) {
     previewPresentation,
     registerAutoPreview,
     shouldAutoPreview,
+    url,
   ]);
 
   const handlePreview = () => {

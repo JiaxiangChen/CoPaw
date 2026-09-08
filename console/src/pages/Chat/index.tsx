@@ -162,7 +162,7 @@ import {
   type PlanModeSessionLike,
 } from "./planMode";
 import FileManager from "./components/FileManager";
-import { AutoPreviewHtmlProvider } from "@/components/agentscope-chat/AutoPreviewHtmlContext";
+import { ChatAutoPreviewHtmlProvider as AutoPreviewHtmlProvider } from "@/components/agentscope-chat/ChatAutoPreviewHtmlProvider";
 import { HtmlPreviewTrackingProvider } from "@/components/agentscope-chat/HtmlPreviewTrackingContext";
 import { ChatContentOnlyProvider } from "@/components/agentscope-chat/ChatContentOnlyContext";
 import type {
