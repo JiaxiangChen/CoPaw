@@ -88,12 +88,17 @@ function findAutoPreviewHtmlTextMatch(
   const directMatch = toAutoPreviewHtmlMatch(value);
   if (directMatch) return directMatch;
 
+  let latestMatch: AutoPreviewHtmlMatch | null = null;
+  let latestMatchEnd = -1;
   MARKDOWN_LINK_PATTERN.lastIndex = 0;
   let match = MARKDOWN_LINK_PATTERN.exec(value);
   while (match) {
     const [, fileName, url] = match;
     const markdownMatch = toAutoPreviewHtmlMatch(url, fileName);
-    if (markdownMatch) return markdownMatch;
+    if (markdownMatch) {
+      latestMatch = markdownMatch;
+      latestMatchEnd = MARKDOWN_LINK_PATTERN.lastIndex;
+    }
     match = MARKDOWN_LINK_PATTERN.exec(value);
   }
 
@@ -101,11 +106,14 @@ function findAutoPreviewHtmlTextMatch(
   let urlMatch = PLAIN_URL_PATTERN.exec(value);
   while (urlMatch) {
     const plainMatch = toAutoPreviewHtmlMatch(urlMatch[0]);
-    if (plainMatch) return plainMatch;
+    if (plainMatch && urlMatch.index >= latestMatchEnd) {
+      latestMatch = plainMatch;
+      latestMatchEnd = PLAIN_URL_PATTERN.lastIndex;
+    }
     urlMatch = PLAIN_URL_PATTERN.exec(value);
   }
 
-  return null;
+  return latestMatch;
 }
 
 function findAutoPreviewHtmlValue(
@@ -134,7 +142,7 @@ function findAutoPreviewHtmlValue(
   }
 
   if (Array.isArray(value)) {
-    for (const item of value) {
+    for (const item of [...value].reverse()) {
       const match = findAutoPreviewHtmlValue(item, depth + 1);
       if (match) return match;
     }
@@ -206,7 +214,7 @@ function pickAutoPreviewHtmlResponseData(
 ): ChatRuntimeResponseCardData | null {
   const output = Array.isArray(data.output) ? data.output : [];
 
-  for (const outputMessage of output) {
+  for (const outputMessage of [...output].reverse()) {
     if (!isRecord(outputMessage)) {
       continue;
     }
@@ -214,7 +222,7 @@ function pickAutoPreviewHtmlResponseData(
     const content = Array.isArray(outputMessage.content)
       ? outputMessage.content
       : [];
-    for (const contentItem of content) {
+    for (const contentItem of [...content].reverse()) {
       const match = findAutoPreviewHtmlValue(contentItem);
       if (match) {
         const previewOutputMessage = shouldReuseAutoPreviewContentItem(
@@ -253,9 +261,9 @@ function pickAutoPreviewHtmlResponseData(
 function findAutoPreviewHtmlMessages(
   messages: IAgentScopeRuntimeWebUIMessage[],
 ): IAgentScopeRuntimeWebUIMessage[] | null {
-  for (const message of messages) {
+  for (const message of [...messages].reverse()) {
     const cards = message.cards || [];
-    for (let cardIndex = 0; cardIndex < cards.length; cardIndex += 1) {
+    for (let cardIndex = cards.length - 1; cardIndex >= 0; cardIndex -= 1) {
       const card = cards[cardIndex];
       if (card.code !== "AgentScopeRuntimeResponseCard") {
         continue;
@@ -432,10 +440,10 @@ export default function TaskRunGroupCard(props: {
     !data.collapsedByDefault,
   );
   const [stepsExpanded, setStepsExpanded] = useState(false);
-  const autoPreviewMessages = findAutoPreviewHtmlMessages([
-    ...data.finalMessages,
-    ...data.stepMessages,
-  ]);
+  // Prefer the last final result; only fall back to execution steps.
+  const autoPreviewMessages =
+    findAutoPreviewHtmlMessages(data.finalMessages) ||
+    findAutoPreviewHtmlMessages(data.stepMessages);
   const finalMessages = autoPreviewMessages || data.finalMessages;
   const stepMessages = autoPreviewMessages
     ? mergeTaskRunDetailMessages([...data.stepMessages, ...data.finalMessages])
