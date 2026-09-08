@@ -23,8 +23,10 @@ from .models import (
     MergedHookResult,
     StopHookExecutionResult,
     copy_handler_with_overrides,
+    skill_hook_handler_definition,
 )
 from .resolver import HookResolver, once_key
+from .skill_loader import refresh_skill_hooks_for_session
 from swe.tracing.sanitizer import sanitize_string
 
 logger = logging.getLogger(__name__)
@@ -48,12 +50,15 @@ class HookRuntime:
         self.agent_config = agent_config or HookConfig()
         self.session_overlay = session_overlay or HookSessionOverlay()
 
-    def requires_stop_output_buffer(self, context: HookContext) -> bool:
-        return HookResolver(
-            tenant_config=self.tenant_config,
-            agent_config=self.agent_config,
-            session_overlay=self.session_overlay,
-        ).requires_stop_output_buffer(context)
+    def requires_stop_output_buffer(
+        self,
+        context: HookContext,
+        *,
+        workspace_dir: Path | None = None,
+    ) -> bool:
+        if workspace_dir is not None:
+            self._refresh_skill_hooks_sync(workspace_dir)
+        return self._event_resolver().requires_stop_output_buffer(context)
 
     async def emit(
         self,
@@ -65,11 +70,8 @@ class HookRuntime:
         ) = None,
     ) -> MergedHookResult:
         started_at = time.perf_counter()
-        resolver = HookResolver(
-            tenant_config=self.tenant_config,
-            agent_config=self.agent_config,
-            session_overlay=self.session_overlay,
-        )
+        await self._refresh_skill_hooks(workspace_dir)
+        resolver = self._event_resolver()
         plan = (
             resolver.resolve_stop_validator_plan(context)
             if context.hook_event_name == HookEventName.STOP
@@ -146,11 +148,8 @@ class HookRuntime:
         if not context.assistant_response:
             return StopHookExecutionResult(final_response="")
 
-        resolver = HookResolver(
-            tenant_config=self.tenant_config,
-            agent_config=self.agent_config,
-            session_overlay=self.session_overlay,
-        )
+        await self._refresh_skill_hooks(workspace_dir)
+        resolver = self._event_resolver()
         transformer_plan = resolver.resolve_stop_transformer_plan(
             context,
             evaluate_if=False,
@@ -319,6 +318,8 @@ class HookRuntime:
         for item in handlers:
             if not item.handler.once:
                 continue
+            if not self._can_mark_skill_once(context, item):
+                continue
             self.session_overlay.once_executed[
                 once_key(
                     context.effective_tenant_id,
@@ -334,6 +335,55 @@ class HookRuntime:
                     item.handler.id,
                 )
             ] = True
+
+    def _event_resolver(self) -> HookResolver:
+        event_overlay = HookSessionOverlay.model_validate(
+            self.session_overlay.model_dump(mode="json", by_alias=True),
+        )
+        return HookResolver(
+            tenant_config=self.tenant_config,
+            agent_config=self.agent_config,
+            session_overlay=event_overlay,
+        )
+
+    async def _refresh_skill_hooks(self, workspace_dir: Path) -> None:
+        await asyncio.to_thread(
+            self._refresh_skill_hooks_sync,
+            workspace_dir,
+        )
+
+    def _refresh_skill_hooks_sync(self, workspace_dir: Path) -> None:
+        if not (
+            self.session_overlay.has_monitored_skill_sources()
+            or self.session_overlay.has_loaded_skill_sources()
+        ):
+            return
+        refreshed_state = refresh_skill_hooks_for_session(
+            workspace_dir=workspace_dir,
+            session_state=self.session_overlay,
+        )
+        self.session_overlay.loaded_skill_sources = (
+            refreshed_state.loaded_skill_sources
+        )
+        self.session_overlay.monitored_skill_sources = (
+            refreshed_state.monitored_skill_sources
+        )
+        self.session_overlay.entries = refreshed_state.entries
+        self.session_overlay.once_executed = refreshed_state.once_executed
+
+    def _can_mark_skill_once(self, context: HookContext, item) -> bool:
+        if item.skill_definition is None:
+            return True
+        event_name = context.hook_event_name
+        for source in self.session_overlay.loaded_skill_sources:
+            for group in source.hook_config.events.get(event_name, []):
+                if any(
+                    skill_hook_handler_definition(event_name, group, handler)
+                    == item.skill_definition
+                    for handler in group.hooks
+                ):
+                    return True
+        return False
 
 
 def _duration_ms(started_at: float) -> int:

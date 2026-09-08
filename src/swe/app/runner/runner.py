@@ -769,7 +769,10 @@ def _hook_config_enabled(
         or (agent_hooks is not None and agent_hooks.enabled)
         or (
             session_state is not None
-            and session_state.has_loaded_skill_sources()
+            and (
+                session_state.has_loaded_skill_sources()
+                or session_state.has_monitored_skill_sources()
+            )
         ),
     )
 
@@ -882,6 +885,8 @@ def _create_session_skill_detector(
                 approved_http_urls=approvals,
             )
         except SkillHookLoadError as exc:
+            if exc.session_state is not None:
+                set_hook_state(exc.session_state)
             logger.warning(
                 "Rejected hooks for skill '%s': %s",
                 skill_name,
@@ -1075,7 +1080,10 @@ def _requires_stop_output_buffer(
         tenant_hooks=tenant_hooks,
         agent_config=agent_config,
         overlay=overlay,
-    ).requires_stop_output_buffer(context)
+    ).requires_stop_output_buffer(
+        context,
+        workspace_dir=runner.workspace_dir,
+    )
 
 
 async def _emit_runner_stop_finalization(

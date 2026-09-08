@@ -1926,6 +1926,10 @@ _Avoid_: shared daily dialog file, chat transcript, session state
 
 ## Flagged Ambiguities
 
+**Session Skill Hook Revision Boundary**:
+The boundary at which a modified, disabled, or removed Skill `hooks.json` configuration supersedes the configuration previously loaded by an existing session. One Hook event uses the configuration snapshot obtained when its dispatch begins, while a Handler already executing remains allowed to finish. A cached file-version marker determines whether the configuration must be read and validated again. Handler-script content changes do not themselves revise the configuration. An unreadable, invalid, or disabled current configuration withdraws that Skill's Hooks for later event dispatches rather than retaining a prior configuration. A Skill whose configuration is restored to a valid enabled state resumes its Hooks at a later event dispatch without requiring another Skill selection. A changed Handler does not retain its prior one-time execution record, while an unchanged Handler does. Session state converges lazily when each activated Skill next reaches a Hook event rather than through a bulk session rewrite.
+_Avoid_: handler interruption, mid-dispatch revision, session-end-only activation, per-event full configuration read, script-content revision, stale Hook source, invalid-config fallback, reselection to restore, bulk session rewrite, stale one-time record
+
 **"Create SubAgent"**:
 Resolved to distinguish two cases: starting work creates a **SubAgent Run**, while a Main Agent may also supply a **Run-scoped SubAgent Definition** for that single run. Creating an **Agent-owned Stored SubAgent Definition** occurs only through the expert configuration center.
 
