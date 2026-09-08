@@ -344,3 +344,75 @@ describe("Chat Input restore flow", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+const shareState = { active: false };
+vi.mock("@/pages/Chat/chatShareContext", () => ({
+  useChatShareSelection: () => shareState,
+}));
+
+describe("Chat Input sharing mode", () => {
+  afterEach(() => {
+    shareState.active = false;
+    senderOptions.current = {};
+    cleanup();
+  });
+
+  it("hides the composer, blocks submission, and preserves the draft on exit", async () => {
+    const onSubmit = vi.fn();
+    const view = () => (
+      <ChatAnywhereMessagesContext.Provider
+        value={{
+          messages: [{ id: "message-1" } as never],
+          setMessages: vi.fn(),
+          getMessages: () => [],
+        }}
+      >
+        <Input onCancel={vi.fn()} onSubmit={onSubmit} />
+      </ChatAnywhereMessagesContext.Provider>
+    );
+    const { rerender } = render(view());
+    fireEvent.change(screen.getByTestId("chat-input"), {
+      target: { value: "保留这段草稿" },
+    });
+    shareState.active = true;
+    rerender(view());
+    expect(screen.getByTestId("chat-input")).not.toBeVisible();
+    fireEvent.click(screen.getByText("submit"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    shareState.active = false;
+    rerender(view());
+    expect(screen.getByTestId("chat-input")).toBeVisible();
+    expect(screen.getByTestId("chat-input")).toHaveValue("保留这段草稿");
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ query: "保留这段草稿" }),
+      ),
+    );
+  });
+
+  it("blocks an awaiting submission when sharing starts before validation finishes", async () => {
+    let resolveSubmit!: (value: boolean) => void;
+    senderOptions.current = {
+      beforeSubmit: () =>
+        new Promise<boolean>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    };
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <Input onCancel={vi.fn()} onSubmit={onSubmit} />,
+    );
+    fireEvent.change(screen.getByTestId("chat-input"), {
+      target: { value: "待发送草稿" },
+    });
+    fireEvent.click(screen.getByText("submit"));
+    shareState.active = true;
+    rerender(<Input onCancel={vi.fn()} onSubmit={onSubmit} />);
+    resolveSubmit(true);
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-input")).toHaveValue("待发送草稿"),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

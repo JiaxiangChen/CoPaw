@@ -676,3 +676,10 @@
 - `not-allowed`：检查浏览器站点麦克风权限及宿主 Permissions Policy；`audio-capture`：检查麦克风连接/占用；`network`：检查浏览器识别服务网络，不要修改录音白名单或录音服务配置来修复短听写。
 - 语音识别跟随界面语言，不能使用当前仍为 `en` 的 HTML 根语言推断中文识别参数。实时结果只作预览，停止后追加草稿且不发送；取消或识别失败保留原草稿。
 - 本地回归：`cd console && npm run test:run -- src/components/agentscope-chat/Sender/useSpeech.test.tsx`。浏览器 QA 的合成音频/模拟识别验证 UI 与生命周期，不能替代目标浏览器和部署网络上的真实语音服务联调。
+## 分享工具栏空状态错位
+
+- 入口：`console/src/pages/Chat/components/ChatActionGroup/index.tsx` 和同目录 `index.module.less`。
+- 空状态提示作为独立 Grid 子项会触发自动排布，把关闭按钮挤到下一行。提示文字应归入选择状态区域；选择、分享操作、关闭按钮使用明确的网格区域。
+- 分享栏通过 Portal 挂到 `document.body`，宽度取自 `[data-chat-messages-area]`。响应式排布应按分享栏自身容器宽度切换，不能只按浏览器视口判断嵌入区域的可用空间；固定宽度包含 padding，需使用 `box-sizing: border-box`。
+- 回归覆盖：无可分享内容、全选、部分选择、取消全选、退出分享模式、键盘焦点，以及 375px 窄容器与 768/1024/1440px 布局。禁用按钮的图标应跟随禁用文字颜色，半选框保留白底与蓝色短横。
+- 分享模式需要隐藏输入框时，保留 Input 挂载以维持草稿和附件状态；整体隐藏还要覆盖编辑器子层显式声明的可见性。输入框提交入口在异步 `beforeSubmit` 前后检查当前分享状态，防止校验期间进入分享仍发出消息。回归位于 Runtime `core/Chat/Input/index.test.tsx`，覆盖隐藏、恢复草稿与延迟提交拦截。
