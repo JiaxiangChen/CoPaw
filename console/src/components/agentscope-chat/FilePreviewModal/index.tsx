@@ -115,6 +115,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   const [clawPlanLoading, setClawPlanLoading] = useState(false);
   const [clawPlanFailed, setClawPlanFailed] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const personEventsFlagRef = useRef<boolean>(false);
   const clawPlanInitializedRef = useRef(false);
   const cleanupCaptureClickRef = useRef<(() => void) | null>(null);
   const trackingContext = useHtmlPreviewTracking();
@@ -424,8 +425,10 @@ function FilePreviewModal(props: FilePreviewModalProps) {
     if (
       templateInfo?.templateFlag === "person-event" &&
       templateResult?.custUid &&
-      templateResult?.custName
+      templateResult?.custName &&
+      !personEventsFlagRef.current
     ) {
+      personEventsFlagRef.current = true;
       const payload = {
         file_url: fileUrl,
         file_name: fileName,
@@ -561,7 +564,6 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   }, []);
 
   const handleIframeLoad = useCallback(() => {
-    setIframeLoadKey((k) => k + 1);
     reattachTrackersRef.current?.();
   }, []);
 
@@ -607,26 +609,26 @@ function FilePreviewModal(props: FilePreviewModalProps) {
         click:
           isHtmlPreview && enableClickTracking
             ? {
-                reporter: shouldRecordEvents
-                  ? htmlPreviewEventsApi.recordClick
-                  : () => undefined,
-                listSnapshotReporter:
-                  shouldRecordEvents && enableListSnapshotTracking
-                    ? htmlPreviewEventsApi.recordListSnapshot
-                    : undefined,
-                onOpenNestedPreview: setNestedPreview,
-                getTemplateName: (templateId: number) => {
-                  return templateList.current.find(
-                    (t) => t.templateId === templateId,
-                  )?.templateName;
-                },
-              }
+              reporter: shouldRecordEvents
+                ? htmlPreviewEventsApi.recordClick
+                : () => undefined,
+              listSnapshotReporter:
+                shouldRecordEvents && enableListSnapshotTracking
+                  ? htmlPreviewEventsApi.recordListSnapshot
+                  : undefined,
+              onOpenNestedPreview: setNestedPreview,
+              getTemplateName: (templateId: number) => {
+                return templateList.current.find(
+                  (t) => t.templateId === templateId
+                )?.templateName;
+              },
+            }
             : null,
         exposure: isHtmlPreview
-          ? {
-              reporter: htmlPreviewEventsApi.recordClick,
+            ? {
+                reporter: htmlPreviewEventsApi.recordClick,
             }
-          : null,
+            : null,
       },
       [isHtmlPreview, enableClickTracking, enableListSnapshotTracking],
     );
