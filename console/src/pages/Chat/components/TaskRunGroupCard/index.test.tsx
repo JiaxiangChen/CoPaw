@@ -381,6 +381,96 @@ describe("TaskRunGroupCard", () => {
     expect(screen.getByTestId("response-step-response")).toBeInTheDocument();
   });
 
+  it.each(["finalMessages", "stepMessages"] as const)(
+    "selects the last matching message in %s",
+    (section) => {
+      render(
+        <TaskRunGroupCard
+          data={taskRunData({
+            [section]: [
+              messageWithAutoPreviewResponse("old", "old-response"),
+              messageWithAutoPreviewResponse("new", "new-response"),
+              messageWithResponse("trailing", "plain-response"),
+            ],
+          })}
+        />,
+      );
+      expect(screen.getByTestId("response-new-response")).toBeInTheDocument();
+      expect(screen.queryByTestId("response-old-response")).toBeNull();
+    },
+  );
+
+  it("prefers a final preview over a matching execution step", () => {
+    render(
+      <TaskRunGroupCard
+        data={taskRunData({
+          finalMessages: [messageWithAutoPreviewResponse("final", "final")],
+          stepMessages: [messageWithAutoPreviewResponse("step", "step")],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("response-final")).toBeInTheDocument();
+    expect(screen.queryByTestId("response-step")).toBeNull();
+  });
+
+  it.each([
+    "cards",
+    "output",
+    "content",
+    "nested",
+    "markdown",
+    "plain",
+    "mixed",
+  ])("selects B from multiple preview links in %s", (level) => {
+    const urlA = "https://example.test/A-auto-preview.html";
+    const urlB = "https://example.test/B-auto-preview.html";
+    const fileA = { type: "file", file_url: urlA };
+    const fileB = { type: "file", file_url: urlB };
+    const text =
+      level === "markdown"
+        ? `[A](${urlA}) [B](${urlB})`
+        : level === "mixed"
+        ? `[A](${urlA}) ${urlB}`
+        : `${urlA} ${urlB}`;
+    const content =
+      level === "nested"
+        ? [{ type: "text", text: JSON.stringify({ data: [fileA, fileB] }) }]
+        : ["markdown", "plain", "mixed"].includes(level)
+        ? [{ type: "text", text }]
+        : [fileA, fileB, { type: "text", text: "done" }];
+    const outputA = { role: "assistant", type: "message", content: [fileA] };
+    const outputB = { role: "assistant", type: "message", content: [fileB] };
+    const card = {
+      code: "AgentScopeRuntimeResponseCard",
+      data: {
+        id: "preview",
+        output:
+          level === "output" ? [outputA, outputB] : [{ ...outputA, content }],
+      },
+    };
+    const message = {
+      id: "preview-message",
+      role: "assistant",
+      cards:
+        level === "cards"
+          ? [
+              { ...card, data: { id: "old-preview", output: [outputA] } },
+              { ...card, data: { id: "preview", output: [outputB] } },
+            ]
+          : [card],
+    } as TaskRunMessage;
+    const original = JSON.stringify(message);
+    render(
+      <TaskRunGroupCard data={taskRunData({ finalMessages: [message] })} />,
+    );
+    const selected = screen
+      .getByTestId("response-preview")
+      .getAttribute("data-output");
+    expect(selected).toContain(urlB);
+    expect(selected).not.toContain(urlA);
+    expect(JSON.stringify(message)).toBe(original);
+  });
+
   it("shows only the auto-preview HTML card outside and moves all run messages into steps", () => {
     render(
       <TaskRunGroupCard

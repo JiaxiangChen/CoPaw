@@ -173,3 +173,9 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `async_status` 为空时继续占用名额。Agent 执行和子任务等待共用现有派发超时预算；主成功但子结果缺失的回收错误为“获取子任务状态超时”。
 - 先确认 Scheduler 与 Monitor 访问同一执行表，且 Monitor 原有子任务同步/聚合正常运行；沿用 Monitor 的无子任务成功规则，不应把这一行为误诊为 Scheduler 提前完成。
 - 首轮验证：`$env:PYTHONPATH='scheduler/src'; .\.venv\Scripts\python.exe -m pytest tests/unit/scheduler -q`。
+
+## 我的任务自动预览文件选择
+
+- 入口：`console/src/pages/Chat/components/TaskRunGroupCard/index.tsx`。同次执行优先取最终结果中最后一个匹配 `auto-preview` 的 HTML；没有匹配才取步骤中的最后一个。消息、卡片、输出、内容和嵌套数组按原始顺序取最后匹配，文本链接按出现位置取最后匹配；不解析文件名时间戳。
+- 历史结果默认折叠规则在 `console/src/pages/Chat/sessionApi/index.ts`；页面级自动弹窗由 `console/src/components/agentscope-chat/AutoPreviewHtmlContext.tsx` 选择最后注册的候选，120ms 防抖后只打开一个。
+- 回归验证：在 `console/` 运行 `npm run test:run -- src/pages/Chat/components/TaskRunGroupCard/index.test.tsx src/components/agentscope-chat/DownloadFileCard/index.test.tsx`。
