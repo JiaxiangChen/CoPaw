@@ -653,14 +653,6 @@
 - [monitor/src/monitor/app/services/subtask/query_service.py](/Users/shixiangyi/code/Swe/monitor/src/monitor/app/services/subtask/query_service.py)
 - 重点看成功子任务查询是否按 `trace_id + task_type`（`list`）及 `trace_id + custuid`（`plan`）去重，并优先保留最新子任务
 
-## 聊天附件与文字看起来像两条消息
-
-- 先检查聊天请求的 `input`：`AgentScopeRuntimeRequestBuilder.handle()` 将文字、图片、文件等内容放在同一条用户消息的 `content` 数组中，附件上传请求本身不是一次聊天发送。
-- 展示入口为 `console/src/components/agentscope-chat/AgentScopeRuntimeWebUI/core/AgentScopeRuntime/Request/Card.tsx`；实时发送和历史会话的用户消息均使用该组件。
-- 多个内容卡片通过 `swe-request-grouped` 共用气泡背景；空文字不生成文字卡片，多张图片归入同一个 `Images` 卡片。不要为了修复视觉分离而重复发送或合并相邻的独立用户消息。
-- 回归检查：文字加文件、文字加多图、纯附件、纯文字以及历史加载后展示。
-- 附件限宽和换行由 `swe-request-card` 独立控制，不依赖 `swe-request-grouped`：纯多图合并后只有一个卡片，也必须在窄容器中换行。回归包含 320px 容器内仅发送 6 张图片。
-
 ## Cron 模型失败但执行记录显示成功
 
 - 症状：Runtime 报 `model_call_failed`，随后 Cron 日志却出现 `completed_seen=True failed_seen=False` 和 `exec_status=success`。
