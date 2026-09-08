@@ -836,7 +836,7 @@ html.dark-mode .swe-sender-content {
   display: flex;
   flex-direction: column;
   padding-bottom: 8px;
-  padding-right: 8px;
+  /* padding-right: 8px; */
 }
 
 .page-header {
@@ -850,7 +850,7 @@ html.dark-mode .swe-sender-content {
   border-radius: 8px;
   /* 8px */
   box-sizing: border-box;
-  border: 1px solid #eae9e7;
+  /* border: 1px solid #eae9e7; */
   border-top: none;
   /* #EAE9E7 */
 }
