@@ -441,6 +441,46 @@ class TestTraceManager:
         await manager.close()
 
     @pytest.mark.asyncio
+    async def test_end_trace_flushes_spans_emitted_by_skill_detector(
+        self,
+        enabled_config,
+        mock_db,
+    ):
+        """技能检测收尾产生的 span 也必须在 trace 收尾前落库。"""
+        manager = TraceManager(enabled_config, mock_db)
+        await manager.initialize()
+
+        trace_id = await manager.start_trace(
+            user_id="user-1",
+            session_id="session-1",
+            channel="console",
+            source_id="default",
+        )
+
+        class Detector:
+            async def on_reasoning_end(self):
+                await manager.emit_skill_invocation(
+                    trace_id=trace_id,
+                    skill_name="pdf",
+                    source_id="default",
+                )
+
+        ctx = get_current_trace()
+        assert ctx is not None
+        ctx.skill_detector = Detector()
+
+        await manager.end_trace(trace_id, TraceStatus.COMPLETED)
+
+        assert len(manager._span_queue) == 0
+        mock_db.execute_many.assert_called_once()
+        _, params_list = mock_db.execute_many.call_args.args
+        assert len(params_list) == 1
+        assert params_list[0][1] == trace_id
+        assert params_list[0][15] == "pdf"
+
+        await manager.close()
+
+    @pytest.mark.asyncio
     async def test_emit_span_disabled(self, disabled_config):
         """Test emit_span when disabled returns a UUID."""
         manager = TraceManager(disabled_config)

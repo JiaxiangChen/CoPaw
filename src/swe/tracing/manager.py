@@ -629,6 +629,15 @@ class TraceManager:
         if not self.enabled:
             return
 
+        # End skill detection before the final span flush because cleanup may
+        # update existing spans or emit a final skill span.
+        ctx = get_current_trace()
+        if ctx and ctx.trace_id == trace_id and ctx.skill_detector:
+            try:
+                await ctx.skill_detector.on_reasoning_end()
+            except Exception as e:
+                logger.warning("Failed to end skill detection: %s", e)
+
         # Flush pending spans before ending trace with retry mechanism
         # 确保所有 spans 写入完成，避免 trace 结束后 spans 丢失
         max_flush_retries = 3
@@ -665,14 +674,6 @@ class TraceManager:
                 max_flush_retries,
                 [s.span_id[:8] for s in final_pending[:5]],
             )
-
-        # End skill detection
-        ctx = get_current_trace()
-        if ctx and ctx.trace_id == trace_id and ctx.skill_detector:
-            try:
-                await ctx.skill_detector.on_reasoning_end()
-            except Exception as e:
-                logger.warning("Failed to end skill detection: %s", e)
 
         trace = self._active_traces.pop(
             trace_id,
