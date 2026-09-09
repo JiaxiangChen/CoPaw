@@ -83,8 +83,19 @@ describe("Sender skill mentions", () => {
     expect(input).toHaveTextContent("@br");
   });
 
-  it("keeps character count, dictation, and send in one right-side action group", () => {
-    render(<Sender allowSpeech maxLength={10000} />);
+  it("keeps dictation immediately before send and hides the character counter", () => {
+    render(
+      <Sender
+        allowSpeech
+        maxLength={10000}
+        actions={(defaultActions) => (
+          <div>
+            <button aria-label="上下文占用" type="button" />
+            {defaultActions}
+          </div>
+        )}
+      />,
+    );
 
     const actionGroup = document.querySelector(".sender-actions-list");
     const microphone = screen.getByRole("button", { name: "语音输入" });
@@ -92,7 +103,7 @@ describe("Sender skill mentions", () => {
 
     expect(actionGroup).toContainElement(microphone);
     expect(actionGroup).toContainElement(send);
-    expect(actionGroup).toHaveTextContent("0/10000");
+    expect(actionGroup).not.toHaveTextContent("0/10000");
     expect(
       microphone.compareDocumentPosition(send) &
         Node.DOCUMENT_POSITION_FOLLOWING,
