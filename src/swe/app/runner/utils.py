@@ -646,6 +646,10 @@ def agentscope_msg_to_message(
                     base64_data = block.get("source", {}).get("data", "")
                     url = f"data:{media_type};base64,{base64_data}"
                     kwargs["image_url"] = url
+                elif isinstance(block.get("image_url"), str):
+                    kwargs["image_url"] = _resolve_content_url(
+                        block["image_url"],
+                    )
 
                 image_content = ImageContent(
                     delta=False,
@@ -692,6 +696,12 @@ def agentscope_msg_to_message(
                     url = f"data:{media_type};base64,{base64_data}"
                     kwargs["data"] = url
                     kwargs["format"] = media_type
+                else:
+                    url = block.get("audio_url") or block.get("data")
+                    if isinstance(url, str):
+                        url = _resolve_content_url(url)
+                        kwargs["data"] = url
+                    kwargs["format"] = block.get("format")
 
                 audio_content = AudioContent(
                     delta=False,
@@ -736,6 +746,10 @@ def agentscope_msg_to_message(
                     base64_data = block.get("source", {}).get("data", "")
                     url = f"data:{media_type};base64,{base64_data}"
                     kwargs["video_url"] = url
+                elif isinstance(block.get("video_url"), str):
+                    kwargs["video_url"] = _resolve_content_url(
+                        block["video_url"],
+                    )
 
                 video_content = VideoContent(
                     delta=False,
@@ -761,7 +775,8 @@ def agentscope_msg_to_message(
                     current_type = MessageType.MESSAGE
 
                 kwargs = {
-                    "filename": block.get("filename"),
+                    "filename": block.get("filename")
+                    or block.get("file_name"),
                 }
                 if (
                     isinstance(block.get("source"), dict)
@@ -785,6 +800,12 @@ def agentscope_msg_to_message(
                 elif isinstance(block.get("source"), str):
                     url = _resolve_content_url(block.get("source", ""))
                     kwargs["file_url"] = url
+                elif isinstance(block.get("file_url"), str):
+                    kwargs["file_url"] = _resolve_content_url(
+                        block["file_url"],
+                    )
+                elif isinstance(block.get("file_id"), str):
+                    kwargs["file_id"] = block["file_id"]
 
                 file_content = FileContent(
                     delta=False,

@@ -764,19 +764,6 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                   <Flex gap={8}>{prefix}</Flex>
                 </div>
               )}
-              {allowSpeech && (
-                <DictationControl
-                  disabled={!!disabled || !!readOnly || !!loading}
-                  onActiveChange={setSpeechRecording}
-                  onTranscript={(text) => {
-                    const next = appendChatInputText(innerValue, text);
-                    triggerValueChange(
-                      props.maxLength ? next.slice(0, props.maxLength) : next,
-                    );
-                    (tokenEditorRef.current || inputRef.current)?.focus();
-                  }}
-                />
-              )}
               <div
                 className={classnames(
                   actionListCls,
@@ -795,6 +782,19 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                   {actionNode}
                 </ActionButtonContext.Provider>
               </div>
+              {allowSpeech && (
+                <DictationControl
+                  disabled={!!disabled || !!readOnly || !!loading}
+                  onActiveChange={setSpeechRecording}
+                  onTranscript={(text) => {
+                    const next = appendChatInputText(innerValue, text);
+                    triggerValueChange(
+                      props.maxLength ? next.slice(0, props.maxLength) : next,
+                    );
+                    (tokenEditorRef.current || inputRef.current)?.focus();
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
