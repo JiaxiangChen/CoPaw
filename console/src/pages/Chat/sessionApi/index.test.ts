@@ -90,6 +90,43 @@ describe("SessionApi identity mapping", () => {
     });
   });
 
+  it("keeps attachments when rebuilding a user message from chat history", () => {
+    const sessionApi = new SessionApi();
+    const messages = sessionApi.applyChatSnapshot("chat-1", {
+      messages: [
+        {
+          id: "user-with-attachment",
+          role: "user",
+          content: [
+            { type: "text", text: "请分析附件" },
+            {
+              type: "file",
+              file_url: "https://files.example.test/report.pdf",
+              filename: "报告.pdf",
+            },
+            {
+              type: "image",
+              image_url: "https://files.example.test/screenshot.png",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(messages?.[0].cards?.[0].data.input[0].content).toMatchObject([
+      { type: "text", text: "请分析附件" },
+      {
+        type: "file",
+        file_url: "https://files.example.test/report.pdf",
+        file_name: "报告.pdf",
+      },
+      {
+        type: "image",
+        image_url: "https://files.example.test/screenshot.png",
+      },
+    ]);
+  });
+
   it("keeps the logical session id stable after the first reply resolves a real chat id", async () => {
     const sessionApi = new SessionApi();
 

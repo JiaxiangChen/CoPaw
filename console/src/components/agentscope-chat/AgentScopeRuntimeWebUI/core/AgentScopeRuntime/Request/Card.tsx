@@ -4,8 +4,9 @@ import {
 } from "../types";
 import { useMemo } from "react";
 import { Bubble } from "@/components/agentscope-chat";
+import Style from "./style";
 
-type ImageCard = { code: "Image" | "Images"; data: { url?: string }[] };
+type ImageCard = { code: "Images"; data: { url?: string }[] };
 type VideoCard = { code: "Videos"; data: { src?: string; poster?: string }[] };
 type AudioCard = { code: "Audios"; data: { src?: string }[] };
 type FileCard = {
@@ -20,7 +21,7 @@ type RequestCard =
   | FileCard;
 
 const isImageCard = (item: RequestCard): item is ImageCard =>
-  item.code === "Image";
+  item.code === "Images";
 
 const isVideoCard = (item: RequestCard): item is VideoCard =>
   item.code === "Videos";
@@ -36,7 +37,7 @@ export default function AgentScopeRuntimeRequestCard(props: {
 }) {
   const cards = useMemo(() => {
     return props.data.input[0].content.reduce<RequestCard[]>((p, c) => {
-      if (c.type === AgentScopeRuntimeContentType.TEXT) {
+      if (c.type === AgentScopeRuntimeContentType.TEXT && c.text?.trim()) {
         p.push({
           code: "Text",
           data: {
@@ -104,10 +105,26 @@ export default function AgentScopeRuntimeRequestCard(props: {
         }
       }
       return p;
-    }, []);
+    }, []).sort(
+      (left, right) =>
+        Number(left.code === "Text") - Number(right.code === "Text"),
+    );
   }, [props.data.input]);
 
   if (!cards?.length) return null;
 
-  return <Bubble role="user" cards={cards}></Bubble>;
+  return (
+    <>
+      <Style />
+      <Bubble
+        role="user"
+        cards={cards}
+        className={
+          cards.length > 1
+            ? "swe-request-card swe-request-grouped"
+            : "swe-request-card"
+        }
+      />
+    </>
+  );
 }
