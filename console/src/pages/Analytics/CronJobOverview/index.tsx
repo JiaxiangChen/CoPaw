@@ -27,14 +27,7 @@ import {
 } from "antd";
 import { WarningOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type Ref,
-} from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   monitorApi,
@@ -45,6 +38,7 @@ import {
   type CronJobOverviewFailureReason,
   type CronJobOverviewDateFilters,
   type CronJobOverviewPageData,
+  type CronBranchDimensionSortKey,
   type BranchManagerSummaryItem,
   type ManagerSkillItem,
   type ManagerCustomerItem,
@@ -66,10 +60,11 @@ const { Option } = Select;
 type TimeRange = "day" | "week" | "month" | "custom";
 type SummaryMetricTone = "blue" | "green" | "orange" | "red";
 type SortDirection = "asc" | "desc";
-type BranchRankingSortKey = Exclude<
-  keyof CronJobOverviewPageData["branchRankingRows"][number],
-  "rank" | "bbkId" | "branchName"
->;
+type BranchRankingSortKey = CronBranchDimensionSortKey;
+type BranchRankingSort = {
+  key: BranchRankingSortKey;
+  direction: SortDirection;
+} | null;
 type BranchManagerSortableMetric = Exclude<
   keyof BranchManagerSummaryItem,
   "user_id" | "user_name"
@@ -456,18 +451,16 @@ function RankingTable({
   loading = false,
   onRowClick,
   selectedBranchId,
-  tableRef,
+  sortConfig,
+  onSortChange,
 }: {
   data: CronJobOverviewPageData["branchRankingRows"];
   loading?: boolean;
   onRowClick: (bbkId: string, bbkName: string) => void;
   selectedBranchId: string | null;
-  tableRef: Ref<HTMLTableElement>;
+  sortConfig: BranchRankingSort;
+  onSortChange: (sort: BranchRankingSort) => void;
 }) {
-  const [sortConfig, setSortConfig] = useState<{
-    key: BranchRankingSortKey;
-    direction: SortDirection;
-  } | null>(null);
   const sortedData = useMemo(() => {
     if (!sortConfig) {
       return data;
@@ -481,15 +474,13 @@ function RankingTable({
   }, [data, sortConfig]);
 
   const handleSort = (key: BranchRankingSortKey) => {
-    setSortConfig((current) => {
-      if (!current || current.key !== key) {
-        return { key, direction: "desc" };
-      }
-      if (current.direction === "desc") {
-        return { key, direction: "asc" };
-      }
-      return null;
-    });
+    if (!sortConfig || sortConfig.key !== key) {
+      onSortChange({ key, direction: "desc" });
+    } else if (sortConfig.direction === "desc") {
+      onSortChange({ key, direction: "asc" });
+    } else {
+      onSortChange(null);
+    }
   };
 
   const renderSortableHeader = (title: string, key: BranchRankingSortKey) => {
@@ -534,7 +525,6 @@ function RankingTable({
       ) : (
         <div className={styles.tableScroller}>
           <table
-            ref={tableRef}
             className={`${styles.behaviorTable} ${styles.branchDimensionTable}`}
           >
             <colgroup>
@@ -1056,7 +1046,7 @@ export default function CronJobOverviewPage() {
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [branchExporting, setBranchExporting] = useState(false);
-  const branchTableRef = useRef<HTMLTableElement>(null);
+  const [branchSort, setBranchSort] = useState<BranchRankingSort>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>(
     getTimeRangeForDateRange(initialDateRange),
   );
@@ -1459,18 +1449,37 @@ export default function CronJobOverviewPage() {
   };
 
   const handleBranchExport = async () => {
-    if (
-      !branchTableRef.current ||
-      branchDimensionLoading ||
-      branchExporting
-    ) {
+    if (loading || branchExporting || !overviewData.branchRankingRows.length)
       return;
-    }
-    const snapshot = branchTableRef.current.cloneNode(true) as HTMLTableElement;
     setBranchExporting(true);
     try {
-      const { exportBranchTable } = await import("./exportBranchTable");
-      await exportBranchTable(snapshot);
+      const filters = {
+        start_date: dateRange[0].format("YYYY-MM-DD"),
+        end_date: dateRange[1].format("YYYY-MM-DD"),
+        bbk_ids: bbkIds.length > 0 ? bbkIds.join(",") : undefined,
+      };
+      const blob = await monitorApi.exportBranchDimension(
+        branchSort
+          ? {
+              ...filters,
+              sort_by: branchSort.key,
+              sort_order: branchSort.direction,
+            }
+          : filters,
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `定时任务分行维度_${dayjs().format(
+        "YYYYMMDD_HHmmss",
+      )}.xlsx`;
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      }
     } catch (error) {
       Modal.error({
         title: "导出失败",
@@ -2132,9 +2141,7 @@ export default function CronJobOverviewPage() {
           className={styles.exportButton}
           onClick={handleBranchExport}
           disabled={
-            branchDimensionLoading ||
-            branchExporting ||
-            !overviewData.branchRankingRows.length
+            loading || branchExporting || !overviewData.branchRankingRows.length
           }
           aria-label="分行维度导出 Excel"
           aria-busy={branchExporting}

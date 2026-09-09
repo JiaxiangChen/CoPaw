@@ -542,6 +542,20 @@ export interface CronJobOverviewDateFilters {
   bbk_ids?: string;
 }
 
+export type CronBranchDimensionSortKey = Exclude<
+  keyof CronJobOverviewBranchRankingRow,
+  "rank" | "bbkId" | "branchName"
+>;
+
+export type CronBranchDimensionExportFilters = {
+  start_date: string;
+  end_date: string;
+  bbk_ids?: string;
+} & (
+  | { sort_by: CronBranchDimensionSortKey; sort_order: "asc" | "desc" }
+  | { sort_by?: never; sort_order?: never }
+);
+
 export interface CronOverviewStatsResponse {
   start_date: string;
   end_date: string;
@@ -1296,6 +1310,33 @@ export const monitorApi = {
         // Ignore JSON parse error
       }
       throw new Error(errorMessage);
+    }
+    return response.blob();
+  },
+
+  exportBranchDimension: async (
+    filters: CronBranchDimensionExportFilters,
+  ): Promise<Blob> => {
+    const response = await fetch(
+      getApiUrl(`/monitor/cron/export-branch-dimension${buildQuery(filters)}`),
+      { headers: new Headers(buildAuthHeaders()) },
+    );
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        typeof errorData?.detail === "string"
+          ? errorData.detail
+          : `导出失败（HTTP ${response.status}），请稍后重试`,
+      );
+    }
+    if (
+      !response.headers
+        .get("content-type")
+        ?.includes(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    ) {
+      throw new Error("导出接口未返回 Excel 文件，请稍后重试");
     }
     return response.blob();
   },
