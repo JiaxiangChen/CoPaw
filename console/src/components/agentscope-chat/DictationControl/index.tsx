@@ -90,7 +90,7 @@ export default function DictationControl({
   useEffect(() => () => onActiveChange(false), [onActiveChange]);
   const hint = speech.supported
     ? "语音输入"
-    : "当前环境不支持语音输入，请使用支持语音识别的浏览器并通过 HTTPS 访问。";
+    : "当前环境不支持语音输入，请使用支持麦克风采集的浏览器并通过 HTTPS 访问。";
   return (
     <>
       {!active ? (
