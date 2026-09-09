@@ -3,11 +3,7 @@ import { createPortal } from "react-dom";
 import { IconButton } from "@agentscope-ai/design";
 import { SparkShareLine } from "@agentscope-ai/icons";
 import { Button, Checkbox, Flex, Tooltip, message } from "antd";
-import {
-  CloseOutlined,
-  GlobalOutlined,
-  LinkOutlined,
-} from "@ant-design/icons";
+import { CloseOutlined, GlobalOutlined, LinkOutlined } from "@ant-design/icons";
 import { chatApi } from "@/api/modules/chat";
 import type { ChatShareOptions } from "@/api/types";
 import { buildChatShareUrl } from "./shareUrl";
@@ -94,10 +90,7 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({ chatId }) => {
     const selectedTurnIds = [...shareSelection.selectedTurnIds];
     setGenerating(true);
     try {
-      const result = await chatApi.createChatShare(
-        chatId,
-        selectedTurnIds,
-      );
+      const result = await chatApi.createChatShare(chatId, selectedTurnIds);
       if (
         selectedTurnIdsRef.current.length !== selectedTurnIds.length ||
         selectedTurnIdsRef.current.some(
@@ -163,48 +156,52 @@ const ChatActionGroup: React.FC<ChatActionGroupProps> = ({ chatId }) => {
           : undefined
       }
     >
-      <div className={styles.toolbarSelection}>
-        <Checkbox
-          checked={allSelected}
-          indeterminate={selectionState === "partial"}
-          disabled={selectableCount === 0}
-          onChange={(event) => shareSelection.selectAll(event.target.checked)}
-        >
-          全选
-        </Checkbox>
-      </div>
-      <div className={styles.toolbarActions}>
+      <div className={styles.toolbarContent}>
+        <div className={styles.toolbarSelection}>
+          <Checkbox
+            checked={allSelected}
+            indeterminate={selectionState === "partial"}
+            disabled={selectableCount === 0}
+            onChange={(event) => shareSelection.selectAll(event.target.checked)}
+          >
+            全选
+          </Checkbox>
+          <span className={styles.selectionStatus} role="status">
+            {selectableCount === 0
+              ? "暂无可分享内容"
+              : `已选 ${selectedCount} / ${selectableCount} 轮对话`}
+          </span>
+        </div>
+        <div className={styles.toolbarActions}>
+          <Button
+            type="text"
+            className={styles.toolbarAction}
+            icon={<LinkOutlined />}
+            loading={generating}
+            disabled={selectedCount === 0}
+            onClick={() => void copyShareUrl()}
+          >
+            复制链接
+          </Button>
+          <Button
+            type="text"
+            className={styles.toolbarAction}
+            icon={<GlobalOutlined />}
+            loading={generating}
+            disabled={selectedCount === 0}
+            onClick={() => void openShareUrl()}
+          >
+            浏览器打开
+          </Button>
+        </div>
         <Button
+          className={styles.toolbarClose}
           type="text"
-          className={styles.toolbarAction}
-          icon={<LinkOutlined />}
-          loading={generating}
-          disabled={selectedCount === 0}
-          onClick={() => void copyShareUrl()}
-        >
-          复制链接
-        </Button>
-        <Button
-          type="text"
-          className={styles.toolbarAction}
-          icon={<GlobalOutlined />}
-          loading={generating}
-          disabled={selectedCount === 0}
-          onClick={() => void openShareUrl()}
-        >
-          浏览器打开
-        </Button>
+          aria-label="退出分享模式"
+          icon={<CloseOutlined />}
+          onClick={close}
+        />
       </div>
-      {selectableCount === 0 ? (
-        <span className={styles.emptyState}>暂无可分享内容</span>
-      ) : null}
-      <Button
-        className={styles.toolbarClose}
-        type="text"
-        aria-label="退出分享模式"
-        icon={<CloseOutlined />}
-        onClick={close}
-      />
     </div>
   ) : null;
 

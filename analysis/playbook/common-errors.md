@@ -653,10 +653,25 @@
 - [monitor/src/monitor/app/services/subtask/query_service.py](/Users/shixiangyi/code/Swe/monitor/src/monitor/app/services/subtask/query_service.py)
 - 重点看成功子任务查询是否按 `trace_id + task_type`（`list`）及 `trace_id + custuid`（`plan`）去重，并优先保留最新子任务
 
-## 聊天附件与文字看起来像两条消息
+## Cron 模型失败但执行记录显示成功
 
-- 先检查聊天请求的 `input`：`AgentScopeRuntimeRequestBuilder.handle()` 将文字、图片、文件等内容放在同一条用户消息的 `content` 数组中，附件上传请求本身不是一次聊天发送。
-- 展示入口为 `console/src/components/agentscope-chat/AgentScopeRuntimeWebUI/core/AgentScopeRuntime/Request/Card.tsx`；实时发送和历史会话的用户消息均使用该组件。
-- 多个内容卡片通过 `swe-request-grouped` 共用气泡背景；空文字不生成文字卡片，多张图片归入同一个 `Images` 卡片。不要为了修复视觉分离而重复发送或合并相邻的独立用户消息。
-- 回归检查：文字加文件、文字加多图、纯附件、纯文字以及历史加载后展示。
-- 附件限宽和换行由 `swe-request-card` 独立控制，不依赖 `swe-request-grouped`：纯多图合并后只有一个卡片，也必须在窄容器中换行。回归包含 320px 容器内仅发送 6 张图片。
+- 症状：Runtime 报 `model_call_failed`，随后 Cron 日志却出现 `completed_seen=True failed_seen=False` 和 `exec_status=success`。
+- 原因：Runtime 将模型异常转换为 `response/Failed`；仅检测 `message/Failed` 会漏判，并将此前的消息完成误作执行成功。
+- 排查入口：`src/swe/app/crons/executor.py` 的 `_is_failed_message_event()` 必须同时识别消息与整轮响应失败；失败优先于此前的 Completed。
+- 回归：`tests/unit/app/test_cron_manager_completed_cancellation.py` 覆盖先收到 `message/Completed`、再收到 `response/Failed`，验证任务与执行记录均为 `error` 且保留错误详情。
+
+
+## 聊天语音输入不可用或识别失败
+
+- 入口：`console/src/components/agentscope-chat/DictationControl/` 与 `Sender/useSpeech.ts`。新会话和会话内输入框共用短听写能力；加号菜单的白名单「语音录制」仍走原独立链路。
+- 浏览器需同时支持 `SpeechRecognition`（或 `webkitSpeechRecognition`）、麦克风采集和安全上下文（HTTPS / localhost）。嵌入页面还需要宿主允许麦克风权限。浏览器提供 API 不代表其语音服务在当前网络可达。
+- `not-allowed`：检查浏览器站点麦克风权限及宿主 Permissions Policy；`audio-capture`：检查麦克风连接/占用；`network`：检查浏览器识别服务网络，不要修改录音白名单或录音服务配置来修复短听写。
+- 语音识别跟随界面语言，不能使用当前仍为 `en` 的 HTML 根语言推断中文识别参数。实时结果只作预览，停止后追加草稿且不发送；取消或识别失败保留原草稿。
+- 本地回归：`cd console && npm run test:run -- src/components/agentscope-chat/Sender/useSpeech.test.tsx`。浏览器 QA 的合成音频/模拟识别验证 UI 与生命周期，不能替代目标浏览器和部署网络上的真实语音服务联调。
+## 分享工具栏空状态错位
+
+- 入口：`console/src/pages/Chat/components/ChatActionGroup/index.tsx` 和同目录 `index.module.less`。
+- 空状态提示作为独立 Grid 子项会触发自动排布，把关闭按钮挤到下一行。提示文字应归入选择状态区域；选择、分享操作、关闭按钮使用明确的网格区域。
+- 分享栏通过 Portal 挂到 `document.body`，宽度取自 `[data-chat-messages-area]`。响应式排布应按分享栏自身容器宽度切换，不能只按浏览器视口判断嵌入区域的可用空间；固定宽度包含 padding，需使用 `box-sizing: border-box`。
+- 回归覆盖：无可分享内容、全选、部分选择、取消全选、退出分享模式、键盘焦点，以及 375px 窄容器与 768/1024/1440px 布局。禁用按钮的图标应跟随禁用文字颜色，半选框保留白底与蓝色短横。
+- 分享模式需要隐藏输入框时，保留 Input 挂载以维持草稿和附件状态；整体隐藏还要覆盖编辑器子层显式声明的可见性。输入框提交入口在异步 `beforeSubmit` 前后检查当前分享状态，防止校验期间进入分享仍发出消息。回归位于 Runtime `core/Chat/Input/index.test.tsx`，覆盖隐藏、恢复草稿与延迟提交拦截。

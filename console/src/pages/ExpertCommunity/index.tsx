@@ -20,6 +20,8 @@ import { ExpertCard } from "./ExpertCard";
 import { ExpertDetailDrawer } from "./ExpertDetailDrawer";
 import { ExpertVersionHistoryModal } from "./ExpertVersionHistoryModal";
 import { countExpertBbkIds, matchesExpertSearch } from "./expertCommunity";
+import { DistributeTargetModal } from "../Market/DistributeTargetModal";
+import { ExpertRecallModal } from "./ExpertRecallModal";
 
 const { Title, Text } = Typography;
 
@@ -47,6 +49,10 @@ export default function ExpertCommunityPage() {
   const [restoringVersionId, setRestoringVersionId] = useState<string | null>(
     null,
   );
+  const [distributeTarget, setDistributeTarget] = useState<MarketExpert | null>(
+    null,
+  );
+  const [recallTarget, setRecallTarget] = useState<MarketExpert | null>(null);
   const { message } = useAppMessage();
 
   const load = useCallback(async () => {
@@ -139,34 +145,8 @@ export default function ExpertCommunityPage() {
     }
   };
 
-  const distribute = async (item: MarketExpert) => {
-    setBusyId(item.item_id);
-    try {
-      const result = await marketApi.distributeExpert(sourceId, item.item_id, {
-        target_type: "all",
-        target_values: [],
-      });
-      message.success(`已分发 ${result.distributed_count} 个用户`);
-      await load();
-    } catch (reason) {
-      message.error(reason instanceof Error ? reason.message : "分发失败");
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const recall = async (item: MarketExpert) => {
-    setBusyId(item.item_id);
-    try {
-      const result = await marketApi.recallExpert(sourceId, item.item_id);
-      message.success(`已撤回 ${result.recalled_count} 个用户的专家`);
-      await load();
-    } catch (reason) {
-      message.error(reason instanceof Error ? reason.message : "撤回失败");
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const distribute = (item: MarketExpert) => setDistributeTarget(item);
+  const recall = (item: MarketExpert) => setRecallTarget(item);
 
   const unpublish = async (item: MarketExpert) => {
     setBusyId(item.item_id);
@@ -490,10 +470,8 @@ export default function ExpertCommunityPage() {
                   }
                   onReceive={!manager ? () => void receive(item) : undefined}
                   onVersions={() => void showVersions(item)}
-                  onDistribute={
-                    manager ? () => void distribute(item) : undefined
-                  }
-                  onRecall={manager ? () => void recall(item) : undefined}
+                  onDistribute={manager ? () => distribute(item) : undefined}
+                  onRecall={manager ? () => recall(item) : undefined}
                   onUnpublish={manager ? () => void unpublish(item) : undefined}
                 />
               ))}
@@ -514,13 +492,11 @@ export default function ExpertCommunityPage() {
         }}
         onDistribute={
           manager && selectedExpert
-            ? () => void distribute(selectedExpert)
+            ? () => distribute(selectedExpert)
             : undefined
         }
         onRecall={
-          manager && selectedExpert
-            ? () => void recall(selectedExpert)
-            : undefined
+          manager && selectedExpert ? () => recall(selectedExpert) : undefined
         }
         onUnpublish={
           manager && selectedExpert
@@ -528,6 +504,27 @@ export default function ExpertCommunityPage() {
             : undefined
         }
       />
+
+      {manager ? (
+        <>
+          <DistributeTargetModal
+            open={Boolean(distributeTarget)}
+            type="expert"
+            item={distributeTarget}
+            sourceId={sourceId}
+            onClose={() => setDistributeTarget(null)}
+            onSuccess={() => void load()}
+          />
+          <ExpertRecallModal
+            open={Boolean(recallTarget)}
+            sourceId={sourceId}
+            itemId={recallTarget?.item_id || ""}
+            itemName={recallTarget?.name || ""}
+            onClose={() => setRecallTarget(null)}
+            onSuccess={() => void load()}
+          />
+        </>
+      ) : null}
 
       <ExpertVersionHistoryModal
         open={versionItem !== null}

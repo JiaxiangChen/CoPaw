@@ -2237,6 +2237,50 @@ class MarketplaceService:
                 user_ids.add(user_id)
         return sorted(user_ids)
 
+    async def get_expert_distributions(
+        self,
+        source_id: str,
+        item_id: str,
+    ) -> list[DistributionRecord]:
+        """Return users that currently hold a received copy of an expert."""
+        self._expert_item(source_id, item_id)
+        holder_ids = [
+            user_id
+            for user_id in self._received_expert_user_ids(source_id)
+            if self._received_expert_paths(user_id, source_id, item_id)
+        ]
+        if not holder_ids:
+            return []
+
+        user_map: dict[str, dict[str, Any]] = {}
+        if self.db.is_connected:
+            try:
+                placeholders = ",".join(["%s"] * len(holder_ids))
+                rows = await self.db.fetch_all(
+                    _QUERY_USERS_BY_TENANT_IDS_SQL.format(
+                        placeholders=placeholders,
+                    ),
+                    (source_id, *holder_ids),
+                )
+                user_map = {row["tenant_id"]: row for row in rows}
+            except Exception as exc:
+                logger.warning("Failed to resolve expert holder info: %s", exc)
+
+        return [
+            DistributionRecord(
+                target_user_id=user_id,
+                target_user_name=user_map.get(user_id, {}).get(
+                    "tenant_name",
+                    "",
+                )
+                or "",
+                target_bbk_id=user_map.get(user_id, {}).get("bbk_id", "")
+                or "",
+                distributed_at=None,
+            )
+            for user_id in holder_ids
+        ]
+
     def _install_expert_for_user(
         self,
         source_id: str,

@@ -1316,6 +1316,245 @@ async def test_runtime_emits_prompt_command_and_http_handlers_concurrently(
 
 
 @pytest.mark.asyncio
+async def test_runtime_refreshes_changed_skill_hooks_before_event_plan(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from swe.agents.hook_runtime.models import (
+        HookSessionOverlay,
+        HookSessionState,
+    )
+    from swe.agents.hook_runtime.runtime import HookRuntime
+    from swe.agents.hook_runtime.skill_loader import (
+        load_skill_hooks_for_session,
+    )
+
+    skill_root = tmp_path / "skills" / "xlsx"
+    (skill_root / "hooks").mkdir(parents=True)
+    (skill_root / "scripts").mkdir()
+    (skill_root / "scripts" / "check.py").write_text(
+        "print('{}')\n",
+        encoding="utf-8",
+    )
+    hooks_path = skill_root / "hooks" / "hooks.json"
+
+    def write_config(handler_id: str) -> None:
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "events": {
+                        "PreToolUse": [
+                            {
+                                "hooks": [
+                                    {
+                                        "id": handler_id,
+                                        "type": "command",
+                                        "argv": ["python", "scripts/check.py"],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
+
+    write_config("old")
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    write_config("new")
+    executed_handler_ids: list[str] = []
+
+    async def fake_execute_handler(handler, context, *, workspace_dir):
+        del context, workspace_dir
+        executed_handler_ids.append(handler.id)
+        return HookHandlerResult(handler_id=handler.id, order=0)
+
+    monkeypatch.setattr(
+        "swe.agents.hook_runtime.runtime.execute_handler",
+        fake_execute_handler,
+    )
+    runtime = HookRuntime(
+        session_overlay=HookSessionOverlay.model_validate(
+            state.model_dump(mode="json", by_alias=True),
+        ),
+    )
+
+    await runtime.emit(_context(), workspace_dir=tmp_path)
+
+    assert executed_handler_ids == ["skill:xlsx:new"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_restore_once_record_from_replaced_handler(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from swe.agents.hook_runtime.models import (
+        HookSessionOverlay,
+        HookSessionState,
+    )
+    from swe.agents.hook_runtime.runtime import HookRuntime
+    from swe.agents.hook_runtime.skill_loader import (
+        load_skill_hooks_for_session,
+    )
+
+    skill_root = tmp_path / "skills" / "xlsx"
+    (skill_root / "hooks").mkdir(parents=True)
+    (skill_root / "scripts").mkdir()
+    (skill_root / "scripts" / "check.py").write_text(
+        "print('{}')\n",
+        encoding="utf-8",
+    )
+    hooks_path = skill_root / "hooks" / "hooks.json"
+
+    def write_config(event: str) -> None:
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "events": {
+                        event: [
+                            {
+                                "hooks": [
+                                    {
+                                        "id": "once",
+                                        "type": "command",
+                                        "argv": ["python", "scripts/check.py"],
+                                        "once": True,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
+
+    write_config("PreToolUse")
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_execute_handler(handler, context, *, workspace_dir):
+        del handler, context, workspace_dir
+        started.set()
+        await release.wait()
+        return HookHandlerResult(handler_id="skill:xlsx:once", order=0)
+
+    monkeypatch.setattr(
+        "swe.agents.hook_runtime.runtime.execute_handler",
+        fake_execute_handler,
+    )
+    runtime = HookRuntime(
+        session_overlay=HookSessionOverlay.model_validate(
+            state.model_dump(mode="json", by_alias=True),
+        ),
+    )
+
+    old_event = asyncio.create_task(
+        runtime.emit(_context(), workspace_dir=tmp_path),
+    )
+    await started.wait()
+    write_config("Stop")
+    await runtime.emit(_context(), workspace_dir=tmp_path)
+    release.set()
+    await old_event
+
+    assert runtime.session_overlay.once_executed == {}
+
+
+def test_runtime_refreshes_skill_hooks_before_stop_buffer_decision(
+    tmp_path: Path,
+) -> None:
+    from swe.agents.hook_runtime.models import (
+        HookSessionOverlay,
+        HookSessionState,
+    )
+    from swe.agents.hook_runtime.runtime import HookRuntime
+    from swe.agents.hook_runtime.skill_loader import (
+        load_skill_hooks_for_session,
+    )
+
+    skill_root = tmp_path / "skills" / "xlsx"
+    (skill_root / "hooks").mkdir(parents=True)
+    (skill_root / "scripts").mkdir()
+    (skill_root / "scripts" / "check.py").write_text(
+        "print('{}')\n",
+        encoding="utf-8",
+    )
+    hooks_path = skill_root / "hooks" / "hooks.json"
+
+    def write_config(output_transform: bool) -> None:
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "events": {
+                        "Stop": [
+                            {
+                                "hooks": [
+                                    {
+                                        "id": "finalize",
+                                        "type": "command",
+                                        "argv": ["python", "scripts/check.py"],
+                                        "outputTransform": output_transform,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            ),
+            encoding="utf-8",
+        )
+
+    write_config(False)
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    runtime = HookRuntime(
+        session_overlay=HookSessionOverlay.model_validate(
+            state.model_dump(mode="json", by_alias=True),
+        ),
+    )
+    stop_context = _context(HookEventName.STOP)
+
+    assert (
+        runtime.requires_stop_output_buffer(
+            stop_context,
+            workspace_dir=tmp_path,
+        )
+        is False
+    )
+
+    write_config(True)
+
+    assert (
+        runtime.requires_stop_output_buffer(
+            stop_context,
+            workspace_dir=tmp_path,
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_runtime_stop_executes_handlers_and_returns_gate_result(
     monkeypatch,
 ) -> None:

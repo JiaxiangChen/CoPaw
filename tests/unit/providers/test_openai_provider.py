@@ -169,13 +169,13 @@ async def test_update_config_updates_non_none_values_and_get_info() -> None:
     assert provider.api_key == "sk-new"
     assert provider.chat_model == "OpenAIChatModel"
     assert provider.api_key_prefix == "sk-"
-    assert provider.generate_kwargs == {"temperature": 0.2, "top_p": 0.9}
     assert info.name == "OpenAI Custom"
     assert info.base_url == "https://new.example/v1"
     assert info.api_key == "sk-new"
     assert info.chat_model == "OpenAIChatModel"
     assert info.api_key_prefix == "sk-"
-    assert info.generate_kwargs == {"temperature": 0.2, "top_p": 0.9}
+    assert "generate_kwargs" not in provider.model_dump()
+    assert "generate_kwargs" not in info.model_dump()
     assert info.is_custom
     assert not info.support_connection_check
 
@@ -183,7 +183,6 @@ async def test_update_config_updates_non_none_values_and_get_info() -> None:
 async def test_update_config_skips_none_values() -> None:  # noqa: E501
     provider = _make_provider()
     provider.api_key_prefix = "sk-"
-    provider.generate_kwargs = {"temperature": 0.1}
 
     provider.update_config(
         {
@@ -192,7 +191,6 @@ async def test_update_config_skips_none_values() -> None:  # noqa: E501
             "api_key": None,
             "chat_model": None,
             "api_key_prefix": None,
-            "generate_kwargs": None,
         },
     )
 
@@ -203,13 +201,13 @@ async def test_update_config_skips_none_values() -> None:  # noqa: E501
     assert provider.api_key == "sk-test"
     assert provider.chat_model == "OpenAIChatModel"
     assert provider.api_key_prefix == "sk-"
-    assert provider.generate_kwargs == {"temperature": 0.1}
     assert info.name == "OpenAI"
     assert info.base_url == "https://mock-openai.local/v1"
     assert info.api_key == "sk-******"
     assert info.chat_model == "OpenAIChatModel"
     assert info.api_key_prefix == "sk-"
-    assert info.generate_kwargs == {"temperature": 0.1}
+    assert "generate_kwargs" not in provider.model_dump()
+    assert "generate_kwargs" not in info.model_dump()
 
 
 async def test_update_config_updates_openai_compatible_chat_model() -> None:

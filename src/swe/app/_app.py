@@ -48,6 +48,7 @@ from .migration import (
 from .channels.registry import register_custom_channel_routes
 from ..tracing import init_trace_manager, close_trace_manager
 from ..tracing.agent_trace_sdk import shutdown_global_tracer
+from .runner.model_call_error_detail import redact_sensitive_fragments
 from ..database import get_database_config
 from .service_heartbeat import start_service_heartbeat, stop_service_heartbeat
 from .crons.notification_worker import CronNotificationWorker
@@ -57,6 +58,14 @@ from .runtime_diagnostic import RuntimeDiagnosticManager
 logger = setup_logger(os.environ.get(LOG_LEVEL_ENV, "info"))
 
 _SKILL_SCAN_HISTORY_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+_DYNAMIC_RUNNER_ERROR_MESSAGE_MAX_LENGTH = 512
+
+
+def _safe_dynamic_runner_error_message(error: Exception) -> str:
+    message = redact_sensitive_fragments(str(error))
+    if len(message) <= _DYNAMIC_RUNNER_ERROR_MESSAGE_MAX_LENGTH:
+        return message
+    return message[:_DYNAMIC_RUNNER_ERROR_MESSAGE_MAX_LENGTH] + "..."
 
 
 # Ensure static assets are served with browser-compatible MIME types across
@@ -111,12 +120,16 @@ class DynamicMultiAgentRunner:
             )
             return workspace.runner
         except ValueError as e:
-            logger.error(f"Agent not found: {e}")
+            logger.error(
+                "Agent not found: %s",
+                _safe_dynamic_runner_error_message(e),
+            )
             raise
         except Exception as e:
+            safe_message = _safe_dynamic_runner_error_message(e)
             logger.error(
-                f"Error getting workspace runner: {e}",
-                exc_info=True,
+                "Error getting workspace runner: %s",
+                safe_message,
             )
             raise
 
@@ -144,15 +157,31 @@ class DynamicMultiAgentRunner:
                     yield item
             logger.debug(f"stream_query completed, yielded {count} items")
         except Exception as e:
-            logger.error(
-                f"Error in stream_query: {e}",
-                exc_info=True,
+            from agentscope_runtime.engine.schemas.agent_schemas import (
+                AgentResponse,
+                Error,
             )
-            # Yield error message to client
-            yield {
-                "error": str(e),
-                "type": "error",
-            }
+
+            safe_message = _safe_dynamic_runner_error_message(e)
+            logger.error(
+                "Error in stream_query: %s",
+                safe_message,
+            )
+            request_id = (
+                request.get("id")
+                if isinstance(request, dict)
+                else getattr(
+                    request,
+                    "id",
+                    None,
+                )
+            )
+            yield AgentResponse(id=request_id).failed(
+                Error(
+                    code="agent_runtime_error",
+                    message=safe_message,
+                ),
+            )
 
     async def query_handler(self, request, *args, **kwargs):
         """Dynamically route to the correct workspace runner."""

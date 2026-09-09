@@ -18,6 +18,7 @@ from .models import (
     HookMatcherGroupConfig,
     HookSessionOverlay,
     copy_handler_with_overrides,
+    skill_hook_handler_definition,
     validate_handler_event,
 )
 
@@ -29,6 +30,7 @@ class _MatchedHandler:
     group_id: str
     handler: HookHandlerConfig
     source: str
+    skill_definition: str | None = None
 
 
 class HookResolver:
@@ -194,6 +196,7 @@ class HookResolver:
                         context,
                         overlay_entries,
                         source=source,
+                        event_name=event_name,
                         evaluate_if=evaluate_if,
                         output_transform=output_transform,
                     ),
@@ -222,6 +225,7 @@ class HookResolver:
         overlay_entries: dict[str, Any],
         *,
         source: str,
+        event_name: str,
         evaluate_if: bool,
         output_transform: bool | None,
     ) -> list[_MatchedHandler]:
@@ -242,7 +246,22 @@ class HookResolver:
                 continue
             if evaluate_if and not self._handler_can_run(handler, context):
                 continue
-            handlers.append(_MatchedHandler(group_id, handler, source))
+            handlers.append(
+                _MatchedHandler(
+                    group_id,
+                    handler,
+                    source,
+                    (
+                        skill_hook_handler_definition(
+                            event_name,
+                            group,
+                            raw_handler,
+                        )
+                        if source.startswith("skill:")
+                        else None
+                    ),
+                ),
+            )
         return handlers
 
     def _handler_can_run(
@@ -285,6 +304,7 @@ class HookResolver:
                     order=len(handlers),
                     dedupe_key=dedupe_key,
                     source=matched.source,
+                    skill_definition=matched.skill_definition,
                 ),
             )
         return tuple(handlers)

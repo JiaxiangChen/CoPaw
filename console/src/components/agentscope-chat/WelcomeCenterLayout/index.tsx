@@ -16,6 +16,8 @@ import {
 } from "@/components/agentscope-chat";
 import { chatApi } from "@/api/modules/chat";
 import Style from "./style";
+import DictationControl from "../DictationControl";
+import dictationStyles from "../DictationControl/index.module.less";
 import FeaturedCases from "../FeaturedCases";
 import CaseDetailDrawer from "../CaseDetailDrawer";
 import { featuredCasesApi } from "@/api/modules/featuredCases";
@@ -97,6 +99,7 @@ export default function WelcomeCenterLayout(props: WelcomeCenterLayoutProps) {
   const [inputValue, setInputValue] = useState("");
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dictating, setDictating] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [selectedCase, setSelectedCase] = useState<FeaturedCase | null>(null);
   const [randomPlaceholder, setRandomPlaceholder] = useState("");
@@ -489,7 +492,7 @@ export default function WelcomeCenterLayout(props: WelcomeCenterLayoutProps) {
                   }
                   mentionMenuContainer={mentionMenuContainer}
                   mentionMenuPlacement="bottom"
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={dictating ? undefined : handleKeyDown}
                   onValueChange={setCurrentInputValue}
                   placeholder={placeholder || randomPlaceholder}
                   skillMentions={effectiveSkillMentions}
@@ -500,28 +503,45 @@ export default function WelcomeCenterLayout(props: WelcomeCenterLayoutProps) {
                   className="welcome-input-placeholder"
                   value={inputValue}
                   onChange={(event) => setCurrentInputValue(event.target.value)}
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={dictating ? undefined : handleKeyDown}
                   placeholder={placeholder || randomPlaceholder}
                   autoSize={{ minRows: 1, maxRows: 5 }}
                   bordered={false}
                   disabled={inputDisabled || isSubmitting}
                 />
               )}
-              <div className="welcome-input-actions">
-                <div className="welcome-input-actions-left">
-                  <ComposerQuickMenu
-                    disabled={inputDisabled || isSubmitting}
-                    triggerLabel={t("chat.quickMenu.trigger", "快捷操作")}
-                  >
-                    {mergedQuickMenuItems}
-                  </ComposerQuickMenu>
-                  {prefixItems}
-                </div>
+              <div
+                className={`welcome-input-actions ${dictationStyles.toolbar}`}
+              >
+                {!dictating && (
+                  <div className="welcome-input-actions-left">
+                    <ComposerQuickMenu
+                      disabled={inputDisabled || isSubmitting}
+                      triggerLabel={t("chat.quickMenu.trigger", "快捷操作")}
+                    >
+                      {mergedQuickMenuItems}
+                    </ComposerQuickMenu>
+                    {prefixItems}
+                  </div>
+                )}
+                {!dictating && <span className={dictationStyles.prefix} />}
+                <DictationControl
+                  disabled={
+                    inputDisabled || isSubmitting || voiceRecorder?.recording
+                  }
+                  onActiveChange={setDictating}
+                  onTranscript={(text) =>
+                    setCurrentInputValue(
+                      appendChatInputText(inputValueRef.current, text),
+                    )
+                  }
+                />
                 <button
-                  className="welcome-input-send-btn"
+                  className={`welcome-input-send-btn ${dictationStyles.send}`}
                   onClick={handleSend}
                   disabled={
                     inputDisabled ||
+                    dictating ||
                     isSubmitting ||
                     (!inputValue.trim() && !selectedScenario)
                   }

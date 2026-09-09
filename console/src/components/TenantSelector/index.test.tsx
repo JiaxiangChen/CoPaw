@@ -1,5 +1,11 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  cleanup,
+} from "@testing-library/react";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { TenantSelector } from "./index";
 import type { TenantSelectorProps } from "./types";
@@ -20,23 +26,28 @@ const translations: Record<string, string> = {
   "tenantSelector.byUser": "按用户",
   "tenantSelector.selectOrganization": "选择机构",
   "tenantSelector.selectOrganizationPlaceholder": "请选择机构",
-  "tenantSelector.organizationSelectionHint": "已选择 {{count}} 个机构，涉及 {{userCount}} 个用户",
+  "tenantSelector.organizationSelectionHint":
+    "已选择 {{count}} 个机构，涉及 {{userCount}} 个用户",
   "tenantSelector.userCount": "{{count}} 人",
   "tenantSelector.selectUsers": "选择用户",
   "tenantSelector.selectAll": "全选",
   "tenantSelector.clearAll": "清空",
   "tenantSelector.manualInput": "手动输入用户",
-  "tenantSelector.manualInputHint": "输入额外的用户ID，多个用户用空格或逗号分隔",
+  "tenantSelector.manualInputHint":
+    "输入额外的用户ID，多个用户用空格或逗号分隔",
   "tenantSelector.manualInputPlaceholder": "例如：user001 user002 user003",
   "tenantSelector.selectedCount": "已选 {{count}} 个：",
   "tenantSelector.extraInput": "输入额外租户ID",
-  "tenantSelector.extraInputHint": "输入不在列表中的租户ID，多个ID用空格或逗号分隔",
-  "tenantSelector.extraInputPlaceholder": "例如：external_user001 external_user002",
+  "tenantSelector.extraInputHint":
+    "输入不在列表中的租户ID，多个ID用空格或逗号分隔",
+  "tenantSelector.extraInputPlaceholder":
+    "例如：external_user001 external_user002",
   "tenantSelector.filterPlaceholder": "搜索租户名称或ID",
   "tenantSelector.filterHint": "找到 {{count}} 个（共 {{total}} 个）",
   "tenantSelector.noMatchHint": "未找到匹配的租户",
   "tenantSelector.noSourceId": "无法加载租户列表",
-  "tenantSelector.noSourceIdDescription": "未获取到有效的来源标识，请刷新页面重试",
+  "tenantSelector.noSourceIdDescription":
+    "未获取到有效的来源标识，请刷新页面重试",
   "tenantSelector.loadError": "加载租户列表失败",
 };
 
@@ -123,6 +134,51 @@ describe("TenantSelector", () => {
   });
 
   describe("Rendering", () => {
+    it("keeps allowed holder options that are absent from the tenant directory", async () => {
+      render(
+        <TenantSelector
+          {...defaultProps}
+          allowedTenantIds={["orphan"]}
+          additionalTenantOptions={[
+            { tenant_id: "orphan", tenant_name: null, bbk_id: null },
+          ]}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("按用户")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("按用户"));
+
+      await waitFor(() => {
+        expect(getCardByText("orphan")).toBeTruthy();
+      });
+    });
+
+    it("keeps additional holder options when the tenant directory is unavailable", async () => {
+      mocks.fetchTenantsBySource.mockRejectedValueOnce(
+        new Error("tenant directory unavailable"),
+      );
+      render(
+        <TenantSelector
+          {...defaultProps}
+          allowedTenantIds={["orphan"]}
+          additionalTenantOptions={[
+            { tenant_id: "orphan", tenant_name: null, bbk_id: null },
+          ]}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("按用户")).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText("按用户"));
+
+      await waitFor(() => {
+        expect(getCardByText("orphan")).toBeTruthy();
+      });
+    });
+
     it("renders target mode selector", async () => {
       render(<TenantSelector {...defaultProps} />);
 
@@ -205,7 +261,9 @@ describe("TenantSelector", () => {
         expect(lastCall[0]).toContain("user001");
 
         // 文本框应该保持为空（点击不影响文本框）
-        const textarea = screen.getByPlaceholderText(/例如：external/) as HTMLTextAreaElement;
+        const textarea = screen.getByPlaceholderText(
+          /例如：external/,
+        ) as HTMLTextAreaElement;
         expect(textarea.value).toBe("");
       });
     });
@@ -297,7 +355,9 @@ describe("TenantSelector", () => {
         expect(cardAfter?.className).not.toMatch(/Selected/);
 
         // 验证文本框为空
-        const textarea = screen.getByPlaceholderText(/例如：external/) as HTMLTextAreaElement;
+        const textarea = screen.getByPlaceholderText(
+          /例如：external/,
+        ) as HTMLTextAreaElement;
         expect(textarea.value).toBe("");
       });
     });
@@ -313,7 +373,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("搜索租户名称或ID")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("搜索租户名称或ID"),
+        ).toBeInTheDocument();
       });
     });
 
@@ -352,7 +414,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("搜索租户名称或ID")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("搜索租户名称或ID"),
+        ).toBeInTheDocument();
       });
 
       // 输入 ID 筛选
@@ -374,7 +438,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("搜索租户名称或ID")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("搜索租户名称或ID"),
+        ).toBeInTheDocument();
       });
 
       // 输入不存在的关键字
@@ -395,7 +461,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("搜索租户名称或ID")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("搜索租户名称或ID"),
+        ).toBeInTheDocument();
       });
 
       // 先筛选
@@ -425,7 +493,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText("搜索租户名称或ID")).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText("搜索租户名称或ID"),
+        ).toBeInTheDocument();
       });
 
       // 筛选
@@ -458,12 +528,16 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/例如：external/)).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText(/例如：external/),
+        ).toBeInTheDocument();
       });
 
       // 输入额外ID（不在列表中的）
       const textarea = screen.getByPlaceholderText(/例如：external/);
-      fireEvent.change(textarea, { target: { value: "extra_user001 extra_user002" } });
+      fireEvent.change(textarea, {
+        target: { value: "extra_user001 extra_user002" },
+      });
 
       await waitFor(() => {
         expect(onChange).toHaveBeenCalled();
@@ -483,7 +557,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/例如：external/)).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText(/例如：external/),
+        ).toBeInTheDocument();
       });
 
       // 输入列表中存在的ID
@@ -515,7 +591,9 @@ describe("TenantSelector", () => {
 
       // 输入额外ID
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/例如：external/)).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText(/例如：external/),
+        ).toBeInTheDocument();
       });
       const textarea = screen.getByPlaceholderText(/例如：external/);
       fireEvent.change(textarea, { target: { value: "extra_user" } });
@@ -548,7 +626,9 @@ describe("TenantSelector", () => {
 
       // 输入额外ID
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/例如：external/)).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText(/例如：external/),
+        ).toBeInTheDocument();
       });
       const textarea = screen.getByPlaceholderText(/例如：external/);
       fireEvent.change(textarea, { target: { value: "extra_user" } });
@@ -605,7 +685,9 @@ describe("TenantSelector", () => {
       fireEvent.click(screen.getByText("按用户"));
 
       await waitFor(() => {
-        expect(screen.getByPlaceholderText(/例如：external/)).toBeInTheDocument();
+        expect(
+          screen.getByPlaceholderText(/例如：external/),
+        ).toBeInTheDocument();
       });
       const textarea = screen.getByPlaceholderText(/例如：external/);
       fireEvent.change(textarea, { target: { value: "extra_user" } });
@@ -622,7 +704,9 @@ describe("TenantSelector", () => {
       }
 
       await waitFor(() => {
-        const textareaAfter = screen.getByPlaceholderText(/例如：external/) as HTMLTextAreaElement;
+        const textareaAfter = screen.getByPlaceholderText(
+          /例如：external/,
+        ) as HTMLTextAreaElement;
         expect(textareaAfter.value).toBe("");
       });
     });
@@ -631,7 +715,10 @@ describe("TenantSelector", () => {
   describe("External state synchronization", () => {
     it("syncs external IDs to card selection and extra textarea", async () => {
       render(
-        <TenantSelector {...defaultProps} selectedTenantIds={["user001", "extra_user"]} />
+        <TenantSelector
+          {...defaultProps}
+          selectedTenantIds={["user001", "extra_user"]}
+        />,
       );
 
       await waitFor(() => {
@@ -646,7 +733,9 @@ describe("TenantSelector", () => {
         expect(card?.className).toMatch(/Selected/);
 
         // extra_user 应该在文本框中
-        const textarea = screen.getByPlaceholderText(/例如：external/) as HTMLTextAreaElement;
+        const textarea = screen.getByPlaceholderText(
+          /例如：external/,
+        ) as HTMLTextAreaElement;
         expect(textarea.value).toContain("extra_user");
       });
     });

@@ -33,6 +33,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type Ref,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -455,11 +456,13 @@ function RankingTable({
   loading = false,
   onRowClick,
   selectedBranchId,
+  tableRef,
 }: {
   data: CronJobOverviewPageData["branchRankingRows"];
   loading?: boolean;
   onRowClick: (bbkId: string, bbkName: string) => void;
   selectedBranchId: string | null;
+  tableRef: Ref<HTMLTableElement>;
 }) {
   const [sortConfig, setSortConfig] = useState<{
     key: BranchRankingSortKey;
@@ -531,6 +534,7 @@ function RankingTable({
       ) : (
         <div className={styles.tableScroller}>
           <table
+            ref={tableRef}
             className={`${styles.behaviorTable} ${styles.branchDimensionTable}`}
           >
             <colgroup>
@@ -1051,6 +1055,8 @@ export default function CronJobOverviewPage() {
   const [branchDimensionLoading, setBranchDimensionLoading] = useState(false);
   const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [branchExporting, setBranchExporting] = useState(false);
+  const branchTableRef = useRef<HTMLTableElement>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>(
     getTimeRangeForDateRange(initialDateRange),
   );
@@ -1450,6 +1456,30 @@ export default function CronJobOverviewPage() {
     setSelectedTaskManager(null);
 
     await Promise.all([fetchOverviewData(), fetchTaskBranchRankingData()]);
+  };
+
+  const handleBranchExport = async () => {
+    if (
+      !branchTableRef.current ||
+      branchDimensionLoading ||
+      branchExporting
+    ) {
+      return;
+    }
+    const snapshot = branchTableRef.current.cloneNode(true) as HTMLTableElement;
+    setBranchExporting(true);
+    try {
+      const { exportBranchTable } = await import("./exportBranchTable");
+      await exportBranchTable(snapshot);
+    } catch (error) {
+      Modal.error({
+        title: "导出失败",
+        content:
+          error instanceof Error ? error.message : "导出失败，请稍后重试",
+      });
+    } finally {
+      setBranchExporting(false);
+    }
   };
 
   const handleExport = async () => {
@@ -2097,8 +2127,24 @@ export default function CronJobOverviewPage() {
       >
         技能视角-分行综合排行
         <span className={styles.sectionHeadingHint}>（点击分行查看明细）</span>
+        <button
+          type="button"
+          className={styles.exportButton}
+          onClick={handleBranchExport}
+          disabled={
+            branchDimensionLoading ||
+            branchExporting ||
+            !overviewData.branchRankingRows.length
+          }
+          aria-label="分行维度导出 Excel"
+          aria-busy={branchExporting}
+        >
+          <Download size={14} aria-hidden="true" />
+          {branchExporting ? "导出中..." : "导出 Excel"}
+        </button>
       </h2>
       <RankingTable
+        tableRef={branchTableRef}
         data={overviewData.branchRankingRows}
         loading={branchDimensionLoading}
         onRowClick={handleSelectBranch}

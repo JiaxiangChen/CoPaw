@@ -204,6 +204,13 @@ Visual priority for future chat work remains:
 - Future chat redesigns may reuse base accessibility and spacing roles while evolving its visual theme independently from management pages.
 - Future chat redesigns must work both with and without the global navigation.
 
+### Chat Dictation
+
+- The new-chat and active-chat composers share an always-discoverable microphone control immediately before Send. This short dictation workflow is independent of the existing allowlisted recording item in the quick menu.
+- During dictation, replace the quick-action row with Cancel, a neutral dotted audio waveform, and Stop. Keep Send visible but disabled until recognition ends. Show the recognition preview above the waveform; Stop appends it to the existing draft without submitting, while Cancel discards only this dictation.
+- Waveform history follows actual microphone amplitude, with quiet audio rendered as dots and speech as rounded vertical marks. Under reduced motion, retain static dots and textual recording state. Controls retain the Conversation Workspace focus color.
+- Permission requests, unavailable browsers, recognition failures, cancellation, and stopping must have explicit states. Release microphone tracks on stop, cancellation, errors, composer disablement, and conversation changes.
+
 ### Content-Only Conversation Workspace
 
 A content-only Conversation Workspace keeps the existing conversation title, routed message content, message-level actions, typography, and `#3769FC` emphasis. It omits global navigation, the conversation task/history sidebar and collapsed toolbar, model selection, the independent generated-files entry/list, and composer/upload surfaces. Omitted surfaces are not focusable and reserve no width, padding, border, or shell-colored gap; message-level file controls remain part of the conversation content.

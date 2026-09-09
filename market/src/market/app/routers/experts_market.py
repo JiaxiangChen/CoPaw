@@ -11,6 +11,7 @@ from ...marketplace.schemas import (
     ExpertDistributionRequest,
     ExpertDistributionResponse,
     ExpertInstallRequest,
+    DistributionRecord,
     ExpertRecallRequest,
     ExpertRecallResponse,
     MarketExpertDetail,
@@ -203,6 +204,28 @@ async def distribute_expert(
             item_id,
             x_user_id or "manager",
             req,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/market/experts/{item_id}/distributions",
+    response_model=list[DistributionRecord],
+)
+async def get_expert_distributions(
+    item_id: str,
+    request: Request,
+    x_source_id: Optional[str] = Header(default=None, alias="X-Source-Id"),
+    x_manager: Optional[str] = Header(default=None, alias="X-Manager"),
+):
+    """查询当前实际持有专家副本的用户（管理员）。"""
+    source_id = require_source_id(x_source_id)
+    _require_manager(x_manager)
+    try:
+        return await request.app.state.marketplace.get_expert_distributions(
+            source_id,
+            item_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

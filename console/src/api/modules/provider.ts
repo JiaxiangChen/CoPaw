@@ -8,6 +8,8 @@ import type {
   ActiveModelDistributionResponse,
   GetActiveModelsRequest,
   ModelSlotRequest,
+  ModelRuntimeConfig,
+  ModelRuntimeConfigUpdate,
   CreateCustomProviderRequest,
   AddModelRequest,
   TestConnectionResponse,
@@ -143,6 +145,30 @@ export const providerApi = {
       { method: "DELETE" },
     );
     useProviderModelStore.getState().invalidate();
+    return result;
+  },
+
+  getModelRuntimeConfig: (providerId: string, modelId: string) =>
+    request<ModelRuntimeConfig>(
+      `/models/${encodeURIComponent(providerId)}/models/${encodeURIComponent(
+        modelId,
+      )}/config`,
+    ),
+
+  updateModelRuntimeConfig: async (
+    providerId: string,
+    modelId: string,
+    body: ModelRuntimeConfigUpdate,
+  ) => {
+    const result = await request<ModelRuntimeConfig>(
+      `/models/${encodeURIComponent(providerId)}/models/${encodeURIComponent(
+        modelId,
+      )}/config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    useProviderModelStore
+      .getState()
+      .invalidate({ providers: true, active: false });
     return result;
   },
 

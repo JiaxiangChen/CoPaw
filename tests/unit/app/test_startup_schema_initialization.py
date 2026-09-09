@@ -10,6 +10,8 @@ import pytest
 
 from swe.app import _app as app_module
 from swe.app.approvals.store import ApprovalAuditStore
+from swe.app.chat_sharing import router as chat_sharing_router
+from swe.app.chat_sharing.store import ChatShareStore
 from swe.app.crons.broadcast_children_store import CronBroadcastChildrenStore
 from swe.app.crons.broadcast_task_store import CronBroadcastTaskStore
 from swe.app.goals import registry as goal_registry
@@ -96,4 +98,19 @@ async def test_goal_router_fallback_does_not_initialize_schema(
     service = await goal_router._service(request)
 
     assert service is not None
+    initializer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_chat_sharing_startup_does_not_initialize_schema(
+    monkeypatch,
+) -> None:
+    initializer = AsyncMock()
+    monkeypatch.setattr(ChatShareStore, "ensure_schema", initializer)
+    monkeypatch.setattr(chat_sharing_router, "_service", None)
+
+    await chat_sharing_router.initialize_chat_sharing_module(
+        SimpleNamespace(is_connected=True),
+    )
+
     initializer.assert_not_awaited()

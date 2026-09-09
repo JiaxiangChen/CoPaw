@@ -60,13 +60,18 @@ class _SqliteDb:
                 tenant_id TEXT, source_id TEXT, provider_id TEXT, model_id TEXT,
                 status TEXT, attempt_count INTEGER, max_attempts INTEGER,
                 due_at TEXT, locked_at TEXT, lock_owner TEXT,
-                completed_at TEXT, error_message TEXT, dispatch_order INTEGER
+                completed_at TEXT, updated_at TEXT, error_message TEXT,
+                dispatch_order INTEGER
             );
             CREATE TABLE swe_cron_executions (
                 id INTEGER PRIMARY KEY, job_id TEXT, tenant_id TEXT,
                 trace_id TEXT, status TEXT, async_status TEXT, error_message TEXT,
                 end_time TEXT, dispatch_intent_id INTEGER,
                 dispatch_batch_id TEXT, dispatch_attempt INTEGER
+            );
+            CREATE TABLE swe_cron_dispatch_events (
+                id INTEGER PRIMARY KEY, intent_id INTEGER, event_type TEXT,
+                created_at TEXT
             );
             """,
         )
@@ -141,6 +146,7 @@ class _SqliteDb:
                 "due_at": NOW - timedelta(hours=3),
                 "locked_at": NOW - timedelta(hours=3),
                 "lock_owner": "worker-1",
+                "updated_at": NOW - timedelta(hours=3),
                 "error_message": "",
                 "dispatch_order": 1,
                 **overrides,
@@ -241,6 +247,61 @@ async def test_scan_stops_retrying_at_max_attempts(persisted_store):
 
     assert db.intent()["status"] == "failed"
     assert db.intent()["completed_at"] == NOW.isoformat(" ")
+
+
+@pytest.mark.asyncio
+async def test_auth_expired_fails_without_retry_or_worker_penalty(
+    persisted_store,
+):
+    db, store = persisted_store
+    db.add_intent()
+    db.add_execution(
+        status="error",
+        error_message=(
+            "cron auth user_info is expired; "
+            "please refresh cron auth configuration"
+        ),
+    )
+
+    assert await store.reconcile_dispatched_executions(now_utc=NOW) == 1
+
+    row = db.intent()
+    assert row["status"] == "failed"
+    assert row["completed_at"] == NOW.isoformat(" ")
+    assert row["due_at"] == NOW.isoformat(" ")
+    assert row["error_message"].startswith("鉴权过期:")
+    assert store._record_event_best_effort.await_args.kwargs["details"][
+        "retry"
+    ] is False
+
+    feedback = await store.summarize_recent_completion_feedback(
+        since=NOW - timedelta(minutes=5),
+        now_utc=NOW,
+        scope={
+            "source_id": "source-a",
+            "provider_id": "default",
+            "model_id": "default",
+        },
+    )
+    assert feedback["failure_count"] == 0
+
+    db.add_intent(
+        id=8,
+        status="failed",
+        completed_at=NOW,
+        updated_at=NOW,
+        error_message="agent failed",
+    )
+    feedback = await store.summarize_recent_completion_feedback(
+        since=NOW - timedelta(minutes=5),
+        now_utc=NOW,
+        scope={
+            "source_id": "source-a",
+            "provider_id": "default",
+            "model_id": "default",
+        },
+    )
+    assert feedback["failure_count"] == 1
 
 
 @pytest.mark.asyncio

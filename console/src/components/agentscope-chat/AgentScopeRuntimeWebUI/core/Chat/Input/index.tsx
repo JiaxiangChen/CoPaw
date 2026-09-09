@@ -27,6 +27,7 @@ import {
   type ChatInputReplaceTextPayload,
 } from "@/components/agentscope-chat/chatInputDraft";
 import { useVoiceRecorderTrigger } from "@/components/GlobalVoiceRecorder/context";
+import { useChatShareSelection } from "@/pages/Chat/chatShareContext";
 
 const RUNTIME_INPUT_UPLOAD_FILE_EVENT = "pasteFile";
 
@@ -48,6 +49,9 @@ export interface InputProps {
 
 export default function Input({ onCancel, onSubmit }: InputProps) {
   const { t } = useTranslation();
+  const { active: sharing } = useChatShareSelection();
+  const sharingRef = useRef(sharing);
+  sharingRef.current = sharing;
   const [content, setContent, getContent] = useGetState("");
   const restoredBizParamsRef =
     useRef<IAgentScopeRuntimeWebUIInputData["biz_params"]>(undefined);
@@ -87,10 +91,11 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
     handlePasteFile,
     uploadQuickMenuItem,
     uploadFileListHeader,
-  } = useAttachments(attachments, { disabled: !!inputContext.disabled });
-  const canHandlePasteFile = inputContext.disabled
-    ? undefined
-    : handlePasteFile;
+  } = useAttachments(attachments, {
+    disabled: !!inputContext.disabled || sharing,
+  });
+  const canHandlePasteFile =
+    inputContext.disabled || sharing ? undefined : handlePasteFile;
   const voiceRecorder = useVoiceRecorderTrigger();
 
   const mergedQuickMenuItems = useMemo(() => {
@@ -206,6 +211,7 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
   );
 
   const handleSubmit = useCallback(async () => {
+    if (sharingRef.current) return;
     const fileList = (getFileList?.() || []).filter((i) => i.response?.url);
     const inputData: IAgentScopeRuntimeWebUIInputData = {
       query: getContent(),
@@ -213,7 +219,7 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
       biz_params: restoredBizParamsRef.current,
     };
     const next = await beforeSubmit(inputData);
-    if (!next) return;
+    if (!next || sharingRef.current) return;
 
     if (isSubmitCancelled(next)) {
       if (next.clearInput) {
@@ -247,8 +253,9 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
 
   const defaultComposer = (
     <ChatInput
+      key={`${currentSessionId}:${Boolean(hasMessages || fileList.length)}`}
       loading={inputContext.loading}
-      disabled={inputContext.disabled}
+      disabled={inputContext.disabled || sharing}
       placeholder={placeholder}
       value={content}
       prefix={
@@ -267,7 +274,7 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
       maxLength={maxLength}
       onSubmit={handleSubmit}
       onCancel={handleCancel}
-      allowSpeech={allowSpeech}
+      allowSpeech={allowSpeech && !voiceRecorder?.recording}
       onPasteFile={canHandlePasteFile}
       suggestions={suggestions}
       skillMentions={skillMentions}
@@ -278,7 +285,15 @@ export default function Input({ onCancel, onSubmit }: InputProps) {
     : defaultComposer;
 
   return (
-    <div className={prefixCls}>
+    <div
+      className={prefixCls}
+      aria-hidden={sharing || undefined}
+      style={
+        sharing
+          ? { visibility: "hidden", opacity: 0, pointerEvents: "none" }
+          : undefined
+      }
+    >
       <div
         className={`${prefixCls}-wrapper`}
         style={{

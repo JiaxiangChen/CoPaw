@@ -125,7 +125,11 @@ class AnthropicProvider(Provider):
                 f"Unknown exception when connecting to model '{model_id}'",
             )
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        generation_kwargs: dict | None = None,
+    ) -> ChatModelBase:
         from agentscope.model import AnthropicChatModel
 
         client_kwargs = {"base_url": self.base_url}
@@ -160,7 +164,7 @@ class AnthropicProvider(Provider):
             api_key=self.api_key,
             stream_tool_parsing=False,
             client_kwargs=client_kwargs,
-            generate_kwargs=self.generate_kwargs,
+            generate_kwargs=generation_kwargs or {},
         )
 
     async def probe_model_multimodal(

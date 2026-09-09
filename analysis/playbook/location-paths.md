@@ -32,7 +32,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 重点看 `PROTECTED_RUNTIME_ENV_KEYS`、`_scrub_user_tool_subprocess_env()` 和 `preserve_boundary_env_keys`
 - Python runtime guard 注入：[src/swe/security/python_runtime_path_guard.py](../../src/swe/security/python_runtime_path_guard.py)
 - 重点看 `prepare_python_runtime_path_guard_env()`、trusted paths 和 trusted entrypoint roots
-- 包导入期 env 加载：[src/swe/__init__.py](../../src/swe/__init__.py)、[src/swe/envs/store.py](../../src/swe/envs/store.py)
+- 包导入期 env 加载：[src/swe/**init**.py](../../src/swe/__init__.py)、[src/swe/envs/store.py](../../src/swe/envs/store.py)
 - CLI 根命令读取 last API：[src/swe/cli/main.py](../../src/swe/cli/main.py)、[src/swe/config/utils.py](../../src/swe/config/utils.py)
 - 回归测试：[tests/unit/test_shell_tenant_boundary.py](../../tests/unit/test_shell_tenant_boundary.py)
 
@@ -119,7 +119,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - Agent 运行配置默认值：[src/swe/config/config.py](/Users/shixiangyi/code/Swe/src/swe/config/config.py)
 - source 覆盖合成：[src/swe/app/source_system_config/runtime.py](/Users/shixiangyi/code/Swe/src/swe/app/source_system_config/runtime.py)
 - 历史 tool_result 压缩 hook：[src/swe/agents/hooks/memory_compaction.py](/Users/shixiangyi/code/Swe/src/swe/agents/hooks/memory_compaction.py)
-- MCP 工具返回转换：[src/swe/app/mcp/__init__.py](/Users/shixiangyi/code/Swe/src/swe/app/mcp/__init__.py)
+- MCP 工具返回转换：[src/swe/app/mcp/**init**.py](/Users/shixiangyi/code/Swe/src/swe/app/mcp/__init__.py)
 - 详细经验：[analysis/playbook/tool-result-truncation.md](tool-result-truncation.md)
 
 ## Tenant bootstrap / default workspace scaffold
@@ -173,3 +173,17 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `async_status` 为空时继续占用名额。Agent 执行和子任务等待共用现有派发超时预算；主成功但子结果缺失的回收错误为“获取子任务状态超时”。
 - 先确认 Scheduler 与 Monitor 访问同一执行表，且 Monitor 原有子任务同步/聚合正常运行；沿用 Monitor 的无子任务成功规则，不应把这一行为误诊为 Scheduler 提前完成。
 - 首轮验证：`$env:PYTHONPATH='scheduler/src'; .\.venv\Scripts\python.exe -m pytest tests/unit/scheduler -q`。
+
+## 定时任务详情分行维度 Excel 导出
+
+- 页面与按钮入口：`console/src/pages/Analytics/CronJobOverview/index.tsx` 的 `handleBranchExport`；导出时克隆当前 `RankingTable`，保留点击时的排序、序号与展示文本。
+- 文件生成入口：`console/src/pages/Analytics/CronJobOverview/exportBranchTable.ts`。ExcelJS 按需加载，在浏览器生成 `.xlsx`，保留两层合并表头和全部 22 列；不调用 Monitor 导出接口。百分比、千分位、前导零按文本保存。
+- 加载中、无数据或导出中禁用按钮；失败显示提示并恢复重试。核对导出内容时，比较点击时的表格快照，而非导出期间再次排序后的页面。
+- 验证：`pnpm exec vitest run src/pages/Analytics/CronJobOverview`，包含实际文件生成和回读、当前排序、合并表头、特殊文本、无新增 API 请求及错误恢复。
+
+## 我的任务自动预览文件选择
+
+- 报告提取入口：`console/src/components/agentscope-chat/autoPreviewSelection.ts`，由任务结果卡片和页面预览共用。原始消息按从旧到新排列，选择最后一条含报告的消息及其中最后一个符合原有自动预览条件的文件；包括带 `auto-preview` 标记的 HTML，以及文件卡片中带 `resultId`、`templateId` 的动态报告，不解析文件名时间戳。同次执行优先取最终结果，没有匹配才取步骤结果。
+- 页面入口：`ChatAutoPreviewHtmlProvider.tsx` 在会话加载完成后确定目标 URL；其他消息仍在生成时，已经出现的最新报告仍可自动预览。`AutoPreviewHtmlContext.tsx` 只接受该目标的文件卡片，120ms 防抖后打开一次。URL 比较沿用聊天媒体地址转换，父组件回调变化不能重置已经消费的预览机会。
+- 排错注意：`MessageList` 会倒序挂载消息，不能用组件注册先后判断报告新旧。历史执行默认折叠规则在 `console/src/pages/Chat/sessionApi/index.ts`；最新执行没有报告时，不应回退到折叠的旧执行。加载期间不应消耗 5 秒候选等待窗口。
+- 回归验证：在 `console/` 运行 `npm run test:run -- src/components/agentscope-chat/ChatAutoPreviewHtmlProvider.test.tsx src/components/agentscope-chat/autoPreviewSelection.test.ts src/pages/Chat/components/TaskRunGroupCard/index.test.tsx src/components/agentscope-chat/DownloadFileCard/index.test.tsx`。

@@ -6,6 +6,22 @@ export interface ModelInfo {
   supports_video: boolean | null;
 }
 
+export type ReasoningEffort = "low" | "high" | "max";
+
+export interface ModelRuntimeConfig {
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  max_input_length?: number | null;
+  max_output_length?: number | null;
+  supports_enable_thinking: boolean;
+  supported_reasoning_efforts: ReasoningEffort[];
+  enable_thinking: boolean;
+  reasoning_effort?: ReasoningEffort | null;
+}
+
+export type ModelRuntimeConfigUpdate = Partial<ModelRuntimeConfig>;
+
 export interface ProviderInfo {
   id: string;
   name: string;
@@ -27,14 +43,13 @@ export interface ProviderInfo {
   require_api_key: boolean;
   api_key: string;
   base_url: string;
-  generate_kwargs: Record<string, unknown>;
+  model_configs?: Record<string, ModelRuntimeConfig>;
 }
 
 export interface ProviderConfigRequest {
   api_key?: string;
   base_url?: string;
   chat_model?: string;
-  generate_kwargs?: Record<string, unknown>;
 }
 
 export interface ModelSlotConfig {
@@ -187,7 +202,6 @@ export interface TestProviderRequest {
   api_key?: string;
   base_url?: string;
   chat_model?: string;
-  generate_kwargs?: Record<string, unknown>;
 }
 
 export interface TestModelRequest {

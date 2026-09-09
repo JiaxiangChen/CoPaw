@@ -477,6 +477,9 @@ describe("CronJobOverview summary cards", () => {
       anomalyHeading.compareDocumentPosition(branchDimensionHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "分行维度导出 Excel" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("任务信息")).toBeInTheDocument();
     expect(screen.getByText("by客户经理")).toBeInTheDocument();
     expect(screen.getByText("by客户")).toBeInTheDocument();
