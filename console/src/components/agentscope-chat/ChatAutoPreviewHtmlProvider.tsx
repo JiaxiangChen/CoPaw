@@ -22,8 +22,9 @@ export function ChatAutoPreviewHtmlProvider(props: {
   const resolveUrl = useChatAnywhereOptions((v) => v.api?.replaceMediaURL);
   const ready = !loading;
   const targetUrl = useMemo(
-    () => findLatestAutoPreviewUrl(messages),
-    [messages],
+    () =>
+      props.triggerKey > 0 && ready ? findLatestAutoPreviewUrl(messages) : null,
+    [messages, props.triggerKey, ready],
   );
 
   return (

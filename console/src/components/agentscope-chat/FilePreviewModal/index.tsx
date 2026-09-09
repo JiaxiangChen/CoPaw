@@ -96,7 +96,6 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [nestedPreview, setNestedPreview] =
     useState<NestedHtmlPreviewRequest | null>(null);
-  const [iframeLoadKey, setIframeLoadKey] = useState(0);
   const [dynamicRenderLoading, setDynamicRenderLoading] = useState(false);
   const [isFileGenerating, setIsFileGenerating] = useState(false);
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
