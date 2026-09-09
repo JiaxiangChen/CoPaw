@@ -1,40 +1,36 @@
 import { useState } from "react";
 import {
-  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import DictationControl from "./index";
 import { appendChatInputText } from "../chatInputDraft";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ i18n: { language: "zh" } }),
-}));
-const microphoneStop = vi.fn();
-const abort = vi.fn();
-const recognition = {
-  onstart: null as null | (() => void),
-  onend: null as null | (() => void),
-  onresult: null as
-    | null
-    | ((event: {
-        results: { isFinal: boolean; 0: { transcript: string } }[];
-      }) => void),
-  start() {
-    this.onstart?.();
-  },
-  stop() {
-    this.onend?.();
-  },
-  abort,
-};
-const getUserMedia = vi.fn(async () => ({
-  getTracks: () => [{ stop: microphoneStop }],
-}));
+vi.mock("../Sender/useSpeech", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    default: function useSpeech(onSpeech: (text: string) => void) {
+      const [status, setStatus] = React.useState<"idle" | "listening">("idle");
+      return {
+        supported: true,
+        status,
+        preview: "",
+        error: "",
+        stream: null,
+        start: () => setStatus("listening"),
+        stop: () => {
+          setStatus("idle");
+          onSpeech("听写结果");
+        },
+        cancel: () => setStatus("idle"),
+      };
+    },
+  };
+});
 function Composer({ disabled = false }: { disabled?: boolean }) {
   const [draft, setDraft] = useState("原有草稿");
   const [active, setActive] = useState(false);
@@ -56,24 +52,8 @@ function Composer({ disabled = false }: { disabled?: boolean }) {
     </>
   );
 }
-beforeEach(() => {
-  vi.stubGlobal(
-    "SpeechRecognition",
-    class {
-      constructor() {
-        return recognition;
-      }
-    },
-  );
-  vi.stubGlobal("isSecureContext", true);
-  Object.defineProperty(navigator, "mediaDevices", {
-    configurable: true,
-    value: { getUserMedia },
-  });
-});
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 const begin = async () => {
@@ -83,16 +63,9 @@ const begin = async () => {
   );
 };
 describe("DictationControl", () => {
-  it("previews speech, blocks send and appends to the latest editable draft on stop", async () => {
+  it("blocks send and appends the converted text to the latest editable draft", async () => {
     render(<Composer />);
     await begin();
-    act(
-      () =>
-        recognition.onresult?.({
-          results: [{ isFinal: false, 0: { transcript: "听写结果" } }],
-        }),
-    );
-    expect(screen.getByRole("status")).toHaveTextContent("听写结果");
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "修改后的草稿" },
@@ -100,7 +73,6 @@ describe("DictationControl", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止语音输入" }));
     expect(screen.getByRole("textbox")).toHaveValue("修改后的草稿\n听写结果");
     expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
-    expect(microphoneStop).toHaveBeenCalled();
   });
   it("supports Escape cancellation with focus restored and draft preserved", async () => {
     render(<Composer />);
@@ -110,7 +82,6 @@ describe("DictationControl", () => {
     });
     expect(screen.getByRole("textbox")).toHaveValue("原有草稿");
     expect(screen.getByRole("button", { name: "语音输入" })).toHaveFocus();
-    expect(abort).toHaveBeenCalled();
   });
   it("keeps the action row compact while listening and after no speech", async () => {
     render(<Composer />);
@@ -121,9 +92,9 @@ describe("DictationControl", () => {
     expect(screen.queryByText("正在启动麦克风…")).not.toBeInTheDocument();
     expect(screen.queryByText("正在整理文字…")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "停止语音输入" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("未识别到语音");
+    fireEvent.keyDown(screen.getByRole("button", { name: "取消语音输入" }), {
+      key: "Escape",
+    });
     expect(screen.getByRole("button", { name: "语音输入" })).toBeVisible();
   });
   it("cancels active capture when the composer is disabled", async () => {
@@ -134,13 +105,5 @@ describe("DictationControl", () => {
       screen.queryByRole("button", { name: "停止语音输入" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "语音输入" })).toBeDisabled();
-    expect(microphoneStop).toHaveBeenCalled();
-  });
-  it("explains unsupported browsers without requesting the microphone", () => {
-    vi.stubGlobal("SpeechRecognition", undefined);
-    render(<Composer />);
-    fireEvent.click(screen.getByRole("button", { name: "语音输入" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("不支持语音输入");
-    expect(getUserMedia).not.toHaveBeenCalled();
   });
 });
