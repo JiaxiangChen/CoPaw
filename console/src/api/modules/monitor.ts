@@ -822,6 +822,16 @@ export function mapCronJobOverviewPageData(
   branchError: CronBranchErrorResponse,
 ): CronJobOverviewPageData {
   return {
+    ...mapCronOverviewStats(stats),
+    ...mapCronBranchRanking(behavior),
+    ...mapCronBranchError(branchError),
+  };
+}
+
+export function mapCronOverviewStats(
+  stats: CronOverviewStatsResponse,
+): Pick<CronJobOverviewPageData, "summaryMetrics"> {
+  return {
     summaryMetrics: [
       { key: "branches", value: formatInteger(stats.branch_count) },
       { key: "managers", value: formatInteger(stats.tenant_count) },
@@ -851,6 +861,13 @@ export function mapCronJobOverviewPageData(
       { key: "insight_count", value: formatInteger(stats.insight_count) },
       { key: "phone_count", value: formatInteger(stats.phone_count) },
     ],
+  };
+}
+
+export function mapCronBranchRanking(
+  behavior: CronBranchRankingResponse,
+): Pick<CronJobOverviewPageData, "branchRankingRows"> {
+  return {
     branchRankingRows: behavior.items.map((item, index) => ({
       rank: index + 1,
       bbkId: item.bbk_id || "",
@@ -891,6 +908,16 @@ export function mapCronJobOverviewPageData(
       insightCustomers: formatInteger(item.insight_customers),
       phoneCustomers: formatInteger(item.phone_customers),
     })),
+  };
+}
+
+export function mapCronBranchError(
+  branchError: CronBranchErrorResponse,
+): Pick<
+  CronJobOverviewPageData,
+  "failureReasons" | "anomalySummary" | "anomalyRankRows"
+> {
+  return {
     failureReasons: branchError.error_reasons.map((item, index) => ({
       name: item.reason || "其他",
       count: Number(item.count || 0),

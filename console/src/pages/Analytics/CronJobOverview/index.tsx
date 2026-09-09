@@ -31,6 +31,9 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   monitorApi,
+  mapCronBranchError,
+  mapCronBranchRanking,
+  mapCronOverviewStats,
   type ExecutionItem,
   type CronJobOverviewFailureReason,
   type CronJobOverviewDateFilters,
@@ -1036,7 +1039,11 @@ export default function CronJobOverviewPage() {
   const initialDateRange = getInitialDateRange(searchParams);
   const [overviewData, setOverviewData] =
     useState<CronJobOverviewPageData>(emptyOverviewData);
-  const [loading, setLoading] = useState(false);
+  const overviewRequestSeqRef = useRef(0);
+  const taskRankingRequestSeqRef = useRef(0);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [branchDimensionLoading, setBranchDimensionLoading] = useState(false);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [branchExporting, setBranchExporting] = useState(false);
   const [branchSort, setBranchSort] = useState<BranchRankingSort>(null);
@@ -1131,6 +1138,95 @@ export default function CronJobOverviewPage() {
     start_date: dateRange[0].format("YYYY-MM-DD"),
     end_date: dateRange[1].format("YYYY-MM-DD"),
   });
+
+  const fetchOverviewData = async () => {
+    const requestSeq = ++overviewRequestSeqRef.current;
+    setSummaryLoading(true);
+    setBranchDimensionLoading(true);
+    setAnomalyLoading(true);
+    const filters = getOverviewFilters();
+    const isCurrentRequest = () => overviewRequestSeqRef.current === requestSeq;
+
+    const statsPromise = monitorApi
+      .getCronOverviewStats(filters)
+      .then((stats) => {
+        if (isCurrentRequest()) {
+          setOverviewData((current) => ({
+            ...current,
+            summaryMetrics: mapCronOverviewStats(stats).summaryMetrics,
+          }));
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to fetch cron overview stats.", error);
+      })
+      .finally(() => {
+        if (isCurrentRequest()) {
+          setSummaryLoading(false);
+        }
+      });
+
+    const rankingPromise = monitorApi
+      .getCronBranchRanking(filters)
+      .then((ranking) => {
+        if (isCurrentRequest()) {
+          setOverviewData((current) => ({
+            ...current,
+            branchRankingRows: mapCronBranchRanking(ranking).branchRankingRows,
+          }));
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to fetch cron branch ranking.", error);
+      })
+      .finally(() => {
+        if (isCurrentRequest()) {
+          setBranchDimensionLoading(false);
+        }
+      });
+
+    const branchErrorPromise = monitorApi
+      .getCronBranchError(filters)
+      .then((branchError) => {
+        if (isCurrentRequest()) {
+          setOverviewData((current) => ({
+            ...current,
+            ...mapCronBranchError(branchError),
+          }));
+        }
+      })
+      .catch((error) => {
+        console.warn("Failed to fetch cron branch error.", error);
+      })
+      .finally(() => {
+        if (isCurrentRequest()) {
+          setAnomalyLoading(false);
+        }
+      });
+
+    await Promise.all([statsPromise, rankingPromise, branchErrorPromise]);
+  };
+
+  const fetchTaskBranchRankingData = async () => {
+    const requestSeq = ++taskRankingRequestSeqRef.current;
+    setTaskBranchRankingLoading(true);
+    const filters = getOverviewFilters();
+    const isCurrentRequest = () =>
+      taskRankingRequestSeqRef.current === requestSeq;
+
+    try {
+      const response = await monitorApi.getCronBranchTaskBehavior(filters);
+      if (isCurrentRequest()) {
+        setTaskBranchRankingRows(response.items);
+      }
+    } catch (error) {
+      console.warn("Failed to fetch cron branch task behavior.", error);
+    } finally {
+      if (isCurrentRequest()) {
+        setTaskBranchRankingLoading(false);
+      }
+    }
+  };
 
   // ===== Task view functions =====
 
@@ -1319,23 +1415,8 @@ export default function CronJobOverviewPage() {
     setSelectedTaskSkill(null);
     setSelectedTaskManager(null);
 
-    // Fetch all main data in parallel
     const fetchAllData = async () => {
-      setLoading(true);
-      setTaskBranchRankingLoading(true);
-      try {
-        const [overviewResponse, taskRankingResponse] = await Promise.all([
-          monitorApi.getCronJobOverviewPageData(getOverviewFilters()),
-          monitorApi.getCronBranchTaskBehavior(getOverviewFilters()),
-        ]);
-        setOverviewData(overviewResponse);
-        setTaskBranchRankingRows(taskRankingResponse.items);
-      } catch (error) {
-        console.warn("Failed to fetch cron job overview data.", error);
-      } finally {
-        setLoading(false);
-        setTaskBranchRankingLoading(false);
-      }
+      await Promise.all([fetchOverviewData(), fetchTaskBranchRankingData()]);
     };
 
     fetchAllData();
@@ -1364,22 +1445,7 @@ export default function CronJobOverviewPage() {
     setSelectedTaskSkill(null);
     setSelectedTaskManager(null);
 
-    // Fetch all main data in parallel
-    setLoading(true);
-    setTaskBranchRankingLoading(true);
-    try {
-      const [overviewResponse, taskRankingResponse] = await Promise.all([
-        monitorApi.getCronJobOverviewPageData(getOverviewFilters()),
-        monitorApi.getCronBranchTaskBehavior(getOverviewFilters()),
-      ]);
-      setOverviewData(overviewResponse);
-      setTaskBranchRankingRows(taskRankingResponse.items);
-    } catch (error) {
-      console.warn("Failed to refresh cron job overview page data.", error);
-    } finally {
-      setLoading(false);
-      setTaskBranchRankingLoading(false);
-    }
+    await Promise.all([fetchOverviewData(), fetchTaskBranchRankingData()]);
   };
 
   const handleBranchExport = async () => {
@@ -1622,7 +1688,12 @@ export default function CronJobOverviewPage() {
 
   return (
     <main className={styles.cronOverviewPage}>
-      {loading ? <div className={styles.loadingBar}>加载中...</div> : null}
+      {summaryLoading ||
+      branchDimensionLoading ||
+      anomalyLoading ||
+      taskBranchRankingLoading ? (
+        <div className={styles.loadingBar}>加载中...</div>
+      ) : null}
       <header className={styles.header}>
         <div className={styles.titleRow}>
           <button
@@ -1745,7 +1816,7 @@ export default function CronJobOverviewPage() {
       </header>
 
       <section className={styles.summaryGrid} aria-label="概览指标">
-        {loading ? (
+        {summaryLoading ? (
           Array.from({ length: summaryMetricDefinitions.length + 1 }).map(
             (_, index) => (
               <article key={index} className={styles.summaryCard}>
@@ -1768,159 +1839,6 @@ export default function CronJobOverviewPage() {
         已读执行次数 / 任务执行次数； 查看方案任务率 = 查看方案次数 /
         任务执行次数
       </p>
-
-      {/* 分行维度报表 */}
-      <h2
-        className={`${styles.sectionHeading} ${styles.sectionHeadingSpacious}`}
-      >
-        分行维度
-        <span className={styles.sectionHeadingHint}>（点击分行查看明细）</span>
-        <button
-          type="button"
-          className={styles.exportButton}
-          onClick={handleBranchExport}
-          disabled={
-            loading || branchExporting || !overviewData.branchRankingRows.length
-          }
-          aria-label="分行维度导出 Excel"
-          aria-busy={branchExporting}
-        >
-          <Download size={14} aria-hidden="true" />
-          {branchExporting ? "导出中..." : "导出 Excel"}
-        </button>
-      </h2>
-      <RankingTable
-        sortConfig={branchSort}
-        onSortChange={setBranchSort}
-        data={overviewData.branchRankingRows}
-        loading={loading}
-        onRowClick={handleSelectBranch}
-        selectedBranchId={selectedBranch?.bbk_id ?? null}
-      />
-
-      {/* 技能视角下钻 */}
-      {selectedBranch && (
-        <div className={styles.drillDownContainer}>
-          <div className={styles.drillDownFullWidth}>
-            <h3 className={styles.drillDownTitle}>
-              当前分行下的客户经理明细
-              <span className={styles.drillDownSubTitle}>
-                （{selectedBranch.bbk_name}）
-              </span>
-            </h3>
-            <Table
-              className={styles.drillDownTable}
-              dataSource={managerSummary}
-              rowKey="user_id"
-              loading={managerSummaryLoading}
-              size="small"
-              pagination={false}
-              sticky
-              scroll={DRILL_DOWN_TABLE_SCROLL}
-              rowClassName={styles.drillHoverRow}
-              columns={[
-                {
-                  title: "客户经理名称",
-                  dataIndex: "user_name",
-                  key: "user_name",
-                  width: 100,
-                  align: "center",
-                  render: (v: string, record: BranchManagerSummaryItem) => (
-                    <span
-                      className={styles.clickableLink}
-                      onClick={() => handleOpenManagerDetail(record)}
-                    >
-                      {v || record.user_id}
-                    </span>
-                  ),
-                },
-                {
-                  title: "技能数量",
-                  dataIndex: "skill_count",
-                  key: "skill_count",
-                  width: 70,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("skill_count"),
-                },
-                {
-                  title: "任务总数",
-                  dataIndex: "total_tasks",
-                  key: "total_tasks",
-                  width: 70,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("total_tasks"),
-                },
-                {
-                  title: "成功执行数",
-                  dataIndex: "success_count",
-                  key: "success_count",
-                  width: 70,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("success_count"),
-                },
-                {
-                  title: "已读任务数",
-                  dataIndex: "read_tasks",
-                  key: "read_tasks",
-                  width: 70,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("read_tasks"),
-                },
-                {
-                  title: "推荐客户数",
-                  dataIndex: "recommended_customers",
-                  key: "recommended_customers",
-                  width: 80,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("recommended_customers"),
-                },
-                {
-                  title: "查看方案客户数",
-                  dataIndex: "viewed_customers",
-                  key: "viewed_customers",
-                  width: 90,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("viewed_customers"),
-                },
-                {
-                  title: "去洞察客户数",
-                  dataIndex: "insight_customers",
-                  key: "insight_customers",
-                  width: 80,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("insight_customers"),
-                },
-                {
-                  title: "去电访客户数",
-                  dataIndex: "phone_customers",
-                  key: "phone_customers",
-                  width: 80,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("phone_customers"),
-                },
-                {
-                  title: "接触客户数",
-                  dataIndex: "contacted_customers",
-                  key: "contacted_customers",
-                  width: 80,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("contacted_customers"),
-                },
-                {
-                  title: "接触客户率",
-                  dataIndex: "contact_rate",
-                  key: "contact_rate",
-                  width: 90,
-                  align: "center",
-                  sorter: branchManagerMetricSorter("contact_rate"),
-                  render: (v: number | null | undefined) =>
-                    formatRatioPercent(v),
-                },
-              ]}
-            />
-          </div>
-        </div>
-      )}
 
       {/* 任务视角分行排行 */}
       <h2 className={styles.sectionHeading}>
@@ -2170,7 +2088,7 @@ export default function CronJobOverviewPage() {
         <div className={styles.anomalyLeft}>
           <h2>分行层异常诊断</h2>
           <div className={styles.miniSummaryGrid}>
-            {loading ? (
+            {anomalyLoading ? (
               Array.from({ length: 2 }).map((_, index) => (
                 <article key={index} className={styles.miniSummaryCard}>
                   {renderPanelLoading()}
@@ -2196,11 +2114,14 @@ export default function CronJobOverviewPage() {
           </div>
           <FailureReasonPanel
             data={overviewData.failureReasons}
-            loading={loading}
+            loading={anomalyLoading}
             onOpenDetail={() => setFailedTaskModalOpen(true)}
           />
         </div>
-        <RankTable data={overviewData.anomalyRankRows} loading={loading} />
+        <RankTable
+          data={overviewData.anomalyRankRows}
+          loading={anomalyLoading}
+        />
       </section>
       <FailedTaskModal
         open={failedTaskModalOpen}
@@ -2208,6 +2129,158 @@ export default function CronJobOverviewPage() {
         tasks={failedTasks}
         loading={failedTasksLoading}
       />
+
+      {/* 分行维度 */}
+      <h2
+        className={`${styles.sectionHeading} ${styles.sectionHeadingSpacious}`}
+      >
+        技能视角-分行综合排行
+        <span className={styles.sectionHeadingHint}>（点击分行查看明细）</span>
+        <button
+          type="button"
+          className={styles.exportButton}
+          onClick={handleBranchExport}
+          disabled={
+            loading || branchExporting || !overviewData.branchRankingRows.length
+          }
+          aria-label="分行维度导出 Excel"
+          aria-busy={branchExporting}
+        >
+          <Download size={14} aria-hidden="true" />
+          {branchExporting ? "导出中..." : "导出 Excel"}
+        </button>
+      </h2>
+      <RankingTable
+        tableRef={branchTableRef}
+        data={overviewData.branchRankingRows}
+        loading={branchDimensionLoading}
+        onRowClick={handleSelectBranch}
+        selectedBranchId={selectedBranch?.bbk_id ?? null}
+      />
+
+      {/* 分行维度下钻 */}
+      {selectedBranch && (
+        <div className={styles.drillDownContainer}>
+          <div className={styles.drillDownFullWidth}>
+            <h3 className={styles.drillDownTitle}>
+              当前分行下的客户经理明细
+              <span className={styles.drillDownSubTitle}>
+                （{selectedBranch.bbk_name}）
+              </span>
+            </h3>
+            <Table
+              className={styles.drillDownTable}
+              dataSource={managerSummary}
+              rowKey="user_id"
+              loading={managerSummaryLoading}
+              size="small"
+              pagination={false}
+              sticky
+              scroll={DRILL_DOWN_TABLE_SCROLL}
+              rowClassName={styles.drillHoverRow}
+              columns={[
+                {
+                  title: "客户经理名称",
+                  dataIndex: "user_name",
+                  key: "user_name",
+                  width: 100,
+                  align: "center",
+                  render: (v: string, record: BranchManagerSummaryItem) => (
+                    <span
+                      className={styles.clickableLink}
+                      onClick={() => handleOpenManagerDetail(record)}
+                    >
+                      {v || record.user_id}
+                    </span>
+                  ),
+                },
+                {
+                  title: "技能数量",
+                  dataIndex: "skill_count",
+                  key: "skill_count",
+                  width: 70,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("skill_count"),
+                },
+                {
+                  title: "任务总数",
+                  dataIndex: "total_tasks",
+                  key: "total_tasks",
+                  width: 70,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("total_tasks"),
+                },
+                {
+                  title: "成功执行数",
+                  dataIndex: "success_count",
+                  key: "success_count",
+                  width: 70,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("success_count"),
+                },
+                {
+                  title: "已读任务数",
+                  dataIndex: "read_tasks",
+                  key: "read_tasks",
+                  width: 70,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("read_tasks"),
+                },
+                {
+                  title: "推荐客户数",
+                  dataIndex: "recommended_customers",
+                  key: "recommended_customers",
+                  width: 80,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("recommended_customers"),
+                },
+                {
+                  title: "查看方案客户数",
+                  dataIndex: "viewed_customers",
+                  key: "viewed_customers",
+                  width: 90,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("viewed_customers"),
+                },
+                {
+                  title: "去洞察客户数",
+                  dataIndex: "insight_customers",
+                  key: "insight_customers",
+                  width: 80,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("insight_customers"),
+                },
+                {
+                  title: "去电访客户数",
+                  dataIndex: "phone_customers",
+                  key: "phone_customers",
+                  width: 80,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("phone_customers"),
+                },
+                {
+                  title: "接触客户数",
+                  dataIndex: "contacted_customers",
+                  key: "contacted_customers",
+                  width: 80,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("contacted_customers"),
+                },
+                {
+                  title: "接触客户率",
+                  dataIndex: "contact_rate",
+                  key: "contact_rate",
+                  width: 90,
+                  align: "center",
+                  sorter: branchManagerMetricSorter("contact_rate"),
+                  render: (v: number | null | undefined) =>
+                    formatRatioPercent(v),
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 客户经理详情弹窗 */}
       <Modal

@@ -1,21 +1,18 @@
 .button {
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: #f5f5f5;
+  background: transparent;
   color: #262626;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
   transition: background 160ms ease;
-  &:hover {
-    background: #e8e8e8;
-  }
   &:focus-visible {
     outline: 2px solid var(--console-conversation-primary, #3769fc);
     outline-offset: 3px;
@@ -24,6 +21,21 @@
   &[aria-disabled="true"] {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+}
+.launcher {
+  color: rgba(0, 0, 0, 0.68);
+
+  &:hover {
+    background: #e8e8e8;
+  }
+}
+.sessionButton {
+  font-size: 14px;
+  background: #f5f5f5;
+
+  &:hover {
+    background: #e8e8e8;
   }
 }
 .session {
@@ -35,7 +47,7 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
-  height: 40px;
+  height: 28px;
 }
 .preview {
   color: #595959;
@@ -50,7 +62,7 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  height: 40px;
+  height: 28px;
   gap: 6px;
   align-items: center;
   overflow: hidden;
@@ -69,17 +81,18 @@
   }
 }
 .stop {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   background: currentColor;
   border-radius: 2px;
 }
 .error {
   order: 1;
-  flex-basis: 100%;
+  flex: 1;
+  min-width: 0;
   color: #b94a4f;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 28px;
   overflow-wrap: anywhere;
 }
 .toolbar {
@@ -90,9 +103,13 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+.toolbar > .button {
+  order: 3;
+}
 .prefix {
   flex: 1;
   min-width: 0;
+  order: 2;
 }
 @media (prefers-reduced-motion: reduce) {
   .button,
@@ -105,6 +122,7 @@
 }
 
 .send {
+  order: 4;
   align-self: flex-end;
   margin-bottom: 2px;
 }

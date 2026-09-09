@@ -90,14 +90,14 @@ export default function DictationControl({
   useEffect(() => () => onActiveChange(false), [onActiveChange]);
   const hint = speech.supported
     ? "语音输入"
-    : "当前环境不支持语音输入，请使用支持语音识别的浏览器并通过 HTTPS 访问。";
+    : "当前环境不支持语音输入，请使用支持麦克风采集的浏览器并通过 HTTPS 访问。";
   return (
     <>
       {!active ? (
         <button
           ref={startRef}
           type="button"
-          className={styles.button}
+          className={`${styles.button} ${styles.launcher}`}
           aria-label="语音输入"
           title={hint}
           aria-disabled={disabled || !speech.supported}
@@ -120,18 +120,15 @@ export default function DictationControl({
             }
           }}
         >
-          <div className={styles.preview} role="status">
-            {speech.preview ||
-              (speech.status === "starting"
-                ? "正在启动麦克风…"
-                : speech.status === "stopping"
-                ? "正在整理文字…"
-                : "请说话，停止后填入输入框")}
-          </div>
+          {speech.preview && (
+            <div className={styles.preview} role="status">
+              {speech.preview}
+            </div>
+          )}
           <div className={styles.row}>
             <button
               ref={cancelRef}
-              className={styles.button}
+              className={`${styles.button} ${styles.sessionButton}`}
               type="button"
               aria-label="取消语音输入"
               title="取消语音输入（Esc）"
@@ -141,7 +138,7 @@ export default function DictationControl({
             </button>
             <Waveform stream={speech.stream} />
             <button
-              className={styles.button}
+              className={`${styles.button} ${styles.sessionButton}`}
               type="button"
               aria-label="停止语音输入"
               title="停止并填入文字"

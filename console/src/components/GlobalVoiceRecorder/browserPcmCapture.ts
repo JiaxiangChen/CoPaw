@@ -7,6 +7,7 @@ interface WebkitAudioWindow extends Window {
 export interface BrowserPcmCaptureHandlers {
   onSamples: (samples: Float32Array) => void;
   onDeviceEnded: () => void;
+  onStreamChange?: (stream: MediaStream | null) => void;
 }
 
 export function isBrowserPcmCaptureSupported(): boolean {
@@ -59,6 +60,7 @@ export class BrowserPcmCapture {
         this.mediaStream.getTracks().forEach((track) => track.stop());
         return;
       }
+      this.handlers.onStreamChange?.(this.mediaStream);
 
       this.audioContext = new AudioContextConstructor({
         latencyHint: "interactive",
@@ -138,6 +140,7 @@ export class BrowserPcmCapture {
     this.workletNode?.disconnect();
     this.silentGain?.disconnect();
     this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.handlers.onStreamChange?.(null);
     if (this.audioContext && this.audioContext.state !== "closed") {
       await this.audioContext.close();
     }

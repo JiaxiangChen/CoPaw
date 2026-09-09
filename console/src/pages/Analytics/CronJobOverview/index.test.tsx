@@ -12,6 +12,9 @@ import styles from "./index.module.less";
 
 const monitorApiMock = vi.hoisted(() => ({
   getCronJobOverviewPageData: vi.fn(),
+  getCronOverviewStats: vi.fn(),
+  getCronBranchRanking: vi.fn(),
+  getCronBranchError: vi.fn(),
   getCronBranchTaskBehavior: vi.fn(),
   getBranchSkills: vi.fn(),
   getBranchSkillManagers: vi.fn(),
@@ -24,6 +27,78 @@ const monitorApiMock = vi.hoisted(() => ({
 const iframeStoreMock = vi.hoisted(() => ({
   bbk: undefined as string | undefined,
 }));
+
+const setOverviewMocks = (overrides?: {
+  stats?: Record<string, unknown>;
+  ranking?: Record<string, unknown>;
+  branchError?: Record<string, unknown>;
+}) => {
+  monitorApiMock.getCronOverviewStats.mockResolvedValue({
+    start_date: "2026-06-30",
+    end_date: "2026-06-30",
+    total_tasks: 320,
+    new_cron_tasks: 12,
+    total_executions: 2480,
+    branch_count: 12,
+    tenant_count: 86,
+    success_rate: 93.2,
+    success_count: 2112,
+    running_count: 24,
+    read_tasks: 1525,
+    read_rate: 61.5,
+    error_count: 154,
+    error_rate: 6.2,
+    report_rate: 34.8,
+    report_count: 863,
+    insight_count: 512,
+    phone_count: 221,
+    ...overrides?.stats,
+  });
+  monitorApiMock.getCronBranchRanking.mockResolvedValue({
+    start_date: "2026-06-30",
+    end_date: "2026-06-30",
+    items:
+      overrides?.ranking?.items ??
+      (
+        overrides?.ranking?.branchRankingRows as
+          | Array<Record<string, unknown>>
+          | undefined
+      )?.map((row) => ({
+        bbk_id: row.bbkId,
+        bbk_name: row.branchName,
+        skill_count: Number(row.skillCount ?? 0),
+        total_tasks: Number(row.totalTasks ?? 0),
+        success_count: Number(row.successCount ?? 0),
+        read_tasks: Number(row.readTasks ?? 0),
+        involved_managers: Number(row.involvedManagers ?? 0),
+        result_view_managers: Number(row.resultViewManagers ?? 0),
+        plan_managers: Number(row.planManagers ?? 0),
+        insight_managers: Number(row.insightManagers ?? 0),
+        phone_managers: Number(row.phoneManagers ?? 0),
+        recommended_customers: Number(row.recommendedCustomers ?? 0),
+        viewed_customers: Number(row.viewedCustomers ?? 0),
+        contacted_customers: Number(row.contactedCustomers ?? 0),
+        contact_rate: Number(row.contactRate ?? "0")
+          .toString()
+          .includes("%")
+          ? Number(row.contactRate) / 100
+          : Number(row.contactRate ?? 0),
+        insight_customers: Number(row.insightCustomers ?? 0),
+        phone_customers: Number(row.phoneCustomers ?? 0),
+      })) ??
+      [],
+    ...overrides?.ranking,
+  });
+  monitorApiMock.getCronBranchError.mockResolvedValue({
+    start_date: "2026-06-30",
+    end_date: "2026-06-30",
+    affected_branch_count: 0,
+    affected_manager_count: 0,
+    error_reasons: [],
+    branch_error_rank: [],
+    ...overrides?.branchError,
+  });
+};
 
 vi.mock("../../../api/modules/monitor", async () => {
   const actual = await vi.importActual<
@@ -46,33 +121,7 @@ describe("CronJobOverview summary cards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     iframeStoreMock.bbk = undefined;
-    monitorApiMock.getCronJobOverviewPageData.mockResolvedValue({
-      summaryMetrics: [
-        { key: "branches", value: "12" },
-        { key: "managers", value: "86" },
-        {
-          key: "tasks",
-          value: "320",
-          hintValue: "新增 12 个",
-          footerValue: "2,480 次",
-        },
-        { key: "success", value: "93.20", footerValue: "2,112/154" },
-        { key: "read", value: "61.50", footerValue: "1,525" },
-        { key: "report", value: "34.80" },
-        { key: "report_count", value: "863" },
-        { key: "insight_count", value: "512" },
-        { key: "phone_count", value: "221" },
-      ],
-      branchRankingRows: [],
-      failureReasons: [],
-      anomalySummary: {
-        affectedBranches: "0",
-        affectedBranchesUnit: "家",
-        affectedManagers: "0",
-        affectedManagersUnit: "人",
-      },
-      anomalyRankRows: [],
-    });
+    setOverviewMocks();
     monitorApiMock.getCronBranchTaskBehavior.mockResolvedValue({
       start_date: "2026-06-30",
       end_date: "2026-06-30",
@@ -148,9 +197,7 @@ describe("CronJobOverview summary cards", () => {
     );
 
     await waitFor(() => {
-      expect(monitorApiMock.getCronJobOverviewPageData).toHaveBeenCalledTimes(
-        1,
-      );
+      expect(monitorApiMock.getCronOverviewStats).toHaveBeenCalledTimes(1);
     });
 
     const reportTitle = await screen.findByText("查看方案任务率");
@@ -192,7 +239,7 @@ describe("CronJobOverview summary cards", () => {
       "ant-select-disabled",
     );
     await waitFor(() => {
-      expect(monitorApiMock.getCronJobOverviewPageData).toHaveBeenCalledWith(
+      expect(monitorApiMock.getCronOverviewStats).toHaveBeenCalledWith(
         expect.objectContaining({
           bbk_ids: "200",
         }),
@@ -202,51 +249,53 @@ describe("CronJobOverview summary cards", () => {
   });
 
   it("renders expanded manager detail without extra drill-down scroll wrapper", async () => {
-    monitorApiMock.getCronJobOverviewPageData.mockResolvedValueOnce({
-      summaryMetrics: [
-        { key: "branches", value: "12" },
-        { key: "managers", value: "86" },
-        {
-          key: "tasks",
-          value: "320",
-          hintValue: "新增 12 个",
-          footerValue: "2,480 次",
+    setOverviewMocks({
+      ranking: {
+        summaryMetrics: [
+          { key: "branches", value: "12" },
+          { key: "managers", value: "86" },
+          {
+            key: "tasks",
+            value: "320",
+            hintValue: "新增 12 个",
+            footerValue: "2,480 次",
+          },
+          { key: "success", value: "93.20", footerValue: "2,112/154" },
+          { key: "read", value: "61.50", footerValue: "1,525" },
+          { key: "report", value: "34.80" },
+          { key: "report_count", value: "863" },
+          { key: "insight_count", value: "512" },
+          { key: "phone_count", value: "221" },
+        ],
+        branchRankingRows: [
+          {
+            rank: 1,
+            branchName: "测试分行",
+            bbkId: "100",
+            skillCount: 3,
+            totalTasks: 20,
+            successCount: 18,
+            readTasks: 11,
+            involvedManagers: 5,
+            resultViewManagers: 4,
+            planManagers: 3,
+            insightManagers: 2,
+            phoneManagers: 1,
+            recommendedCustomers: 30,
+            viewedCustomers: 12,
+            insightCustomers: 5,
+            phoneCustomers: 2,
+          },
+        ],
+        failureReasons: [],
+        anomalySummary: {
+          affectedBranches: "0",
+          affectedBranchesUnit: "家",
+          affectedManagers: "0",
+          affectedManagersUnit: "人",
         },
-        { key: "success", value: "93.20", footerValue: "2,112/154" },
-        { key: "read", value: "61.50", footerValue: "1,525" },
-        { key: "report", value: "34.80" },
-        { key: "report_count", value: "863" },
-        { key: "insight_count", value: "512" },
-        { key: "phone_count", value: "221" },
-      ],
-      branchRankingRows: [
-        {
-          rank: 1,
-          branchName: "测试分行",
-          bbkId: "100",
-          skillCount: 3,
-          totalTasks: 20,
-          successCount: 18,
-          readTasks: 11,
-          involvedManagers: 5,
-          resultViewManagers: 4,
-          planManagers: 3,
-          insightManagers: 2,
-          phoneManagers: 1,
-          recommendedCustomers: 30,
-          viewedCustomers: 12,
-          insightCustomers: 5,
-          phoneCustomers: 2,
-        },
-      ],
-      failureReasons: [],
-      anomalySummary: {
-        affectedBranches: "0",
-        affectedBranchesUnit: "家",
-        affectedManagers: "0",
-        affectedManagersUnit: "人",
+        anomalyRankRows: [],
       },
-      anomalyRankRows: [],
     });
     monitorApiMock.getBranchManagerSummary.mockResolvedValueOnce({
       start_date: "2026-06-30",
@@ -295,43 +344,45 @@ describe("CronJobOverview summary cards", () => {
   });
 
   it("renders the branch-dimension report with grouped headers and sortable metrics", async () => {
-    monitorApiMock.getCronJobOverviewPageData.mockResolvedValueOnce({
-      summaryMetrics: [],
-      branchRankingRows: [
-        {
-          rank: 1,
-          branchName: "测试分行",
-          bbkId: "100",
-          skillCount: "3",
-          totalTasks: "20",
-          successCount: "18",
-          readTasks: "11",
-          involvedManagers: "5",
-          resultViewManagers: "4",
-          resultViewManagerRate: "80.00%",
-          planManagers: "3",
-          planManagerRate: "75.00%",
-          insightManagers: "2",
-          insightManagerRate: "66.67%",
-          phoneManagers: "1",
-          phoneManagerRate: "33.33%",
-          recommendedCustomers: "30",
-          viewedCustomers: "12",
-          viewedCustomerRate: "40.00%",
-          insightCustomers: "5",
-          phoneCustomers: "2",
-          contactedCustomers: "8",
-          contactRate: "40.00%",
+    setOverviewMocks({
+      ranking: {
+        summaryMetrics: [],
+        branchRankingRows: [
+          {
+            rank: 1,
+            branchName: "测试分行",
+            bbkId: "100",
+            skillCount: "3",
+            totalTasks: "20",
+            successCount: "18",
+            readTasks: "11",
+            involvedManagers: "5",
+            resultViewManagers: "4",
+            resultViewManagerRate: "80.00%",
+            planManagers: "3",
+            planManagerRate: "75.00%",
+            insightManagers: "2",
+            insightManagerRate: "66.67%",
+            phoneManagers: "1",
+            phoneManagerRate: "33.33%",
+            recommendedCustomers: "30",
+            viewedCustomers: "12",
+            viewedCustomerRate: "40.00%",
+            insightCustomers: "5",
+            phoneCustomers: "2",
+            contactedCustomers: "8",
+            contactRate: "40.00%",
+          },
+        ],
+        failureReasons: [],
+        anomalySummary: {
+          affectedBranches: "0",
+          affectedBranchesUnit: "家",
+          affectedManagers: "0",
+          affectedManagersUnit: "人",
         },
-      ],
-      failureReasons: [],
-      anomalySummary: {
-        affectedBranches: "0",
-        affectedBranchesUnit: "家",
-        affectedManagers: "0",
-        affectedManagersUnit: "人",
+        anomalyRankRows: [],
       },
-      anomalyRankRows: [],
     });
     monitorApiMock.getBranchManagerSummary.mockResolvedValueOnce({
       start_date: "2026-06-30",
@@ -418,8 +469,17 @@ describe("CronJobOverview summary cards", () => {
 
     expect(managerNames()).toEqual(["张三", "李四"]);
 
-    expect(screen.queryByText("技能视角-分行综合排行")).not.toBeInTheDocument();
-    expect(screen.getByText("分行维度")).toBeInTheDocument();
+    expect(screen.getByText("技能视角-分行综合排行")).toBeInTheDocument();
+    const anomalyHeading = screen.getByText("分行层异常诊断");
+    const branchDimensionHeading = screen.getByText("技能视角-分行综合排行");
+    expect(branchDimensionHeading).toBeInTheDocument();
+    expect(
+      anomalyHeading.compareDocumentPosition(branchDimensionHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "分行维度导出 Excel" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("任务信息")).toBeInTheDocument();
     expect(screen.getByText("by客户经理")).toBeInTheDocument();
     expect(screen.getByText("by客户")).toBeInTheDocument();
@@ -442,11 +502,23 @@ describe("CronJobOverview summary cards", () => {
   });
 
   it("shows unified loading placeholders for overview cards, anomaly section, and skill-view ranking while the main query is pending", async () => {
-    let resolveOverview:
+    let resolveStats:
       | ((
           value: Awaited<
-            ReturnType<typeof monitorApiMock.getCronJobOverviewPageData>
+            ReturnType<typeof monitorApiMock.getCronOverviewStats>
           >,
+        ) => void)
+      | null = null;
+    let resolveRanking:
+      | ((
+          value: Awaited<
+            ReturnType<typeof monitorApiMock.getCronBranchRanking>
+          >,
+        ) => void)
+      | null = null;
+    let resolveBranchError:
+      | ((
+          value: Awaited<ReturnType<typeof monitorApiMock.getCronBranchError>>,
         ) => void)
       | null = null;
     let resolveTaskRanking:
@@ -457,10 +529,22 @@ describe("CronJobOverview summary cards", () => {
         ) => void)
       | null = null;
 
-    monitorApiMock.getCronJobOverviewPageData.mockImplementationOnce(
+    monitorApiMock.getCronOverviewStats.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
-          resolveOverview = resolve;
+          resolveStats = resolve;
+        }),
+    );
+    monitorApiMock.getCronBranchRanking.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRanking = resolve;
+        }),
+    );
+    monitorApiMock.getCronBranchError.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveBranchError = resolve;
         }),
     );
     monitorApiMock.getCronBranchTaskBehavior.mockImplementationOnce(
@@ -499,23 +583,169 @@ describe("CronJobOverview summary cards", () => {
       end_date: "2026-06-30",
       items: [],
     });
-    resolveOverview?.({
-      summaryMetrics: [],
-      branchRankingRows: [],
-      failureReasons: [],
-      anomalySummary: {
-        affectedBranches: "0",
-        affectedBranchesUnit: "家",
-        affectedManagers: "0",
-        affectedManagersUnit: "人",
-      },
-      anomalyRankRows: [],
+    resolveStats?.({
+      start_date: "2026-06-30",
+      end_date: "2026-06-30",
+      total_tasks: 0,
+      new_cron_tasks: 0,
+      total_executions: 0,
+      branch_count: 0,
+      tenant_count: 0,
+      success_rate: 0,
+      success_count: 0,
+      running_count: 0,
+      read_tasks: 0,
+      read_rate: 0,
+      error_count: 0,
+      error_rate: 0,
+      report_rate: 0,
+      report_count: 0,
+      insight_count: 0,
+      phone_count: 0,
+    });
+    resolveRanking?.({
+      start_date: "2026-06-30",
+      end_date: "2026-06-30",
+      items: [],
+    });
+    resolveBranchError?.({
+      start_date: "2026-06-30",
+      end_date: "2026-06-30",
+      affected_branch_count: 0,
+      affected_manager_count: 0,
+      error_reasons: [],
+      branch_error_rank: [],
     });
 
     await waitFor(() => {
       expect(
         screen.queryByTestId("cron-panel-loading"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the other overview sections rendering when one overview request fails", async () => {
+    setOverviewMocks({
+      ranking: {
+        items: [
+          {
+            bbk_id: "100",
+            bbk_name: "可用分行",
+            skill_count: 2,
+            total_tasks: 10,
+            success_count: 9,
+            read_tasks: 6,
+            involved_managers: 4,
+            result_view_managers: 3,
+            plan_managers: 2,
+            insight_managers: 1,
+            phone_managers: 1,
+            recommended_customers: 8,
+            viewed_customers: 4,
+            insight_customers: 2,
+            phone_customers: 1,
+            contacted_customers: 3,
+            contact_rate: 0.375,
+          },
+        ],
+      },
+      branchError: {
+        affected_branch_count: 1,
+      },
+    });
+    monitorApiMock.getCronOverviewStats.mockRejectedValueOnce(
+      new Error("stats unavailable"),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/analytics/cron-job-overview"]}>
+        <Routes>
+          <Route
+            path="/analytics/cron-job-overview"
+            element={<CronJobOverviewPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("可用分行")).toBeInTheDocument();
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("加载中...")).not.toBeInTheDocument();
+    expect(screen.getByText("分行层异常诊断")).toBeInTheDocument();
+    expect(screen.getByText("查看方案任务率")).toBeInTheDocument();
+  });
+
+  it("ignores stale task ranking responses after the filters change", async () => {
+    let resolveFirstTaskRanking:
+      | ((
+          value: Awaited<
+            ReturnType<typeof monitorApiMock.getCronBranchTaskBehavior>
+          >,
+        ) => void)
+      | null = null;
+    monitorApiMock.getCronBranchTaskBehavior
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstTaskRanking = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        start_date: "2026-06-24",
+        end_date: "2026-06-30",
+        items: [
+          {
+            rank: 1,
+            bbk_id: "200",
+            bbk_name: "新筛选分行",
+            manager_count: 2,
+            total_tasks: 20,
+            success_count: 18,
+            success_rate: 0.9,
+            read_tasks: 10,
+            read_rate: 0.5,
+          },
+        ],
+      });
+
+    render(
+      <MemoryRouter initialEntries={["/analytics/cron-job-overview"]}>
+        <Routes>
+          <Route
+            path="/analytics/cron-job-overview"
+            element={<CronJobOverviewPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByText("近7天"));
+    await waitFor(() => {
+      expect(monitorApiMock.getCronBranchTaskBehavior).toHaveBeenCalledTimes(2);
+    });
+
+    expect(await screen.findByText("新筛选分行")).toBeInTheDocument();
+    resolveFirstTaskRanking?.({
+      start_date: "2026-09-08",
+      end_date: "2026-09-08",
+      items: [
+        {
+          rank: 1,
+          bbk_id: "100",
+          bbk_name: "旧筛选分行",
+          manager_count: 1,
+          total_tasks: 1,
+          success_count: 1,
+          success_rate: 1,
+          read_tasks: 1,
+          read_rate: 1,
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("新筛选分行")).toBeInTheDocument();
+      expect(screen.queryByText("旧筛选分行")).not.toBeInTheDocument();
     });
   });
 
@@ -570,79 +800,81 @@ describe("CronJobOverview summary cards", () => {
     expect(await screen.findByText("insurance_mkt")).toBeInTheDocument();
   });
 
-  it("sorts skill-view branch ranking metrics on the client while keeping rank and branch headers unsortable", async () => {
-    monitorApiMock.getCronJobOverviewPageData.mockResolvedValueOnce({
-      summaryMetrics: [],
-      branchRankingRows: [
-        {
-          rank: 1,
-          branchName: "甲分行",
-          bbkId: "100",
-          skillCount: "3",
-          totalTasks: "20",
-          successCount: "18",
-          readTasks: "11",
-          involvedManagers: "5",
-          resultViewManagers: "4",
-          planManagers: "3",
-          insightManagers: "2",
-          phoneManagers: "1",
-          recommendedCustomers: "30",
-          viewedCustomers: "12",
-          insightCustomers: "5",
-          phoneCustomers: "2",
-          contactedCustomers: "8",
-          contactRate: "40.00%",
+  it("sorts branch-dimension ranking metrics on the client while keeping rank and branch headers unsortable", async () => {
+    setOverviewMocks({
+      ranking: {
+        summaryMetrics: [],
+        branchRankingRows: [
+          {
+            rank: 1,
+            branchName: "甲分行",
+            bbkId: "100",
+            skillCount: "3",
+            totalTasks: "20",
+            successCount: "18",
+            readTasks: "11",
+            involvedManagers: "5",
+            resultViewManagers: "4",
+            planManagers: "3",
+            insightManagers: "2",
+            phoneManagers: "1",
+            recommendedCustomers: "30",
+            viewedCustomers: "12",
+            insightCustomers: "5",
+            phoneCustomers: "2",
+            contactedCustomers: "8",
+            contactRate: "40.00%",
+          },
+          {
+            rank: 2,
+            branchName: "乙分行",
+            bbkId: "200",
+            skillCount: "5",
+            totalTasks: "8",
+            successCount: "8",
+            readTasks: "7",
+            involvedManagers: "2",
+            resultViewManagers: "2",
+            planManagers: "1",
+            insightManagers: "1",
+            phoneManagers: "1",
+            recommendedCustomers: "10",
+            viewedCustomers: "9",
+            insightCustomers: "6",
+            phoneCustomers: "1",
+            contactedCustomers: "6",
+            contactRate: "60.00%",
+          },
+          {
+            rank: 3,
+            branchName: "丙分行",
+            bbkId: "300",
+            skillCount: "1",
+            totalTasks: "32",
+            successCount: "4",
+            readTasks: "2",
+            involvedManagers: "1",
+            resultViewManagers: "1",
+            planManagers: "0",
+            insightManagers: "0",
+            phoneManagers: "0",
+            recommendedCustomers: "5",
+            viewedCustomers: "3",
+            insightCustomers: "1",
+            phoneCustomers: "0",
+            contactedCustomers: "1",
+            contactRate: "20.00%",
+          },
+        ],
+        failureReasons: [],
+        anomalySummary: {
+          affectedBranches: "0",
+          affectedBranchesUnit: "家",
+          affectedManagers: "0",
+          affectedManagersUnit: "人",
         },
-        {
-          rank: 2,
-          branchName: "乙分行",
-          bbkId: "200",
-          skillCount: "5",
-          totalTasks: "8",
-          successCount: "8",
-          readTasks: "7",
-          involvedManagers: "2",
-          resultViewManagers: "2",
-          planManagers: "1",
-          insightManagers: "1",
-          phoneManagers: "1",
-          recommendedCustomers: "10",
-          viewedCustomers: "9",
-          insightCustomers: "6",
-          phoneCustomers: "1",
-          contactedCustomers: "6",
-          contactRate: "60.00%",
-        },
-        {
-          rank: 3,
-          branchName: "丙分行",
-          bbkId: "300",
-          skillCount: "1",
-          totalTasks: "32",
-          successCount: "4",
-          readTasks: "2",
-          involvedManagers: "1",
-          resultViewManagers: "1",
-          planManagers: "0",
-          insightManagers: "0",
-          phoneManagers: "0",
-          recommendedCustomers: "5",
-          viewedCustomers: "3",
-          insightCustomers: "1",
-          phoneCustomers: "0",
-          contactedCustomers: "1",
-          contactRate: "20.00%",
-        },
-      ],
-      failureReasons: [],
-      anomalySummary: {
-        affectedBranches: "0",
-        affectedBranchesUnit: "家",
-        affectedManagers: "0",
-        affectedManagersUnit: "人",
+        anomalyRankRows: [],
       },
-      anomalyRankRows: [],
     });
 
     const { container } = render(
@@ -656,7 +888,7 @@ describe("CronJobOverview summary cards", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("分行维度");
+    await screen.findByText("技能视角-分行综合排行");
 
     expect(
       screen.queryByRole("button", { name: "分行名称排序" }),
@@ -665,11 +897,11 @@ describe("CronJobOverview summary cards", () => {
       screen.getByRole("button", { name: "任务总数排序" }),
     ).toBeInTheDocument();
 
-    const skillViewTable = container.querySelectorAll(
+    const branchDimensionTable = container.querySelectorAll(
       `.${styles.behaviorTable}`,
-    )[0];
+    )[1];
     const branchNames = () =>
-      Array.from(skillViewTable?.querySelectorAll("tbody tr") ?? []).map(
+      Array.from(branchDimensionTable?.querySelectorAll("tbody tr") ?? []).map(
         (row) => row.children[1]?.textContent,
       );
 
@@ -679,7 +911,7 @@ describe("CronJobOverview summary cards", () => {
 
     expect(branchNames()).toEqual(["丙分行", "甲分行", "乙分行"]);
     expect(
-      Array.from(skillViewTable?.querySelectorAll("tbody tr") ?? []).map(
+      Array.from(branchDimensionTable?.querySelectorAll("tbody tr") ?? []).map(
         (row) => row.children[0]?.textContent,
       ),
     ).toEqual(["1", "2", "3"]);
