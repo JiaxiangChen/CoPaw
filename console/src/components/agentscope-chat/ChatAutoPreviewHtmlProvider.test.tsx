@@ -137,6 +137,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("task report auto-preview through a reverse-ordered BubbleList", () => {
+  it("does not scan messages without an auto-preview trigger", () => {
+    const messages = new Proxy([] as Message[], {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) {
+          throw new Error("messages should not be scanned");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(() =>
+      render(<Fixture messages={messages} triggerKey={0} urls={[]} />),
+    ).not.toThrow();
+  });
+
   it.each([
     [newUrl, oldUrl],
     [oldUrl, newUrl],
