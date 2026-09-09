@@ -1097,7 +1097,8 @@ class ToolGuardMixin:
         return bool(
             tenant_hooks.enabled
             or (agent_hooks is not None and agent_hooks.enabled)
-            or session_state.has_loaded_skill_sources(),
+            or session_state.has_loaded_skill_sources()
+            or session_state.has_monitored_skill_sources(),
         )
 
     def _get_hook_session_state(self) -> HookSessionState:
@@ -1660,7 +1661,9 @@ class ToolGuardMixin:
         tool_call: dict[str, Any],
     ) -> dict[str, Any]:
         """Remove the display-only operation_group key before execution."""
-        from ..app.runner.operation_group import clean_tool_call_operation_group
+        from ..app.runner.operation_group import (
+            clean_tool_call_operation_group,
+        )
 
         return clean_tool_call_operation_group(tool_call)
 
@@ -1950,7 +1953,9 @@ class ToolGuardMixin:
         executable_tool_call = dict(tool_call)
         executable_tool_call.pop(OPERATION_GROUP_INTERNAL_FIELD, None)
         if action is not None:
-            return await self._execute_guard_action(action, executable_tool_call)
+            return await self._execute_guard_action(
+                action, executable_tool_call
+            )
         return await self._run_tool_call_with_hard_timeout(
             executable_tool_call,
             tool_name,

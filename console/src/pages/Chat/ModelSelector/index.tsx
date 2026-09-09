@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
-import { Dropdown, Spin, Tooltip } from "antd";
+import { Dropdown, Select, Spin, Switch, Tooltip } from "antd";
 import { useAppMessage } from "../../../hooks/useAppMessage";
 import {
   CheckOutlined,
@@ -11,6 +11,7 @@ import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { providerApi } from "../../../api/modules/provider";
 import { useProviderModelStore } from "../../../stores/providerModelStore";
+import type { ModelRuntimeConfig, ReasoningEffort } from "../../../api/types";
 import styles from "./index.module.less";
 
 interface EligibleProvider {
@@ -25,8 +26,14 @@ export default function ModelSelector() {
   const activeModels = useProviderModelStore((state) => state.activeModels);
   const loading = useProviderModelStore((state) => state.loading);
   const loadModelData = useProviderModelStore((state) => state.loadModelData);
+  const setModelRuntimeConfig = useProviderModelStore(
+    (state) => state.setModelRuntimeConfig,
+  );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const [runtimeConfig, setRuntimeConfig] = useState<ModelRuntimeConfig | null>(
+    null,
+  );
   const savingRef = useRef(false);
   const location = useLocation();
   const { message } = useAppMessage();
@@ -80,6 +87,41 @@ export default function ModelSelector() {
 
   const activeProviderId = activeModels?.active_llm?.provider_id;
   const activeModelId = activeModels?.active_llm?.model;
+
+  useEffect(() => {
+    const provider = providers.find((item) => item.id === activeProviderId);
+    setRuntimeConfig(provider?.model_configs?.[activeModelId || ""] ?? null);
+  }, [providers, activeProviderId, activeModelId]);
+
+  const updateRuntimeConfig = useCallback(
+    async (updates: Partial<ModelRuntimeConfig>) => {
+      if (!activeProviderId || !activeModelId || !runtimeConfig) return;
+      const previous = runtimeConfig;
+      setRuntimeConfig({ ...runtimeConfig, ...updates });
+      try {
+        const saved = await providerApi.updateModelRuntimeConfig(
+          activeProviderId,
+          activeModelId,
+          updates,
+        );
+        setModelRuntimeConfig(activeProviderId, activeModelId, saved);
+        setRuntimeConfig(saved);
+      } catch (err) {
+        setRuntimeConfig(previous);
+        message.error(
+          err instanceof Error ? err.message : t("models.failedToSaveConfig"),
+        );
+      }
+    },
+    [
+      activeProviderId,
+      activeModelId,
+      message,
+      runtimeConfig,
+      setModelRuntimeConfig,
+      t,
+    ],
+  );
 
   // Display label for trigger button
   const activeModelName = (() => {
@@ -193,6 +235,45 @@ export default function ModelSelector() {
           );
         })
       )}
+      {runtimeConfig &&
+        (runtimeConfig.supports_enable_thinking ||
+          runtimeConfig.supported_reasoning_efforts.length > 0) && (
+          <div
+            className={styles.runtimeConfig}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {runtimeConfig.supports_enable_thinking && (
+              <div className={styles.runtimeConfigRow}>
+                <span>{t("models.enableThinking", "思考模式")}</span>
+                <Switch
+                  size="small"
+                  checked={runtimeConfig.enable_thinking}
+                  onChange={(checked) =>
+                    updateRuntimeConfig({ enable_thinking: checked })
+                  }
+                />
+              </div>
+            )}
+            {(runtimeConfig.enable_thinking ||
+              !runtimeConfig.supports_enable_thinking) &&
+              runtimeConfig.supported_reasoning_efforts.length > 0 && (
+                <div className={styles.runtimeConfigRow}>
+                  <span>{t("models.reasoningEffort", "思考强度")}</span>
+                  <Select<ReasoningEffort>
+                    size="small"
+                    value={runtimeConfig.reasoning_effort ?? undefined}
+                    options={runtimeConfig.supported_reasoning_efforts.map(
+                      (value) => ({ value, label: value }),
+                    )}
+                    onChange={(value) =>
+                      updateRuntimeConfig({ reasoning_effort: value })
+                    }
+                    style={{ minWidth: 90 }}
+                  />
+                </div>
+              )}
+          </div>
+        )}
     </div>
   );
 

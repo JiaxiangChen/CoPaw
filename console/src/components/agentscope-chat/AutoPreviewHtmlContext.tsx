@@ -8,6 +8,7 @@ import React, {
 } from "react";
 
 interface AutoPreviewCandidate {
+  url: string;
   open: () => void;
 }
 
@@ -18,6 +19,14 @@ interface AutoPreviewHtmlContextValue {
 
 const noopUnregister = () => undefined;
 
+function previewUrlKey(url: string): string {
+  try {
+    return decodeURI(new URL(url, window.location.origin).href);
+  } catch {
+    return url;
+  }
+}
+
 const AutoPreviewHtmlContext = createContext<AutoPreviewHtmlContextValue>({
   enabled: false,
   register: () => noopUnregister,
@@ -27,15 +36,34 @@ interface AutoPreviewHtmlProviderProps {
   children: React.ReactNode;
   triggerKey: number;
   onConsumed: () => void;
+  targetUrl?: string | null;
+  ready?: boolean;
+  resolveUrl?: (url: string) => string;
 }
 
 export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
-  const { children, triggerKey, onConsumed } = props;
+  const {
+    children,
+    triggerKey,
+    onConsumed,
+    targetUrl,
+    ready = true,
+    resolveUrl,
+  } = props;
   const candidatesRef = useRef<AutoPreviewCandidate[]>([]);
   const selectTimerRef = useRef<number | null>(null);
   const expireTimerRef = useRef<number | null>(null);
   const consumedRef = useRef(false);
-  const enabled = triggerKey > 0;
+  const onConsumedRef = useRef(onConsumed);
+  const enabled = triggerKey > 0 && ready;
+
+  useLayoutEffect(() => {
+    onConsumedRef.current = onConsumed;
+  }, [onConsumed]);
+
+  useLayoutEffect(() => {
+    consumedRef.current = false;
+  }, [triggerKey]);
 
   const clearSelectTimer = useCallback(() => {
     if (selectTimerRef.current !== null) {
@@ -46,7 +74,6 @@ export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
 
   useLayoutEffect(() => {
     candidatesRef.current = [];
-    consumedRef.current = false;
     clearSelectTimer();
 
     if (expireTimerRef.current !== null) {
@@ -54,12 +81,12 @@ export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
       expireTimerRef.current = null;
     }
 
-    if (!enabled) return;
+    if (!enabled || consumedRef.current) return;
 
     expireTimerRef.current = window.setTimeout(() => {
       consumedRef.current = true;
       candidatesRef.current = [];
-      onConsumed();
+      onConsumedRef.current();
     }, 5000);
 
     return () => {
@@ -69,11 +96,19 @@ export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
         expireTimerRef.current = null;
       }
     };
-  }, [clearSelectTimer, enabled, onConsumed, triggerKey]);
+  }, [clearSelectTimer, enabled, targetUrl, triggerKey]);
 
   const register = useCallback(
     (candidate: AutoPreviewCandidate) => {
-      if (!enabled || consumedRef.current) return noopUnregister;
+      if (triggerKey <= 0 || !ready || consumedRef.current) return noopUnregister;
+      if (
+        targetUrl !== undefined &&
+        (!targetUrl ||
+          previewUrlKey(resolveUrl?.(candidate.url) || candidate.url) !==
+            previewUrlKey(resolveUrl?.(targetUrl) || targetUrl))
+      ) {
+        return noopUnregister;
+      }
 
       candidatesRef.current.push(candidate);
       clearSelectTimer();
@@ -81,10 +116,11 @@ export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
         if (consumedRef.current) return;
 
         const latest = candidatesRef.current[candidatesRef.current.length - 1];
+        if (!latest) return;
         consumedRef.current = true;
         candidatesRef.current = [];
-        latest?.open();
-        onConsumed();
+        latest.open();
+        onConsumedRef.current();
       }, 120);
 
       return () => {
@@ -93,7 +129,7 @@ export function AutoPreviewHtmlProvider(props: AutoPreviewHtmlProviderProps) {
         );
       };
     },
-    [clearSelectTimer, enabled, onConsumed],
+    [clearSelectTimer, ready, targetUrl, triggerKey, resolveUrl],
   );
 
   const value = useMemo(

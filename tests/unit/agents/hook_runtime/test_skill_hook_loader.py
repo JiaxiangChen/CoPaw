@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 
 from swe.agents.hook_runtime.models import (
+    HookOverlayEntry,
     HookEventName,
     HookSessionState,
 )
 from swe.agents.hook_runtime.skill_loader import (
     SkillHookLoadError,
     load_skill_hooks_for_session,
+    refresh_skill_hooks_for_session,
 )
 
 
@@ -74,6 +76,247 @@ def test_missing_skill_hooks_file_is_ignored(tmp_path: Path) -> None:
     )
 
     assert result.loaded_skill_sources == []
+    assert result.monitored_skill_sources[0].skill_name == "xlsx"
+
+
+def test_refresh_replaces_changed_skill_hook_source(tmp_path: Path) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    (skill_root / "hooks" / "hooks.json").write_text(
+        json.dumps(_command_config(id="validate-new")),
+        encoding="utf-8",
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.loaded_skill_sources[0].handler_ids() == {
+        "skill:xlsx:validate-new",
+    }
+    assert refreshed.monitored_skill_sources[0].skill_name == "xlsx"
+
+
+def test_refresh_withdraws_deleted_skill_hook_but_keeps_monitor(
+    tmp_path: Path,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    (skill_root / "hooks" / "hooks.json").unlink()
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.loaded_skill_sources == []
+    assert refreshed.monitored_skill_sources[0].skill_name == "xlsx"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"enabled": False, "events": {}},
+        "{",
+    ],
+)
+def test_refresh_withdraws_disabled_or_invalid_skill_hooks(
+    tmp_path: Path,
+    payload: dict | str,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    (skill_root / "hooks" / "hooks.json").write_text(
+        payload if isinstance(payload, str) else json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.loaded_skill_sources == []
+    assert refreshed.monitored_skill_sources[0].skill_name == "xlsx"
+
+
+def test_refresh_restores_valid_skill_hooks_without_reactivation(
+    tmp_path: Path,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    hooks_path = skill_root / "hooks" / "hooks.json"
+    hooks_path.unlink()
+    withdrawn = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+    persisted_withdrawn = HookSessionState.model_validate(
+        withdrawn.model_dump(mode="json", by_alias=True),
+    )
+    hooks_path.write_text(json.dumps(_command_config()), encoding="utf-8")
+
+    restored = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=persisted_withdrawn,
+    )
+
+    assert restored.loaded_skill_sources[0].source_id == "skill:xlsx"
+
+
+def test_refresh_clears_changed_handler_once_record(tmp_path: Path) -> None:
+    skill_root = _write_skill_hook(
+        tmp_path,
+        _command_config(once=True),
+    )
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(
+            once_executed={
+                "tenant-a:user-1:session-1:PreToolUse:skill:xlsx:validate": True,
+            },
+        ),
+    )
+    (skill_root / "hooks" / "hooks.json").write_text(
+        json.dumps(_command_config(once=False)),
+        encoding="utf-8",
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.once_executed == {}
+
+
+def test_refresh_keeps_unchanged_handler_once_record_without_reading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config(once=True))
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(
+            once_executed={
+                "tenant-a:user-1:session-1:PreToolUse:skill:xlsx:validate": True,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "swe.agents.hook_runtime.skill_loader._read_hook_config",
+        lambda _path: pytest.fail("unchanged marker must not read hooks.json"),
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.once_executed == state.once_executed
+
+
+def test_refresh_ignores_skill_script_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    (skill_root / "scripts" / "check.py").write_text(
+        "print('updated')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "swe.agents.hook_runtime.skill_loader._read_hook_config",
+        lambda _path: pytest.fail("script changes must not reload hooks.json"),
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.loaded_skill_sources == state.loaded_skill_sources
+
+
+def test_refresh_removes_overlay_entry_for_removed_handler(
+    tmp_path: Path,
+) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    state = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    state = HookSessionState(
+        loaded_skill_sources=state.loaded_skill_sources,
+        monitored_skill_sources=state.monitored_skill_sources,
+        entries=[HookOverlayEntry(hook_id="skill:xlsx:validate")],
+    )
+    (skill_root / "hooks" / "hooks.json").write_text(
+        json.dumps(_command_config(id="new-handler")),
+        encoding="utf-8",
+    )
+
+    refreshed = refresh_skill_hooks_for_session(
+        workspace_dir=tmp_path,
+        session_state=state,
+    )
+
+    assert refreshed.entries == []
+
+
+def test_loading_legacy_source_adds_one_monitor(tmp_path: Path) -> None:
+    skill_root = _write_skill_hook(tmp_path, _command_config())
+    first = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=HookSessionState(),
+    )
+    legacy = HookSessionState(
+        loaded_skill_sources=first.loaded_skill_sources,
+    )
+
+    refreshed = load_skill_hooks_for_session(
+        skill_name="xlsx",
+        skill_root=skill_root,
+        workspace_dir=tmp_path,
+        session_state=legacy,
+    )
+
+    assert len(refreshed.monitored_skill_sources) == 1
 
 
 def test_skill_root_outside_workspace_is_rejected(tmp_path: Path) -> None:

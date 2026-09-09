@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
 from swe.app.routers import providers as providers_module
 from swe.app.routers.providers import router as providers_router
 from swe.app.routers.providers import tenant_providers_router
-from swe.providers.provider import ProviderInfo
+from swe.providers.provider import ModelRuntimeConfig, ProviderInfo
 
 
 @pytest.fixture
@@ -266,6 +266,36 @@ class TestProviderAPIUpdateProvider:
 
             # Verify get_instance was called with tenant-c
             mock_pm_class.get_or_create_instance.assert_called_with("tenant-c")
+
+
+class TestProviderAPIModelConfig:
+    """Tests for the tenant-scoped model runtime config endpoint."""
+
+    def test_update_model_config_uses_tenant_from_header(self, client):
+        with patch(
+            "swe.app.routers.providers.ProviderManager",
+        ) as mock_pm_class:
+            mock_manager = MagicMock()
+            mock_manager.update_model_config.return_value = ModelRuntimeConfig(
+                temperature=0.2,
+            )
+            mock_pm_class.get_or_create_instance = AsyncMock(
+                return_value=mock_manager,
+            )
+
+            response = client.put(
+                "/models/openai/models/gpt-5/config",
+                headers={"X-Tenant-Id": "tenant-c"},
+                json={"temperature": 0.2},
+            )
+
+            assert response.status_code == 200
+            mock_pm_class.get_or_create_instance.assert_called_with("tenant-c")
+            mock_manager.update_model_config.assert_called_once_with(
+                "openai",
+                "gpt-5",
+                {"temperature": 0.2},
+            )
 
 
 class TestProviderAPIDeleteProvider:

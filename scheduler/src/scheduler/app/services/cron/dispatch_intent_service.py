@@ -21,6 +21,11 @@ DEFAULT_DISPATCHED_STALE_SECONDS = 7800
 EXECUTION_SCAN_LIMIT = 200
 SUBTASK_EXECUTION_FAILED = "子任务执行失败"
 SUBTASK_STATUS_TIMEOUT = "获取子任务状态超时"
+CRON_AUTH_EXPIRED_ERROR = (
+    "cron auth user_info is expired; "
+    "please refresh cron auth configuration"
+)
+CRON_AUTH_EXPIRED_FAILURE_MESSAGE = f"鉴权过期: {CRON_AUTH_EXPIRED_ERROR}"
 DISPATCH_OUTCOME_UNKNOWN = "dispatch outcome unknown past stale timeout"
 EXECUTION_RECORD_MISSING = (
     "dispatch accepted but no execution record before stale timeout"
@@ -1656,13 +1661,22 @@ class CronDispatchIntentService:
             SELECT
                 SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)
                     AS success_count,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)
+                SUM(CASE
+                    WHEN status = 'failed'
+                     AND COALESCE(error_message, '') <> %s
+                    THEN 1 ELSE 0
+                END)
                     AS failure_count
             FROM swe_cron_dispatch_intents
             WHERE (completed_at >= %s OR updated_at >= %s)
               {scope_clause}
             """,
-            (since_value, since_value, *scope_params),
+            (
+                CRON_AUTH_EXPIRED_FAILURE_MESSAGE,
+                since_value,
+                since_value,
+                *scope_params,
+            ),
         )
         event_row = await db.fetch_one(
             f"""
@@ -2253,8 +2267,10 @@ def _build_execution_completion_transition(
 ) -> _ExecutionCompletionTransition:
     normalized_status = str(status or "").lower()
     success = normalized_status == "success"
-    terminal_failure = int(row.get("attempt_count") or 0) >= int(
-        row.get("max_attempts") or DEFAULT_MAX_ATTEMPTS,
+    auth_expired = not success and _is_cron_auth_expired_error(error)
+    terminal_failure = auth_expired or (
+        int(row.get("attempt_count") or 0)
+        >= int(row.get("max_attempts") or DEFAULT_MAX_ATTEMPTS)
     )
     if success:
         next_status = "completed"
@@ -2279,9 +2295,20 @@ def _build_execution_completion_transition(
         event_type=event_type,
         retry=retry,
         error_message=(
-            "" if success else (error or normalized_status or "")[:2048]
+            ""
+            if success
+            else (
+                CRON_AUTH_EXPIRED_FAILURE_MESSAGE
+                if auth_expired
+                else (error or normalized_status or "")[:2048]
+            )
         ),
     )
+
+
+def _is_cron_auth_expired_error(error: str) -> bool:
+    normalized_error = str(error or "").strip().casefold()
+    return normalized_error == CRON_AUTH_EXPIRED_ERROR.casefold()
 
 
 async def _update_execution_intent_row(

@@ -27,7 +27,6 @@ function provider(
     require_api_key: false,
     api_key: "",
     base_url: "http://localhost",
-    generate_kwargs: {},
   };
 }
 
@@ -179,5 +178,46 @@ describe("providerModelStore", () => {
 
     expect(reloaded.providers[0]?.id).toBe("fresh");
     expect(providerCalls).toBe(2);
+  });
+
+  it("keeps a saved model runtime configuration when the model is selected again", async () => {
+    vi.mocked(request)
+      .mockResolvedValueOnce([
+        {
+          ...provider("openai"),
+          model_configs: {
+            "gpt-5": {
+              temperature: 0.2,
+              supports_enable_thinking: true,
+              supported_reasoning_efforts: ["low", "high"],
+              enable_thinking: false,
+              reasoning_effort: null,
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce({
+        active_llm: { provider_id: "openai", model: "gpt-5" },
+      });
+
+    const store = useProviderModelStore.getState();
+    await store.loadModelData();
+    store.setModelRuntimeConfig("openai", "gpt-5", {
+      temperature: 0.2,
+      supports_enable_thinking: true,
+      supported_reasoning_efforts: ["low", "high"],
+      enable_thinking: true,
+      reasoning_effort: "high",
+    });
+
+    const reselected = useProviderModelStore
+      .getState()
+      .providers.find((item) => item.id === "openai")
+      ?.model_configs?.["gpt-5"];
+
+    expect(reselected).toMatchObject({
+      enable_thinking: true,
+      reasoning_effort: "high",
+    });
   });
 });

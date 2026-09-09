@@ -10,11 +10,12 @@ Example:
 """
 
 import base64
+import copy
 import json
 import logging
 import os
 import time
-from typing import List, Sequence, Tuple, Type, Any, Union, Optional
+from typing import Callable, List, Sequence, Tuple, Type, Any, Union, Optional
 from urllib.parse import urlparse
 
 from agentscope.formatter import FormatterBase, OpenAIChatFormatter
@@ -1025,6 +1026,8 @@ def create_model_and_formatter(
     fallback_model_slot: Any | None = None,
     fallback_model_provider: Any | None = None,
     resolved_model_info: dict[str, str] | None = None,
+    on_model_config_resolved: Callable[[Any], None] | None = None,
+    on_model_provider_resolved: Callable[[Any], None] | None = None,
 ) -> Tuple[ChatModelBase, FormatterBase]:
     """Factory method to create model and formatter instances.
 
@@ -1088,9 +1091,16 @@ def create_model_and_formatter(
             raise ValueError(f"Provider '{model_slot.provider_id}' not found.")
 
         try:
-            model = provider.get_chat_model_instance(model_slot.model)
+            model_config = provider.get_model_config(model_slot.model)
+            model = provider.get_chat_model_instance(
+                model_slot.model,
+                generation_kwargs=provider.build_generation_kwargs(
+                    model_config,
+                ),
+            )
             provider_id = model_slot.provider_id
             resolved_slot = model_slot
+            resolved_provider = provider
         except Exception:
             if (
                 fallback_model_slot is None
@@ -1099,11 +1109,31 @@ def create_model_and_formatter(
                 or not fallback_model_slot.model
             ):
                 raise
+            model_config = fallback_model_provider.get_model_config(
+                fallback_model_slot.model,
+            )
             model = fallback_model_provider.get_chat_model_instance(
                 fallback_model_slot.model,
+                generation_kwargs=(
+                    fallback_model_provider.build_generation_kwargs(
+                        model_config,
+                    )
+                ),
             )
             provider_id = fallback_model_slot.provider_id
             resolved_slot = fallback_model_slot
+            resolved_provider = fallback_model_provider
+
+        if on_model_config_resolved is not None:
+            on_model_config_resolved(model_config)
+        if on_model_provider_resolved is not None:
+            model_copy = getattr(resolved_provider, "model_copy", None)
+            snapshot = (
+                model_copy(deep=True)
+                if callable(model_copy)
+                else copy.deepcopy(resolved_provider)
+            )
+            on_model_provider_resolved(snapshot)
 
         if resolved_model_info is not None:
             resolved_model_info.clear()

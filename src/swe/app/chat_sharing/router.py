@@ -168,8 +168,6 @@ def init_chat_sharing_module(db: Any | None = None) -> None:
 
 async def initialize_chat_sharing_module(db: Any | None = None) -> None:
     init_chat_sharing_module(db)
-    assert _service is not None
-    await _service.store.ensure_schema()
 
 
 def get_service() -> ChatSharingService:

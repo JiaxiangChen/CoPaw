@@ -85,17 +85,39 @@ class DeterministicChatModel(ChatModelBase):
 
 
 class FakeProvider:
-    def __init__(self, model: ChatModelBase, model_id: str = "critical"):
+    def __init__(
+        self,
+        model: ChatModelBase,
+        model_id: str = "critical",
+        generation_kwargs: dict[str, Any] | None = None,
+    ):
         self.model = model
         self.model_id = model_id
+        self.generation_kwargs = generation_kwargs or {}
+        self.request_generation_kwargs: list[dict[str, Any]] = []
 
     def has_model(self, model_id: str) -> bool:
         return model_id == self.model_id
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        generation_kwargs: dict[str, Any] | None = None,
+    ) -> ChatModelBase:
         if not self.has_model(model_id):
             raise ValueError(f"unknown test model: {model_id}")
+        self.request_generation_kwargs.append(generation_kwargs or {})
         return self.model
+
+    def get_model_config(self, model_id: str):
+        if not self.has_model(model_id):
+            raise ValueError(f"unknown test model: {model_id}")
+        from swe.providers.provider import ModelRuntimeConfig
+
+        return ModelRuntimeConfig()
+
+    def build_generation_kwargs(self, _config) -> dict[str, Any]:
+        return dict(self.generation_kwargs)
 
 
 class FakeProviderManager:

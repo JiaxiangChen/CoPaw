@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import httpx
+from agentscope_runtime.engine.schemas.agent_schemas import RunStatus
 
 from .auth_state import resolve_auth_token_for_execution
 from .model_slot_context import bind_model_slot_override
@@ -32,6 +33,7 @@ from ...providers.models import ModelSlotConfig
 from ...providers.provider_manager import ProviderManager
 from ...tracing import has_trace_manager, get_trace_manager
 from ...tracing.models import TraceStatus
+from ..runner.model_call_error_detail import redact_sensitive_fragments
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,7 @@ BROADCAST_MODEL_SLOT_FALLBACK_REASON_META_KEY = (
     "broadcast_model_slot_fallback_reason"
 )
 CRON_TRACE_SUCCESS_CLEANUP_TIMEOUT_SECONDS = 5.0
+CRON_EVENT_ERROR_MESSAGE_MAX_LENGTH = 512
 
 
 async def resolve_user_identity(
@@ -230,10 +233,26 @@ class AgentStreamState:
     output_parts: list[str] = field(default_factory=list)
     failed_message_seen: bool = False  # 是否看到 Failed 事件
     error_message: str = ""  # 错误信息
+    response_completed_seen: bool = False
+    response_failed_seen: bool = False
+    response_cancelled_seen: bool = False
+    terminal_response_status: str = ""
+    terminal_error_code: str = ""
+    last_event_object: str = ""
+    last_event_status: str = ""
+    unknown_event_count: int = 0
 
     @property
     def output_len(self) -> int:
         return len("\n".join(self.output_parts))
+
+    @property
+    def failed_seen(self) -> bool:
+        return self.failed_message_seen or self.response_failed_seen
+
+    @property
+    def completed_seen(self) -> bool:
+        return self.completed_message_seen or self.response_completed_seen
 
 
 async def _index_model_output_to_monitor(
@@ -1263,11 +1282,15 @@ class CronExecutor:
         )
         logger.warning(
             "cron agent stream returned without completion: job_id=%s "
-            "event_count=%s output_len=%s failed_seen=%s",
+            "event_count=%s output_len=%s failed_seen=%s "
+            "last_event_object=%s last_event_status=%s unknown_event_count=%s",
             job.id,
             stream_state.event_count,
             stream_state.output_len,
-            stream_state.failed_message_seen,
+            stream_state.failed_seen,
+            stream_state.last_event_object,
+            stream_state.last_event_status,
+            stream_state.unknown_event_count,
         )
         await self._end_trace_on_exception(
             trace_id,
@@ -1327,7 +1350,25 @@ class CronExecutor:
         Raises:
             asyncio.CancelledError: 如果取消前未完成
         """
-        if stream_state.failed_message_seen:
+        if stream_state.response_cancelled_seen:
+            logger.info(
+                "cron agent response cancelled: job_id=%s event_count=%s "
+                "error_code=%s error=%s",
+                job.id,
+                stream_state.event_count,
+                stream_state.terminal_error_code,
+                stream_state.error_message,
+            )
+            await self._end_trace_on_exception(
+                trace_id,
+                TraceStatus.CANCELLED,
+                stream_state.error_message or None,
+            )
+            exc = asyncio.CancelledError()
+            setattr(exc, "cron_trace_id", trace_id)
+            raise exc
+
+        if stream_state.failed_seen:
             self._log_agent_cancelled_after_failed(job, stream_state)
             await self._end_trace_on_exception(
                 trace_id,
@@ -1422,7 +1463,7 @@ class CronExecutor:
                 runtime_tenant_id,
             )
 
-            if stream_state.failed_message_seen:
+            if stream_state.failed_seen:
                 trace_ended = True
                 await self._handle_agent_failed_after_stream(
                     job,
@@ -1430,8 +1471,12 @@ class CronExecutor:
                     trace_id,
                 )
 
-            # 检查是否有 Completed 事件，没有则视为执行失败
-            if not stream_state.completed_message_seen:
+            if stream_state.response_cancelled_seen:
+                raise asyncio.CancelledError()
+
+            # Runtime 协议以 response/completed 为执行终态；message/completed
+            # 仅用于提取实际输出，兼容旧 runner 才保留其成功判定。
+            if not stream_state.completed_seen:
                 trace_ended = True
                 await self._handle_agent_no_completion(
                     job,
@@ -1587,8 +1632,12 @@ class CronExecutor:
         """Run agent stream query and send events to channel."""
         async for event in self._runner.stream_query(req):
             stream_state.event_count += 1
+            self._record_agent_stream_event(job, event, stream_state)
             is_completed_message = self._is_completed_message_event(event)
             is_failed_message = self._is_failed_message_event(event)
+            is_completed_response = self._is_completed_response_event(event)
+            is_failed_response = self._is_failed_response_event(event)
+            is_cancelled_response = self._is_cancelled_response_event(event)
             text = self._extract_text_from_event(event)
             if text:
                 stream_state.output_parts.append(text)
@@ -1603,9 +1652,7 @@ class CronExecutor:
                 )
             if is_failed_message:
                 stream_state.failed_message_seen = True
-                stream_state.error_message = self._extract_error_from_event(
-                    event,
-                )
+                self._set_stream_error_from_event(stream_state, event)
                 logger.warning(
                     "cron agent failed message received: job_id=%s "
                     "event_count=%s error=%s",
@@ -1613,6 +1660,21 @@ class CronExecutor:
                     stream_state.event_count,
                     stream_state.error_message,
                 )
+            if is_completed_response:
+                stream_state.response_completed_seen = True
+                stream_state.terminal_response_status = RunStatus.Completed
+            if is_failed_response:
+                stream_state.response_failed_seen = True
+                stream_state.terminal_response_status = getattr(
+                    event,
+                    "status",
+                    RunStatus.Failed,
+                )
+                self._set_stream_error_from_event(stream_state, event)
+            if is_cancelled_response:
+                stream_state.response_cancelled_seen = True
+                stream_state.terminal_response_status = RunStatus.Canceled
+                self._set_stream_error_from_event(stream_state, event)
             await self._channel_manager.send_event(
                 channel=job.dispatch.channel,
                 user_id=target_user_id,
@@ -1632,12 +1694,23 @@ class CronExecutor:
         stream_state.stream_returned = True
         logger.info(
             "cron agent stream returned: job_id=%s event_count=%s "
-            "completed_seen=%s completed_sent=%s failed_seen=%s output_len=%s",
+            "completed_seen=%s completed_sent=%s failed_seen=%s "
+            "response_completed_seen=%s response_failed_seen=%s "
+            "response_cancelled_seen=%s terminal_response_status=%s "
+            "last_event_object=%s last_event_status=%s "
+            "unknown_event_count=%s output_len=%s",
             job.id,
             stream_state.event_count,
-            stream_state.completed_message_seen,
+            stream_state.completed_seen,
             stream_state.completed_message_sent,
-            stream_state.failed_message_seen,
+            stream_state.failed_seen,
+            stream_state.response_completed_seen,
+            stream_state.response_failed_seen,
+            stream_state.response_cancelled_seen,
+            stream_state.terminal_response_status,
+            stream_state.last_event_object,
+            stream_state.last_event_status,
+            stream_state.unknown_event_count,
             stream_state.output_len,
         )
 
@@ -1733,41 +1806,133 @@ class CronExecutor:
 
     @staticmethod
     def _is_failed_message_event(event: Any) -> bool:
-        """检测是否为 Failed 状态事件。
+        """检测消息或整轮响应的 Failed 状态事件。
 
-        当模型调用失败时，runner 会 yield Failed 事件而不是抛出异常。
+        当模型调用失败时，Runtime 会 yield response/Failed 而不是抛出异常。
         我们需要检测这个事件以正确处理失败情况。
 
         Args:
             event: Runner event
 
         Returns:
-            True if event is a failed message event
+            True if event is a failed message or response event
         """
         from agentscope_runtime.engine.schemas.agent_schemas import RunStatus
 
         return (
-            getattr(event, "object", None) == "message"
+            getattr(event, "object", None) in ("message", "response")
             and getattr(event, "status", None) == RunStatus.Failed
         )
 
     @staticmethod
-    def _extract_error_from_event(event: Any) -> str:
-        """从 Failed 事件中提取错误信息。
+    def _is_completed_response_event(event: Any) -> bool:
+        return (
+            getattr(event, "object", None) == "response"
+            and getattr(event, "status", None) == RunStatus.Completed
+        )
 
-        Args:
-            event: Runner event with status Failed
+    @staticmethod
+    def _is_failed_response_event(event: Any) -> bool:
+        return getattr(event, "object", None) == "response" and getattr(
+            event,
+            "status",
+            None,
+        ) in {
+            RunStatus.Failed,
+            RunStatus.Rejected,
+            RunStatus.Incomplete,
+        }
 
-        Returns:
-            Error message string
-        """
+    @staticmethod
+    def _is_cancelled_response_event(event: Any) -> bool:
+        return (
+            getattr(event, "object", None) == "response"
+            and getattr(event, "status", None) == RunStatus.Canceled
+        )
+
+    @staticmethod
+    def _event_content_types(event: Any) -> str:
+        content = getattr(event, "content", None)
+        if not isinstance(content, list):
+            return ""
+        return ",".join(
+            str(getattr(part, "type", type(part).__name__)) for part in content
+        )
+
+    @staticmethod
+    def _sanitize_event_error_message(message: Any) -> str:
+        safe_message = redact_sensitive_fragments(str(message or ""))
+        if len(safe_message) <= CRON_EVENT_ERROR_MESSAGE_MAX_LENGTH:
+            return safe_message
+        return safe_message[:CRON_EVENT_ERROR_MESSAGE_MAX_LENGTH] + "..."
+
+    def _record_agent_stream_event(
+        self,
+        job: CronJobSpec,
+        event: Any,
+        stream_state: AgentStreamState,
+    ) -> None:
+        event_object = str(getattr(event, "object", "") or "")
+        event_status = str(getattr(event, "status", "") or "")
+        stream_state.last_event_object = event_object
+        stream_state.last_event_status = event_status
+        if event_object not in {"response", "message", "content"}:
+            stream_state.unknown_event_count += 1
+        error_code, error_message = self._extract_error_details_from_event(
+            event,
+        )
+        logger.info(
+            "cron agent event: job_id=%s event_index=%s event_class=%s "
+            "object=%s status=%s event_id=%s sequence_number=%s "
+            "content_types=%s error_code=%s error_message=%s",
+            job.id,
+            stream_state.event_count,
+            type(event).__name__,
+            event_object,
+            event_status,
+            str(getattr(event, "id", "") or ""),
+            str(getattr(event, "sequence_number", "") or ""),
+            self._event_content_types(event),
+            error_code,
+            error_message,
+        )
+
+    def _set_stream_error_from_event(
+        self,
+        stream_state: AgentStreamState,
+        event: Any,
+    ) -> None:
+        error_code, error_message = self._extract_error_details_from_event(
+            event,
+        )
+        stream_state.terminal_error_code = error_code
+        if (
+            not error_code
+            and not error_message
+            and stream_state.terminal_response_status
+        ):
+            stream_state.error_message = str(
+                stream_state.terminal_response_status,
+            )
+            return
+        stream_state.error_message = (
+            f"{error_code}: {error_message}"
+            if error_code and error_message
+            else error_message or error_code
+        )
+
+    def _extract_error_details_from_event(
+        self,
+        event: Any,
+    ) -> tuple[str, str]:
         error = getattr(event, "error", None)
         if error is None:
-            return ""
-        message = getattr(error, "message", None) or ""
-        code = getattr(error, "code", None) or ""
+            return "", ""
         return (
-            f"{code}: {message}" if code and message else message or code or ""
+            str(getattr(error, "code", "") or ""),
+            self._sanitize_event_error_message(
+                getattr(error, "message", ""),
+            ),
         )
 
     @staticmethod
@@ -1788,19 +1953,21 @@ class CronExecutor:
             True if agent truly completed with output
         """
         # 如果看到了 Failed 事件，绝对不是成功
-        if stream_state.failed_message_seen:
+        if stream_state.failed_seen:
             return False
         # 必须看到 Completed 事件才视为成功
-        return stream_state.completed_message_seen
+        return stream_state.completed_seen
 
     @staticmethod
     def _agent_stream_phase(stream_state: AgentStreamState) -> str:
-        if stream_state.failed_message_seen:
+        if stream_state.failed_seen:
             return "failed"
+        if stream_state.response_cancelled_seen:
+            return "response_cancelled"
         if stream_state.stream_returned:
             return "stream_returned"
-        if stream_state.completed_message_seen:
-            return "completed_message_sent"
+        if stream_state.completed_seen:
+            return "completed"
         return "before_completed_message"
 
     @staticmethod

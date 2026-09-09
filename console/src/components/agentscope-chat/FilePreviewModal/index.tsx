@@ -5,8 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Drawer, message, Modal, Tooltip, Spin, Tabs } from "antd";
-import { FullscreenOutlined } from "@ant-design/icons";
+import { Button, Drawer, message, Modal, Tooltip, Spin, Tabs } from "antd";
+import { ArrowLeftOutlined, FullscreenOutlined } from "@ant-design/icons";
 import { SparkFalseLine, SparkDownloadLine } from "@agentscope-ai/icons";
 import { IconButton } from "@agentscope-ai/design";
 import {
@@ -63,6 +63,8 @@ export interface FilePreviewModalProps {
   custUid?: string | null;
   urlParams?: Record<string, string>;
   presentation?: FilePreviewPresentation;
+  nestedPreviewMode?: "stack" | "replace";
+  onBack?: () => void;
 }
 
 function FilePreviewModal(props: FilePreviewModalProps) {
@@ -81,6 +83,8 @@ function FilePreviewModal(props: FilePreviewModalProps) {
     custUid,
     urlParams,
     presentation = "modal",
+    nestedPreviewMode = "stack",
+    onBack,
   } = props;
   const iframeState = useIframeStore((state) => state);
   const { userId, bbk } = iframeState;
@@ -111,6 +115,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   const [clawPlanLoading, setClawPlanLoading] = useState(false);
   const [clawPlanFailed, setClawPlanFailed] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const personEventsFlagRef = useRef<boolean>(false);
   const clawPlanInitializedRef = useRef(false);
   const cleanupCaptureClickRef = useRef<(() => void) | null>(null);
   const trackingContext = useHtmlPreviewTracking();
@@ -420,8 +425,10 @@ function FilePreviewModal(props: FilePreviewModalProps) {
     if (
       templateInfo?.templateFlag === "person-event" &&
       templateResult?.custUid &&
-      templateResult?.custName
+      templateResult?.custName &&
+      !personEventsFlagRef.current
     ) {
+      personEventsFlagRef.current = true;
       const payload = {
         file_url: fileUrl,
         file_name: fileName,
@@ -557,7 +564,6 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   }, []);
 
   const handleIframeLoad = useCallback(() => {
-    setIframeLoadKey((k) => k + 1);
     reattachTrackersRef.current?.();
   }, []);
 
@@ -603,26 +609,26 @@ function FilePreviewModal(props: FilePreviewModalProps) {
         click:
           isHtmlPreview && enableClickTracking
             ? {
-                reporter: shouldRecordEvents
-                  ? htmlPreviewEventsApi.recordClick
-                  : () => undefined,
-                listSnapshotReporter:
-                  shouldRecordEvents && enableListSnapshotTracking
-                    ? htmlPreviewEventsApi.recordListSnapshot
-                    : undefined,
-                onOpenNestedPreview: setNestedPreview,
-                getTemplateName: (templateId: number) => {
-                  return templateList.current.find(
-                    (t) => t.templateId === templateId,
-                  )?.templateName;
-                },
-              }
+              reporter: shouldRecordEvents
+                ? htmlPreviewEventsApi.recordClick
+                : () => undefined,
+              listSnapshotReporter:
+                shouldRecordEvents && enableListSnapshotTracking
+                  ? htmlPreviewEventsApi.recordListSnapshot
+                  : undefined,
+              onOpenNestedPreview: setNestedPreview,
+              getTemplateName: (templateId: number) => {
+                return templateList.current.find(
+                  (t) => t.templateId === templateId
+                )?.templateName;
+              },
+            }
             : null,
         exposure: isHtmlPreview
-          ? {
-              reporter: htmlPreviewEventsApi.recordClick,
+            ? {
+                reporter: htmlPreviewEventsApi.recordClick,
             }
-          : null,
+            : null,
       },
       [isHtmlPreview, enableClickTracking, enableListSnapshotTracking],
     );
@@ -780,6 +786,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
           icon={<SparkDownloadLine />}
           onClick={handleDownload}
           bordered={false}
+          aria-label="下载文件"
         />
       </Tooltip>,
     ];
@@ -861,13 +868,63 @@ function FilePreviewModal(props: FilePreviewModalProps) {
       </div>
     ) : null;
 
+  const replaceWithNestedPreview =
+    nestedPreviewMode === "replace" && nestedPreview !== null;
+
+  const nestedPreviewContent = nestedPreview ? (
+    <FilePreviewModal
+      open
+      onClose={() => setNestedPreview(null)}
+      fileUrl={nestedPreview.fileUrl}
+      fileName={nestedPreview.fileName}
+      enableClickTracking
+      enableListSnapshotTracking={false}
+      trackingListKey={nestedPreview.listKey}
+      trackingListName={nestedPreview.listName}
+      defaultCustomerInfo={nestedPreview.customerInfo}
+      custUid={nestedPreview.custUid}
+      rootTemplateId={
+        templateInfo?.templateId ? String(templateInfo.templateId) : undefined
+      }
+      rootResultId={effectiveResultId}
+      presentation={presentation}
+      nestedPreviewMode={nestedPreviewMode}
+      onBack={
+        nestedPreviewMode === "replace"
+          ? () => setNestedPreview(null)
+          : undefined
+      }
+    />
+  ) : null;
+
+  if (replaceWithNestedPreview) return nestedPreviewContent;
+
   return (
     <>
       {presentation === "workspace" ? (
-        <>
+        <div className={styles.workspacePreview}>
+          <header className={styles.workspacePreviewHeader}>
+            {onBack && (
+              <Button
+                type="text"
+                size="small"
+                icon={<ArrowLeftOutlined />}
+                onClick={onBack}
+                aria-label="返回上一级预览"
+              >
+                返回
+              </Button>
+            )}
+            <div className={styles.previewTitle} title={fileName}>
+              {fileName}
+            </div>
+            <div className={styles.headerActions}>
+              {headerActions[headerActions.length - 1]}
+            </div>
+          </header>
           {templateTabs}
           <div className={styles.previewContent}>{previewBody}</div>
-        </>
+        </div>
       ) : presentation === "drawer" ? (
         <Drawer
           open={open}
@@ -960,27 +1017,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
           </div>
         </Modal>
       )}
-      {nestedPreview && (
-        <FilePreviewModal
-          open
-          onClose={() => setNestedPreview(null)}
-          fileUrl={nestedPreview.fileUrl}
-          fileName={nestedPreview.fileName}
-          enableClickTracking
-          enableListSnapshotTracking={false}
-          trackingListKey={nestedPreview.listKey}
-          trackingListName={nestedPreview.listName}
-          defaultCustomerInfo={nestedPreview.customerInfo}
-          custUid={nestedPreview.custUid}
-          rootTemplateId={
-            templateInfo?.templateId
-              ? String(templateInfo.templateId)
-              : undefined
-          }
-          rootResultId={effectiveResultId}
-          presentation={presentation}
-        />
-      )}
+      {nestedPreviewContent}
     </>
   );
 }

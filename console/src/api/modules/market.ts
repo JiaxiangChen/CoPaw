@@ -429,6 +429,16 @@ export const marketApi = {
     );
   },
 
+  getExpertDistributions: async (
+    sourceId: string,
+    itemId: string,
+  ): Promise<DistributionRecord[]> => {
+    return request<DistributionRecord[]>(
+      `/market/experts/${itemId}/distributions`,
+      mergeHeaders({ "X-Source-Id": sourceId, "X-Manager": "true" }),
+    );
+  },
+
   recallExpert: async (
     sourceId: string,
     itemId: string,

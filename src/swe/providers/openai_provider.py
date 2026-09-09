@@ -137,7 +137,11 @@ class OpenAIProvider(Provider):
                 f"Unknown exception when connecting to model '{model_id}'",
             )
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        generation_kwargs: dict | None = None,
+    ) -> ChatModelBase:
         from .openai_chat_model_compat import OpenAIChatModelCompat
         from .kimi_chat_model import KimiChatModel
 
@@ -178,7 +182,7 @@ class OpenAIProvider(Provider):
             api_key=self.api_key,
             stream_tool_parsing=False,
             client_kwargs=client_kwargs,
-            generate_kwargs=self.generate_kwargs,
+            generate_kwargs=generation_kwargs or {},
         )
 
     async def probe_model_multimodal(

@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HtmlPreviewTrackingProvider } from "../HtmlPreviewTrackingContext";
@@ -58,6 +65,19 @@ vi.mock("../Markdown", () => ({
 }));
 
 vi.mock("antd", () => ({
+  Button: ({
+    children,
+    onClick,
+    "aria-label": ariaLabel,
+  }: {
+    children?: ReactNode;
+    onClick?: () => void;
+    "aria-label"?: string;
+  }) => (
+    <button type="button" onClick={onClick} aria-label={ariaLabel}>
+      {children}
+    </button>
+  ),
   Modal: ({
     open,
     children,
@@ -108,6 +128,7 @@ vi.mock("antd", () => ({
 }));
 
 vi.mock("@ant-design/icons", () => ({
+  ArrowLeftOutlined: () => <span data-testid="back-icon" />,
   FullscreenOutlined: () => <span data-testid="fullscreen-icon" />,
 }));
 
@@ -306,6 +327,91 @@ describe("FilePreviewModal HTML preview recording", () => {
         "https://example.test/report[auto-preview].html?resultId=result-1&templateId=1",
       listName: "report[auto-preview].html",
       defaultCustomerInfo: { customer_id: "CUST-001", name: "张三" },
+    });
+  });
+
+  it("replaces the workspace preview for nested links without changing the default stack mode", async () => {
+    render(
+      <FilePreviewModal
+        open
+        onClose={vi.fn()}
+        fileUrl="https://example.test/report[auto-preview].html?resultId=result-1&templateId=1"
+        fileName="report[auto-preview].html"
+        enableClickTracking
+        presentation="workspace"
+        nestedPreviewMode="replace"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    });
+    const trackerParams = getLatestTrackerParams();
+
+    await act(async () => {
+      trackerParams.onOpenNestedPreview({
+        fileUrl:
+          "https://example.test/nested-plan.html?resultId=result-2&templateId=2",
+        fileName: "nested-plan.html",
+        listKey:
+          "https://example.test/report[auto-preview].html?resultId=result-1&templateId=1",
+        listName: "report[auto-preview].html",
+        customerInfo: null,
+        custUid: "",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTitle("nested-plan.html")).toBeInTheDocument();
+      expect(
+        screen.queryByTitle("report[auto-preview].html"),
+      ).not.toBeInTheDocument();
+      expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "返回上一级预览" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTitle("report[auto-preview].html"),
+      ).toBeInTheDocument();
+      expect(screen.queryByTitle("nested-plan.html")).not.toBeInTheDocument();
+      expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    });
+  });
+
+  it("keeps nested previews stacked when no replacement mode is requested", async () => {
+    render(
+      <FilePreviewModal
+        open
+        onClose={vi.fn()}
+        fileUrl="https://example.test/report[auto-preview].html?resultId=result-1&templateId=1"
+        fileName="report[auto-preview].html"
+        enableClickTracking
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    });
+    const trackerParams = getLatestTrackerParams();
+
+    await act(async () => {
+      trackerParams.onOpenNestedPreview({
+        fileUrl:
+          "https://example.test/nested-plan.html?resultId=result-2&templateId=2",
+        fileName: "nested-plan.html",
+        listKey:
+          "https://example.test/report[auto-preview].html?resultId=result-1&templateId=1",
+        listName: "report[auto-preview].html",
+        customerInfo: null,
+        custUid: "",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("preview-modal")).toHaveLength(2);
+      expect(document.querySelectorAll("iframe")).toHaveLength(2);
     });
   });
 

@@ -1,11 +1,21 @@
 import { useState, useEffect } from "react";
-import { Button, Form, Input, Modal, Tag } from "@agentscope-ai/design";
+import {
+  Button,
+  Checkbox,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Switch,
+  Tag,
+} from "@agentscope-ai/design";
 import {
   DeleteOutlined,
   PlusOutlined,
   ApiOutlined,
   SyncOutlined,
   EyeOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import type { ProviderInfo } from "../../../../../api/types";
 import api from "../../../../../api";
@@ -35,7 +45,10 @@ export function RemoteModelManageModal({
   const [discovering, setDiscovering] = useState(false);
   const [testingModelId, setTestingModelId] = useState<string | null>(null);
   const [probingModelId, setProbingModelId] = useState<string | null>(null);
+  const [configModelId, setConfigModelId] = useState<string | null>(null);
+  const [configSaving, setConfigSaving] = useState(false);
   const [form] = Form.useForm();
+  const [configForm] = Form.useForm();
   const canDiscover = provider.support_model_discovery;
 
   // For custom providers ALL models are deletable.
@@ -177,6 +190,40 @@ export function RemoteModelManageModal({
         }
       },
     });
+  };
+
+  const openModelConfig = async (modelId: string) => {
+    try {
+      const config = await api.getModelRuntimeConfig(provider.id, modelId);
+      configForm.setFieldsValue({
+        ...config,
+        supported_reasoning_efforts: config.supported_reasoning_efforts ?? [],
+      });
+      setConfigModelId(modelId);
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : t("models.failedToSaveConfig"),
+      );
+    }
+  };
+
+  const saveModelConfig = async () => {
+    if (!configModelId) return;
+    try {
+      const values = await configForm.validateFields();
+      setConfigSaving(true);
+      await api.updateModelRuntimeConfig(provider.id, configModelId, values);
+      message.success(t("models.configurationSaved", { name: configModelId }));
+      setConfigModelId(null);
+      await onSaved();
+    } catch (error) {
+      if (error && typeof error === "object" && "errorFields" in error) return;
+      message.error(
+        error instanceof Error ? error.message : t("models.failedToSaveConfig"),
+      );
+    } finally {
+      setConfigSaving(false);
+    }
   };
 
   const handleClose = () => {
@@ -326,6 +373,14 @@ export function RemoteModelManageModal({
                       <Button
                         type="text"
                         size="small"
+                        icon={<SettingOutlined />}
+                        onClick={() => openModelConfig(m.id)}
+                      >
+                        {t("models.configure", "配置")}
+                      </Button>
+                      <Button
+                        type="text"
+                        size="small"
                         danger
                         icon={<DeleteOutlined />}
                         onClick={() => handleRemoveModel(m.id, m.name)}
@@ -364,6 +419,14 @@ export function RemoteModelManageModal({
                       >
                         {t("models.testConnection")}
                       </Button>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<SettingOutlined />}
+                        onClick={() => openModelConfig(m.id)}
+                      >
+                        {t("models.configure", "配置")}
+                      </Button>
                     </>
                   )}
                 </div>
@@ -372,6 +435,173 @@ export function RemoteModelManageModal({
           })
         )}
       </div>
+
+      <Modal
+        rootClassName={`console-management-modal ${styles.runtimeConfigModal}`}
+        title={
+          <div className={styles.runtimeConfigTitle}>
+            <span>{t("models.modelRuntimeConfig", "模型运行配置")}</span>
+            {configModelId && (
+              <span
+                className={styles.runtimeConfigModelId}
+                title={configModelId}
+              >
+                {configModelId}
+              </span>
+            )}
+          </div>
+        }
+        open={configModelId !== null}
+        onCancel={() => setConfigModelId(null)}
+        onOk={saveModelConfig}
+        confirmLoading={configSaving}
+        okText={t("common.confirm", "确定")}
+        cancelText={t("models.cancel")}
+        width={720}
+        destroyOnHidden
+      >
+        <Form
+          form={configForm}
+          layout="vertical"
+          className={styles.runtimeConfigForm}
+        >
+          <div className={styles.runtimeConfigGrid}>
+            <div className={styles.runtimeConfigColumn}>
+              <Form.Item name="temperature" label="Temperature">
+                <InputNumber
+                  min={0}
+                  step={0.1}
+                  className={styles.runtimeConfigInput}
+                />
+              </Form.Item>
+              <Form.Item name="top_p" label="Top P">
+                <InputNumber
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  className={styles.runtimeConfigInput}
+                />
+              </Form.Item>
+              <Form.Item name="top_k" label="Top K">
+                <InputNumber
+                  min={0}
+                  precision={0}
+                  className={styles.runtimeConfigInput}
+                />
+              </Form.Item>
+              <div className={styles.runtimeConfigGenerationHint}>
+                {t(
+                  "models.generationParameterDefaultHint",
+                  "以上参数未设置时使用模型服务端默认设置",
+                )}
+              </div>
+            </div>
+            <div className={styles.runtimeConfigColumn}>
+              <Form.Item
+                name="max_input_length"
+                label={t("models.maxInputLength", "最大输入长度")}
+              >
+                <InputNumber
+                  min={1}
+                  precision={0}
+                  placeholder={t(
+                    "models.maxInputLengthDefaultPlaceholder",
+                    "128K（系统默认）",
+                  )}
+                  className={styles.runtimeConfigInput}
+                />
+              </Form.Item>
+              <div
+                className={styles.runtimeConfigPresets}
+                aria-label="最大输入长度快捷选项"
+              >
+                {[32768, 65536, 131072].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={styles.runtimeConfigPreset}
+                    onClick={() =>
+                      configForm.setFieldValue("max_input_length", value)
+                    }
+                  >
+                    {value / 1024}K
+                  </button>
+                ))}
+              </div>
+              <Form.Item
+                name="max_output_length"
+                label={t("models.maxOutputLength", "最大输出长度")}
+              >
+                <InputNumber
+                  min={1}
+                  precision={0}
+                  placeholder={t(
+                    "models.maxOutputLengthDefaultPlaceholder",
+                    "模型服务端默认",
+                  )}
+                  className={styles.runtimeConfigInput}
+                />
+              </Form.Item>
+              <div
+                className={styles.runtimeConfigPresets}
+                aria-label="最大输出长度快捷选项"
+              >
+                {[32768, 65536, 131072].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={styles.runtimeConfigPreset}
+                    onClick={() =>
+                      configForm.setFieldValue("max_output_length", value)
+                    }
+                  >
+                    {value / 1024}K
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.runtimeConfigAdvanced}>
+            <div className={styles.runtimeConfigAdvancedGrid}>
+              <div className={styles.runtimeConfigThinkingRow}>
+                <div>
+                  <div className={styles.runtimeConfigSectionLabel}>
+                    {t("models.supportsThinkingSwitch", "支持思考模式开关")}
+                  </div>
+                  <div className={styles.runtimeConfigHint}>
+                    开启后，聊天界面会显示思考模式选择按钮，用户可按需选择是否启用
+                  </div>
+                </div>
+                <Form.Item
+                  name="supports_enable_thinking"
+                  valuePropName="checked"
+                  noStyle
+                >
+                  <Switch />
+                </Form.Item>
+              </div>
+              <Form.Item
+                name="supported_reasoning_efforts"
+                label={t("models.reasoningEfforts", "支持的思考强度")}
+                className={styles.runtimeConfigReasoning}
+              >
+                <Checkbox.Group className={styles.runtimeConfigReasoningGroup}>
+                  {(["low", "high", "max"] as const).map((effort) => (
+                    <Checkbox
+                      key={effort}
+                      value={effort}
+                      className={styles.runtimeConfigReasoningOption}
+                    >
+                      {effort}
+                    </Checkbox>
+                  ))}
+                </Checkbox.Group>
+              </Form.Item>
+            </div>
+          </div>
+        </Form>
+      </Modal>
 
       {/* Add model section */}
       {adding ? (

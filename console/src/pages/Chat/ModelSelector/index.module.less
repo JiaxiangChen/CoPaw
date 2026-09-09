@@ -184,6 +184,22 @@
   text-align: center;
 }
 
+.runtimeConfig {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 8px 10px;
+  min-width: 220px;
+}
+
+.runtimeConfigRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #666;
+}
+
 /* ─── Dark mode overrides ─────────────────────────────────────────────────── */
 :global(.dark-mode) {
   .trigger {
@@ -249,5 +265,13 @@
 
   .emptyTip {
     color: rgba(255, 255, 255, 0.25);
+  }
+
+  .runtimeConfig {
+    border-top-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .runtimeConfigRow {
+    color: rgba(255, 255, 255, 0.65);
   }
 }

@@ -72,7 +72,11 @@ class OllamaProvider(OpenAIProvider):
             "`ollama rm <model>` CLI command.",
         )
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        generation_kwargs: dict | None = None,
+    ) -> ChatModelBase:
         from .openai_chat_model_compat import OpenAIChatModelCompat
 
         return OpenAIChatModelCompat(
@@ -81,5 +85,5 @@ class OllamaProvider(OpenAIProvider):
             api_key=self.api_key,
             stream_tool_parsing=False,
             client_kwargs={"base_url": self._openai_compatible_base_url()},
-            generate_kwargs=self.generate_kwargs,
+            generate_kwargs=generation_kwargs or {},
         )

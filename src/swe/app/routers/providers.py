@@ -37,7 +37,12 @@ from ...config.utils import (
     list_logical_tenant_ids,
 )
 from ...providers.models import ModelSlotConfig
-from ...providers.provider import ProviderInfo, ModelInfo
+from ...providers.provider import (
+    ModelInfo,
+    ModelRuntimeConfig,
+    ProviderInfo,
+    ReasoningEffort,
+)
 from ...providers.provider_manager import ActiveModelsInfo, ProviderManager
 from ..async_tasks import AsyncTaskStore
 from ..async_tasks.db import get_or_create_async_task_db
@@ -243,14 +248,6 @@ class ProviderConfigRequest(BaseModel):
         default=None,
         description="Chat model class name for protocol selection",
     )
-    generate_kwargs: Optional[dict] = Field(
-        default_factory=dict,
-        description=(
-            "Configuration in json format, will be expanded "
-            "and passed to generation calls "
-            "(e.g., openai.chat.completions, anthropic.messages)."
-        ),
-    )
 
 
 class ModelSlotRequest(BaseModel):
@@ -278,6 +275,20 @@ class CreateCustomProviderRequest(BaseModel):
 class AddModelRequest(BaseModel):
     id: str = Field(...)
     name: str = Field(...)
+
+
+class ModelRuntimeConfigUpdate(BaseModel):
+    """Partial model runtime configuration update."""
+
+    temperature: float | None = Field(default=None, ge=0)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=0)
+    max_input_length: int | None = Field(default=None, gt=0)
+    max_output_length: int | None = Field(default=None, gt=0)
+    supports_enable_thinking: bool | None = None
+    supported_reasoning_efforts: list[ReasoningEffort] | None = None
+    enable_thinking: bool | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
 
 def _validate_model_slot(
@@ -545,7 +556,14 @@ def _resolve_distribution_source(
             ),
         )
 
-    return active_model, provider.model_dump()
+    provider_payload = provider.model_dump()
+    model_configs = provider_payload.get("model_configs") or {}
+    provider_payload["model_configs"] = (
+        {active_model.model: model_configs[active_model.model]}
+        if active_model.model in model_configs
+        else {}
+    )
+    return active_model, provider_payload
 
 
 async def _distribute_active_model_to_tenant(
@@ -945,7 +963,6 @@ async def configure_provider(
             "api_key": body.api_key,
             "base_url": body.base_url,
             "chat_model": body.chat_model,
-            "generate_kwargs": body.generate_kwargs,
         },
     )
     if not ok:
@@ -1289,6 +1306,43 @@ async def add_model_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return provider
+
+
+@router.get(
+    "/{provider_id}/models/{model_id:path}/config",
+    response_model=ModelRuntimeConfig,
+    summary="Get a model runtime configuration",
+)
+async def get_model_runtime_config(
+    manager: ProviderManager = Depends(get_provider_manager),
+    provider_id: str = Path(...),
+    model_id: str = Path(...),
+) -> ModelRuntimeConfig:
+    try:
+        return manager.get_model_config(provider_id, model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put(
+    "/{provider_id}/models/{model_id:path}/config",
+    response_model=ModelRuntimeConfig,
+    summary="Update a model runtime configuration",
+)
+async def update_model_runtime_config(
+    manager: ProviderManager = Depends(get_provider_manager),
+    provider_id: str = Path(...),
+    model_id: str = Path(...),
+    body: ModelRuntimeConfigUpdate = Body(...),
+) -> ModelRuntimeConfig:
+    try:
+        return manager.update_model_config(
+            provider_id,
+            model_id,
+            body.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class ProbeMultimodalResponse(BaseModel):

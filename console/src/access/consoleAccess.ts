@@ -5,6 +5,7 @@ export type ConsoleAccessDecision = {
   reason:
     | "local-development"
     | "embedded"
+    | "chat-share"
     | "direct-allowlist"
     | "direct-denied";
   userId: string | null;
@@ -13,6 +14,7 @@ export type ConsoleAccessDecision = {
 type ResolveConsoleAccessParams = {
   isDevelopment?: boolean;
   isEmbedded: boolean;
+  isChatShare?: boolean;
   userId: string | null;
   directAccessUserWhitelist: readonly string[];
 };
@@ -45,9 +47,14 @@ export function isConsoleEmbedded(): boolean {
   }
 }
 
+export function isChatSharePath(pathname: string): boolean {
+  return /^\/(?:console\/)?chat-share\/[^/]+\/?$/.test(pathname);
+}
+
 export function resolveConsoleAccess({
   isDevelopment = false,
   isEmbedded,
+  isChatShare = false,
   userId,
   directAccessUserWhitelist,
 }: ResolveConsoleAccessParams): ConsoleAccessDecision {
@@ -57,6 +64,10 @@ export function resolveConsoleAccess({
 
   if (isDevelopment) {
     return { allowed: true, reason: "local-development", userId };
+  }
+
+  if (isChatShare) {
+    return { allowed: true, reason: "chat-share", userId };
   }
 
   const normalizedWhitelist = directAccessUserWhitelist
@@ -74,10 +85,12 @@ export function resolveConsoleAccess({
 export function getConsoleAccessDecision(
   isEmbedded = isConsoleEmbedded(),
   isDevelopment = import.meta.env.DEV,
+  pathname = window.location.pathname,
 ): ConsoleAccessDecision {
   return resolveConsoleAccess({
     isDevelopment,
     isEmbedded,
+    isChatShare: isChatSharePath(pathname),
     userId: decodeCookieValue(getWPlusCookie("userid")),
     directAccessUserWhitelist: getDirectAccessUserWhitelist(),
   });

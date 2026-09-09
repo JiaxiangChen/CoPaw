@@ -138,7 +138,7 @@ source_id + provider_id + model_id
 Scheduler 每轮先汇总当前派发轮次的执行记录，再回收失联任务、计算空闲名额和派发；一轮结束后默认等待 60 秒。即使名额全部占满，结果扫描也会运行。
 
 - `status='success' AND async_status='success'`：完成 intent。
-- Agent 明确失败：保留原错误并按策略重试。
+- Agent 明确失败：保留原错误并按策略重试；固定的 Cron 鉴权过期错误首次即终止，不重试，并明确记录为“鉴权过期”。
 - `status='success' AND async_status='error'`：以“子任务执行失败”重试。
 - 没有当前轮次执行记录或子任务结果未确认：保持 dispatched，继续占用名额。
 
@@ -149,12 +149,13 @@ Scheduler 必须访问 Monitor 更新的同一份 `swe_cron_executions`，直接
 ## 重试与失联回收
 
 - Scheduler 请求 SWE 失败时，intent 按重试策略重新进入 pending。
-- 扫描发现失败结果时，如果还没达到最大尝试次数，默认从本次扫描时间起 300 秒后重试。
+- 扫描发现失败结果时，如果还没达到最大尝试次数，默认从本次扫描时间起 300 秒后重试；Cron 鉴权过期错误除外。
 - 默认最多尝试 3 次；达到上限后 intent 标记 failed。
 - 已派发但没有最终结果的 intent，由 `SCHEDULER_CRON_DISPATCHED_STALE_SECONDS` 判定失联并回收或终止。Agent 执行和等待子任务共用默认 7800 秒预算，收到 Agent 回执不刷新派发锁时间。
 - Agent 成功但子结果未确认时，超时错误为“获取子任务状态超时”；主结果未收到时保留原失联文案。达到重试上限后进入 failed。
 - execution 回执使用 `(dispatch_intent_id, dispatch_batch_id, dispatch_attempt)` 去重。
 - SWE 回传完整 dispatch 身份时采用同步请求并最多尝试 3 次，避免回执丢失后容量无法释放。
+- Cron 鉴权过期属于配置故障，不计入 worker 容量调整的失败反馈。
 
 ## 数据表
 

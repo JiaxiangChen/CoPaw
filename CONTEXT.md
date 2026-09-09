@@ -285,6 +285,10 @@ _Avoid_: live marketplace binding, immutable market definition, source expert al
 The only community-driven update path for a Received Community Expert. A source administrator distributes a newer Community Expert Package to recipients' Default Agent Profiles; recipients do not pull updates from the community themselves, and distribution silently replaces any local received-expert modifications.
 _Avoid_: recipient-driven marketplace update, automatic update, local-edit conflict, live version tracking
 
+**Community Expert Distribution Target Selection**:
+The administrator interaction for choosing recipients of a Community Expert Distribution. It uses the same target-selection language as Application Marketplace distribution: users under selected institutions or explicitly selected users, without a separate all-users option; every target must belong to the current source scope.
+_Avoid_: expert-only target semantics, institution-only delivery, implicit full-source distribution, cross-source target, recipient self-selection
+
 **Received Community Expert Enablement**:
 The enablement rule for a Received Community Expert: a first user installation or administrator distribution enables it, while an administrator update preserves the receiving Agent Profile's existing enabled or disabled choice.
 _Avoid_: always-disabled community install, update-forces-enable, publish-state inheritance
@@ -1922,6 +1926,10 @@ _Avoid_: shared daily dialog file, chat transcript, session state
 
 ## Flagged Ambiguities
 
+**Session Skill Hook Revision Boundary**:
+The boundary at which a modified, disabled, or removed Skill `hooks.json` configuration supersedes the configuration previously loaded by an existing session. One Hook event uses the configuration snapshot obtained when its dispatch begins, while a Handler already executing remains allowed to finish. A cached file-version marker determines whether the configuration must be read and validated again. Handler-script content changes do not themselves revise the configuration. An unreadable, invalid, or disabled current configuration withdraws that Skill's Hooks for later event dispatches rather than retaining a prior configuration. A Skill whose configuration is restored to a valid enabled state resumes its Hooks at a later event dispatch without requiring another Skill selection. A changed Handler does not retain its prior one-time execution record, while an unchanged Handler does. Session state converges lazily when each activated Skill next reaches a Hook event rather than through a bulk session rewrite.
+_Avoid_: handler interruption, mid-dispatch revision, session-end-only activation, per-event full configuration read, script-content revision, stale Hook source, invalid-config fallback, reselection to restore, bulk session rewrite, stale one-time record
+
 **"Create SubAgent"**:
 Resolved to distinguish two cases: starting work creates a **SubAgent Run**, while a Main Agent may also supply a **Run-scoped SubAgent Definition** for that single run. Creating an **Agent-owned Stored SubAgent Definition** occurs only through the expert configuration center.
 
@@ -3134,6 +3142,26 @@ _Avoid_: 实例间不同轮询周期、动态缩短或延长传播承诺、依�
 绑定到一个具体可选模型的生成行为参数与能力边界，包括采样参数以及输入、输出长度限制。Provider 下的每个模型各自拥有模型配置；模型配置不同于 Provider 连接配置，并在切换激活模型时随模型生效。
 _Avoid_: Provider 级默认参数、Agent Profile 模型配置、连接凭据
 
+**模型配置字典**:
+Provider 配置中按模型 ID 索引的持久化配置集合。它与 Provider 的模型目录分离，模型发现或目录刷新不得覆盖已有同 ID 配置。
+_Avoid_: 混入模型目录元数据、Provider 全局生成参数、激活模型专属配置
+
+**模型配置删除联动**:
+删除一个可删除的自定义模型时，Provider 必须同时删除该模型 ID 对应的模型配置。内置模型不可删除，其配置不会因模型目录操作移除。
+_Avoid_: 无主模型配置、删除后保留参数、内置模型清理
+
+**模型配置覆盖范围**:
+一个模型配置适用于该租户中所有选择该模型的调用入口，包括 Chat、SubAgent、Cron、Hook 与内部摘要。快照执行仍使用其已选择模型对应的配置。
+_Avoid_: 仅 Chat 生效、入口专属参数、Provider 级回退参数
+
+**模型配置分发**:
+供应商全量分发复制完整的模型配置字典；激活模型分发复制被激活模型对应的配置。目标租户据此获得与源租户一致的模型调用行为。
+_Avoid_: 只分发模型目录、只分发激活槽位、丢失调用参数的分发
+
+**模型配置即时生效边界**:
+聊天界面对模型配置的修改立即持久化，并从下一次模型调用开始生效；已开始的流式响应固定使用其启动时的配置快照。
+_Avoid_: 中途重配当前响应、仅页面内暂存、等待会话结束才生效
+
 **模型输入长度限制**:
 一个模型可接受的最大输入 token 数，也是该模型运行时的上下文预算。它优先于 Agent 级默认上下文预算；未设置时使用 Agent 级默认值。
 _Avoid_: Provider API 的 `max_input_length` 请求参数、字符数限制、输出 token 上限
@@ -3141,6 +3169,10 @@ _Avoid_: Provider API 的 `max_input_length` 请求参数、字符数限制、�
 **模型输出长度限制**:
 一个模型单次响应允许生成的最大输出 token 数，是每次模型调用的硬上限。它由 Provider 适配层转换为目标 API 的对应字段，不要求调用方感知 Provider 差异。
 _Avoid_: 软提示长度、字符数限制、上下文总长度
+
+**模型参数校验**:
+`temperature` 为非负数，`top_p` 位于 0 至 1，`top_k` 为非负整数，输入与输出长度为正整数；思考强度支持列表仅含去重后的 `low`、`high`、`max`，当前强度为空或属于该列表。
+_Avoid_: `Temprature` 拼写字段、无界采样参数、未声明强度透传
 
 **模型思考能力声明**:
 模型配置中对 `enable_thinking` 与 `reasoning_effort` 的支持情况及当前选择的声明。它属于一个租户下的具体模型，并由聊天界面选择后用于实际模型调用。
@@ -3154,8 +3186,12 @@ _Avoid_: 独立的 reasoning_effort 支持开关、运行时已选等级、Provi
 模型配置中的布尔能力声明，表示模型是否接受 `enable_thinking` 请求参数。仅声明支持时，聊天界面才展示会话思考开关。
 _Avoid_: 默认启用思考、会话思考偏好、思考强度支持列表
 
+**独立思考能力**:
+`enable_thinking` 支持声明与思考强度支持列表相互独立；模型可支持其中任一项。运行时只发送该模型声明支持且已配置的字段。
+_Avoid_: 强制成对支持、未声明参数透传、Provider 统一能力假设
+
 **思考参数联动**:
-只有当前模型的思考开关开启且其配置声明支持所选等级时，运行时请求才携带 `reasoning_effort`；关闭思考会清空并停止发送当前等级。
+对于声明支持 `enable_thinking` 的模型，只有当前思考开关开启且其配置声明支持所选等级时，运行时请求才携带 `reasoning_effort`；关闭思考会清空并停止发送当前等级。仅声明支持思考强度、未声明开关的 reasoning-only 模型，不显示思考开关，并直接发送其已配置的等级。
 _Avoid_: 关闭思考仍发送强度、用户级固定强度、未声明等级透传
 
 ## Example Dialogue

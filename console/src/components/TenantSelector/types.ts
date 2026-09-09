@@ -37,4 +37,13 @@ export interface TenantSelectorProps {
 
   /** 触发计数器：每次勾选 checkbox 时增加，强制触发选择 */
   distributedTriggerKey?: number;
+
+  /** 限制可选租户范围（不传则使用当前 source 下全部租户） */
+  allowedTenantIds?: string[];
+
+  /** 是否允许输入列表外的租户 ID */
+  allowManualIds?: boolean;
+
+  /** 追加可选租户（用于租户目录中不存在但仍有本地资源的租户） */
+  additionalTenantOptions?: TenantSourceInfo[];
 }

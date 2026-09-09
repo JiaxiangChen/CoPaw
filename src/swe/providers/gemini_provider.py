@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 class GeminiProvider(Provider):
     """Provider implementation for Google Gemini API."""
 
+    _output_length_key = "max_output_tokens"
+
     def _client(self, timeout: float = 10) -> Any:
         return genai.Client(
             api_key=self.api_key,
@@ -129,14 +131,18 @@ class GeminiProvider(Provider):
                 f"Unknown exception when connecting to model '{model_id}'",
             )
 
-    def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
+    def get_chat_model_instance(
+        self,
+        model_id: str,
+        generation_kwargs: dict | None = None,
+    ) -> ChatModelBase:
         from agentscope.model import GeminiChatModel
 
         return GeminiChatModel(
             model_name=model_id,
             stream=True,
             api_key=self.api_key,
-            generate_kwargs=self.generate_kwargs,
+            generate_kwargs=generation_kwargs or {},
         )
 
     async def probe_model_multimodal(

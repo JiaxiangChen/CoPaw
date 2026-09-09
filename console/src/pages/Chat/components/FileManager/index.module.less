@@ -40,6 +40,7 @@
 .crumbButton { max-width: 150px; overflow: hidden; border: 0; padding: 0; color: inherit; text-overflow: ellipsis; white-space: nowrap; background: transparent; cursor: pointer; &:hover { color: #1677ff; } }
 .headerActions { display: flex; align-items: center; gap: 10px; :global(.ant-input-affix-wrapper) { width: 260px; border-radius: 8px; } :global(.ant-btn-primary) { min-width: 96px; box-shadow: 0 4px 10px rgb(22 119 255 / 18%); } }
 .drawerActions { display: flex; align-items: center; gap: 4px; }
+.fullscreenButton,
 .closeButton { width: 32px !important; min-width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; color: var(--console-management-text-secondary, #4b5563); &:hover { color: var(--console-management-text-primary, #111827) !important; background: var(--console-management-surface-subtle, #f7f9fc) !important; } }
 .fileInput { display: none; }
 .rootNotice { margin: 10px 24px -2px; color: #886311; font-size: 13px; }
@@ -104,6 +105,18 @@
 :global(html.copaw-file-manager-drawer-open) {
   --copaw-file-manager-drawer-width: clamp(760px, 58vw, 920px);
 
+  // Drawer 挂在 body 并贴齐视口；聊天外层也需贴齐，避免额外预留右侧页面边距。
+  :global(.page-container:has([data-chat-shell])) {
+    padding-right: 0;
+  }
+
+  :global(.page-content:has([data-chat-shell])) {
+    border-right: 0;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    overflow: hidden;
+  }
+
   :global(.swe-chat-anywhere-layout) {
     margin-right: var(--copaw-file-manager-drawer-width);
   }
@@ -112,6 +125,12 @@
 :global(html.copaw-file-manager-drawer-open.copaw-file-preview-drawer-open) {
   :global(.swe-chat-anywhere-layout) {
     margin-right: var(--copaw-file-manager-drawer-width);
+  }
+}
+
+:global(html.copaw-file-manager-drawer-open.copaw-file-manager-preview-fullscreen) {
+  :global(.swe-chat-anywhere-layout) {
+    margin-right: 0;
   }
 }
 

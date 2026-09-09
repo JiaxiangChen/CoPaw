@@ -4,21 +4,39 @@ import {
 } from "../types";
 import { useMemo } from "react";
 import { Bubble } from "@/components/agentscope-chat";
-import Style from "./style";
 
+type ImageCard = { code: "Image" | "Images"; data: { url?: string }[] };
+type VideoCard = { code: "Videos"; data: { src?: string; poster?: string }[] };
+type AudioCard = { code: "Audios"; data: { src?: string }[] };
+type FileCard = {
+  code: "Files";
+  data: { url?: string; name?: string; size?: number }[];
+};
 type RequestCard =
-  | { code: "Text"; data: { content: string; raw: boolean } }
-  | { code: "Images"; data: { url: string }[] }
-  | { code: "Videos"; data: { src: string; poster?: string }[] }
-  | { code: "Audios"; data: { src?: string }[] }
-  | { code: "Files"; data: { url?: string; name?: string; size?: number }[] };
+  | { code: "Text"; data: { content?: string; raw: boolean } }
+  | ImageCard
+  | VideoCard
+  | AudioCard
+  | FileCard;
+
+const isImageCard = (item: RequestCard): item is ImageCard =>
+  item.code === "Image";
+
+const isVideoCard = (item: RequestCard): item is VideoCard =>
+  item.code === "Videos";
+
+const isAudioCard = (item: RequestCard): item is AudioCard =>
+  item.code === "Audios";
+
+const isFileCard = (item: RequestCard): item is FileCard =>
+  item.code === "Files";
 
 export default function AgentScopeRuntimeRequestCard(props: {
   data: IAgentScopeRuntimeRequest;
 }) {
   const cards = useMemo(() => {
     return props.data.input[0].content.reduce<RequestCard[]>((p, c) => {
-      if (c.type === AgentScopeRuntimeContentType.TEXT && c.text?.trim()) {
+      if (c.type === AgentScopeRuntimeContentType.TEXT) {
         p.push({
           code: "Text",
           data: {
@@ -29,7 +47,7 @@ export default function AgentScopeRuntimeRequestCard(props: {
       }
 
       if (c.type === AgentScopeRuntimeContentType.IMAGE) {
-        const imageCard = p.find((item) => item.code === "Images");
+        const imageCard = p.find(isImageCard);
         if (!imageCard) {
           p.push({
             code: "Images",
@@ -41,7 +59,7 @@ export default function AgentScopeRuntimeRequestCard(props: {
       }
 
       if (c.type === AgentScopeRuntimeContentType.VIDEO) {
-        const videoCard = p.find((item) => item.code === "Videos");
+        const videoCard = p.find(isVideoCard);
         if (!videoCard) {
           p.push({
             code: "Videos",
@@ -53,7 +71,7 @@ export default function AgentScopeRuntimeRequestCard(props: {
       }
 
       if (c.type === AgentScopeRuntimeContentType.AUDIO) {
-        const audioCard = p.find((item) => item.code === "Audios");
+        const audioCard = p.find(isAudioCard);
         if (!audioCard) {
           p.push({
             code: "Audios",
@@ -65,7 +83,7 @@ export default function AgentScopeRuntimeRequestCard(props: {
       }
 
       if (c.type === AgentScopeRuntimeContentType.FILE) {
-        const fileCard = p.find((item) => item.code === "Files");
+        const fileCard = p.find(isFileCard);
         if (!fileCard) {
           p.push({
             code: "Files",
@@ -91,18 +109,5 @@ export default function AgentScopeRuntimeRequestCard(props: {
 
   if (!cards?.length) return null;
 
-  return (
-    <>
-      <Style />
-      <Bubble
-        role="user"
-        cards={cards}
-        className={
-          cards.length > 1
-            ? "swe-request-card swe-request-grouped"
-            : "swe-request-card"
-        }
-      />
-    </>
-  );
+  return <Bubble role="user" cards={cards}></Bubble>;
 }

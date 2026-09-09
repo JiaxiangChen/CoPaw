@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from swe.providers.models import ModelSlotConfig
-from swe.providers.provider import ModelInfo, ProviderInfo
+from swe.providers.provider import ModelInfo, ModelRuntimeConfig, ProviderInfo
 from swe.providers.provider_runtime_cache import ProviderRuntimeCache
 from swe.providers.tenant_provider_repository import TenantProviderRepository
 
@@ -139,6 +139,32 @@ class ProviderCatalogService:
         )
         self._invalidate_after_write()
         return True
+
+    def get_model_config(
+        self,
+        provider_id: str,
+        model_id: str,
+    ) -> ModelRuntimeConfig:
+        """Return a model's config after verifying its catalog membership."""
+        provider = self._require_provider_model(provider_id, model_id)
+        return provider.get_model_config(model_id)
+
+    def update_model_config(
+        self,
+        provider_id: str,
+        model_id: str,
+        updates: dict[str, Any],
+    ) -> ModelRuntimeConfig:
+        """Persist a partial update for one model without replacing siblings."""
+        manager = self._manager
+        provider = self._require_provider_model(provider_id, model_id)
+        config = provider.update_model_config(model_id, updates)
+        manager._save_provider(
+            provider,
+            is_builtin=provider_id in manager.builtin_providers,
+        )
+        self._invalidate_after_write()
+        return config
 
     async def fetch_provider_models(self, provider_id: str) -> list[ModelInfo]:
         manager = self._manager
@@ -276,12 +302,23 @@ class ProviderCatalogService:
         if not provider:
             raise ValueError(f"Provider '{provider_id}' not found.")
         await provider.delete_model(model_id=model_id)
+        provider.delete_model_config(model_id)
         await manager._save_provider_async(
             provider,
             is_builtin=provider_id in manager.builtin_providers,
         )
         self._reset_model_caches()
         return await provider.get_info()
+
+    def _require_provider_model(self, provider_id: str, model_id: str):
+        provider = self._manager.get_provider(provider_id)
+        if provider is None:
+            raise ValueError(f"Provider '{provider_id}' not found.")
+        if not provider.has_model(model_id):
+            raise ValueError(
+                f"Model '{model_id}' not found in provider '{provider_id}'.",
+            )
+        return provider
 
     async def probe_model_multimodal(
         self,

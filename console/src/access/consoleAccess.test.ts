@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   getConsoleAccessDecision,
+  isChatSharePath,
   resolveConsoleAccess,
   runAccessControlledInitialization,
 } from "./consoleAccess";
@@ -56,6 +57,27 @@ describe("Console access gate", () => {
         directAccessUserWhitelist: ["SAP001", "SAP002"],
       }),
     ).toEqual({ allowed: true, reason: "direct-allowlist", userId: "SAP001" });
+  });
+
+  it("allows top-level access to a chat share route without a whitelist", () => {
+    expect(
+      getConsoleAccessDecision(false, false, "/chat-share/token-1"),
+    ).toEqual({
+      allowed: true,
+      reason: "chat-share",
+      userId: null,
+    });
+    expect(
+      getConsoleAccessDecision(false, false, "/console/chat-share/token-1/")
+        .allowed,
+    ).toBe(true);
+  });
+
+  it("does not allow paths that only contain the chat-share text", () => {
+    expect(isChatSharePath("/chat-share/")).toBe(false);
+    expect(isChatSharePath("/chat-share/token-1/details")).toBe(false);
+    expect(isChatSharePath("/some-chat-share/token-1")).toBe(false);
+    expect(isChatSharePath("/chat?next=/chat-share/token-1")).toBe(false);
   });
 
   it("fails closed for missing, unmatched, or wildcard direct access", () => {

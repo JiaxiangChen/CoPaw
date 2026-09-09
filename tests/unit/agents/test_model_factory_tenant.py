@@ -6,7 +6,7 @@
 import sys
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -840,6 +840,61 @@ class TestRetryConfigPropagation:
 
 
 class TestScopedModelSlotOverride:
+    def test_model_configuration_is_snapshotted_per_factory_call(self):
+        """An in-flight model keeps its arguments after a config save."""
+        from swe.agents.model_factory import create_model_and_formatter
+        from swe.providers.models import ModelSlotConfig
+        from swe.providers.provider import ModelRuntimeConfig
+
+        first_model = MagicMock()
+        second_model = MagicMock()
+        current_config = ModelRuntimeConfig(temperature=0.2)
+
+        with (
+            patch("swe.agents.model_factory.ProviderManager") as manager_cls,
+            patch("swe.agents.model_factory._create_formatter_instance"),
+            patch(
+                "swe.agents.model_factory.TokenRecordingModelWrapper",
+                side_effect=lambda _provider_id, model: model,
+            ),
+            patch(
+                "swe.agents.model_factory.RetryChatModel",
+                side_effect=lambda model, **_kwargs: model,
+            ),
+        ):
+            manager = MagicMock()
+            manager.get_active_model.return_value = ModelSlotConfig(
+                provider_id="openai",
+                model="gpt-5",
+            )
+            manager_cls.get_instance.return_value = manager
+            manager_cls.ensure_tenant_provider_storage = MagicMock()
+            provider = MagicMock()
+            provider.get_model_config.side_effect = (
+                lambda _model_id: current_config
+            )
+            provider.build_generation_kwargs.side_effect = (
+                lambda config: config.generation_kwargs("max_tokens")
+            )
+            provider.get_chat_model_instance.side_effect = [
+                first_model,
+                second_model,
+            ]
+            manager.get_provider.return_value = provider
+
+            first, _ = create_model_and_formatter()
+            current_config = ModelRuntimeConfig(temperature=0.9)
+            second, _ = create_model_and_formatter()
+
+        assert first is first_model
+        assert second is second_model
+        assert provider.get_chat_model_instance.call_args_list[0].kwargs == {
+            "generation_kwargs": {"temperature": 0.2},
+        }
+        assert provider.get_chat_model_instance.call_args_list[1].kwargs == {
+            "generation_kwargs": {"temperature": 0.9},
+        }
+
     def test_scoped_override_takes_priority_over_tenant_default(self):
         from swe.agents.model_factory import create_model_and_formatter
         from swe.app.crons.model_slot_context import (
@@ -893,6 +948,7 @@ class TestScopedModelSlotOverride:
         mock_manager.get_provider.assert_called_once_with("anthropic")
         override_provider.get_chat_model_instance.assert_called_once_with(
             "claude-3-7-sonnet",
+            generation_kwargs=ANY,
         )
 
     def test_private_provider_override_does_not_read_current_provider(
@@ -933,6 +989,7 @@ class TestScopedModelSlotOverride:
         manager_cls.ensure_tenant_provider_storage.assert_not_called()
         frozen_provider.get_chat_model_instance.assert_called_once_with(
             "frozen-model",
+            generation_kwargs=ANY,
         )
 
     def test_private_selected_model_falls_back_to_frozen_parent(self):
@@ -980,4 +1037,5 @@ class TestScopedModelSlotOverride:
         manager_cls.ensure_tenant_provider_storage.assert_not_called()
         parent_provider.get_chat_model_instance.assert_called_once_with(
             "parent-model",
+            generation_kwargs=ANY,
         )
