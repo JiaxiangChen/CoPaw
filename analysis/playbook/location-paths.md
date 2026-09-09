@@ -176,7 +176,10 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 定时任务详情分行维度 Excel 导出
 
-- 页面与按钮入口：`console/src/pages/Analytics/CronJobOverview/index.tsx` 的 `handleBranchExport`；导出时克隆当前 `RankingTable`，保留点击时的排序、序号与展示文本。
-- 文件生成入口：`console/src/pages/Analytics/CronJobOverview/exportBranchTable.ts`。ExcelJS 按需加载，在浏览器生成 `.xlsx`，保留两层合并表头和全部 22 列；不调用 Monitor 导出接口。百分比、千分位、前导零按文本保存。
-- 加载中、无数据或导出中禁用按钮；失败显示提示并恢复重试。核对导出内容时，比较点击时的表格快照，而非导出期间再次排序后的页面。
-- 验证：`pnpm exec vitest run src/pages/Analytics/CronJobOverview`，包含实际文件生成和回读、当前排序、合并表头、特殊文本、无新增 API 请求及错误恢复。
+- 页面与按钮入口：`console/src/pages/Analytics/CronJobOverview/index.tsx`。前端传入当前日期、分行及排序，不再克隆 DOM 或使用 ExcelJS 生成文件。
+- API：`GET /api/monitor/cron/export-branch-dimension`，`start_date/end_date` 必填且包含起止日；`bbk_ids` 可选；`sort_by/sort_order` 成对提供，排序指标使用白名单。
+- 后端路由：`monitor/src/monitor/app/routers/cron_branch_export.py`；复用 `QueryService.get_branch_behavior` 查询全量数据，由 `monitor/src/monitor/app/services/cron/branch_export.py` 生成原始 XLSX 二进制，前端读取 blob 下载。
+- 保留 22 列、两层合并表头；计数千分位、比例两位小数，同值稳定排序，序号排序后从 1 开始。洞察/电访用户比例继续以 plan_managers 为分母。分行名强制文本避免公式解析；空数据返回合法表头工作簿。
+- 用户于 2026-09-09 明确本次只需沿用现有查询过滤：使用 X-Source-Id（缺省 default）及 bbk_ids；未新增身份鉴权或分行权限机制。
+- 加载中、无数据或导出中禁用按钮；失败提示并允许重试。参数或导出失败使用非 200 中文 detail JSON，成功为 Excel MIME 和 Content-Disposition 附件。
+- 验证：Monitor 项目虚拟环境运行 `venv/Scripts/python.exe -m pytest tests/test_branch_export.py tests/test_branch_export_api.py tests/test_export_service.py tests/test_export_integration.py -q`；前端验证入口为 `console/src/api/modules/monitor.branchExport.test.ts` 和 `console/src/pages/Analytics/CronJobOverview/branchExport.test.tsx`。
