@@ -769,6 +769,7 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                   actionListCls,
                   classNames.actions,
                   dictationStyles.send,
+                  speechRecording && dictationStyles.actionGroupActive,
                 )}
                 style={styles.actions}
               >
@@ -778,23 +779,23 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                     {props.maxLength}
                   </div>
                 ) : null}
+                {allowSpeech && (
+                  <DictationControl
+                    disabled={!!disabled || !!readOnly || !!loading}
+                    onActiveChange={setSpeechRecording}
+                    onTranscript={(text) => {
+                      const next = appendChatInputText(innerValue, text);
+                      triggerValueChange(
+                        props.maxLength ? next.slice(0, props.maxLength) : next,
+                      );
+                      (tokenEditorRef.current || inputRef.current)?.focus();
+                    }}
+                  />
+                )}
                 <ActionButtonContext.Provider value={contextValue}>
                   {actionNode}
                 </ActionButtonContext.Provider>
               </div>
-              {allowSpeech && (
-                <DictationControl
-                  disabled={!!disabled || !!readOnly || !!loading}
-                  onActiveChange={setSpeechRecording}
-                  onTranscript={(text) => {
-                    const next = appendChatInputText(innerValue, text);
-                    triggerValueChange(
-                      props.maxLength ? next.slice(0, props.maxLength) : next,
-                    );
-                    (tokenEditorRef.current || inputRef.current)?.focus();
-                  }}
-                />
-              )}
             </div>
           </div>
         </div>
