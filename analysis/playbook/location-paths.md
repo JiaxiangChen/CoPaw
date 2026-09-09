@@ -174,6 +174,13 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 先确认 Scheduler 与 Monitor 访问同一执行表，且 Monitor 原有子任务同步/聚合正常运行；沿用 Monitor 的无子任务成功规则，不应把这一行为误诊为 Scheduler 提前完成。
 - 首轮验证：`$env:PYTHONPATH='scheduler/src'; .\.venv\Scripts\python.exe -m pytest tests/unit/scheduler -q`。
 
+## 定时任务详情分行维度 Excel 导出
+
+- 页面与按钮入口：`console/src/pages/Analytics/CronJobOverview/index.tsx` 的 `handleBranchExport`；导出时克隆当前 `RankingTable`，保留点击时的排序、序号与展示文本。
+- 文件生成入口：`console/src/pages/Analytics/CronJobOverview/exportBranchTable.ts`。ExcelJS 按需加载，在浏览器生成 `.xlsx`，保留两层合并表头和全部 22 列；不调用 Monitor 导出接口。百分比、千分位、前导零按文本保存。
+- 加载中、无数据或导出中禁用按钮；失败显示提示并恢复重试。核对导出内容时，比较点击时的表格快照，而非导出期间再次排序后的页面。
+- 验证：`pnpm exec vitest run src/pages/Analytics/CronJobOverview`，包含实际文件生成和回读、当前排序、合并表头、特殊文本、无新增 API 请求及错误恢复。
+
 ## 我的任务自动预览文件选择
 
 - 报告提取入口：`console/src/components/agentscope-chat/autoPreviewSelection.ts`，由任务结果卡片和页面预览共用。原始消息按从旧到新排列，选择最后一条含报告的消息及其中最后一个符合原有自动预览条件的文件；包括带 `auto-preview` 标记的 HTML，以及文件卡片中带 `resultId`、`templateId` 的动态报告，不解析文件名时间戳。同次执行优先取最终结果，没有匹配才取步骤结果。

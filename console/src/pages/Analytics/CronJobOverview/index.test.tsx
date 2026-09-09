@@ -419,7 +419,7 @@ describe("CronJobOverview summary cards", () => {
     expect(managerNames()).toEqual(["张三", "李四"]);
 
     expect(screen.queryByText("技能视角-分行综合排行")).not.toBeInTheDocument();
-    expect(screen.getByText("分行维度报表")).toBeInTheDocument();
+    expect(screen.getByText("分行维度")).toBeInTheDocument();
     expect(screen.getByText("任务信息")).toBeInTheDocument();
     expect(screen.getByText("by客户经理")).toBeInTheDocument();
     expect(screen.getByText("by客户")).toBeInTheDocument();
@@ -656,7 +656,7 @@ describe("CronJobOverview summary cards", () => {
       </MemoryRouter>,
     );
 
-    await screen.findByText("分行维度报表");
+    await screen.findByText("分行维度");
 
     expect(
       screen.queryByRole("button", { name: "分行名称排序" }),
