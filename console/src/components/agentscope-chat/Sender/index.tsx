@@ -33,6 +33,8 @@ export type SubmitType = "enter" | "shiftEnter" | false;
 type TextareaProps = GetProps<typeof Input.TextArea>;
 type SuggestionItems = Exclude<GetProp<typeof Suggestion, "items">, () => void>;
 
+const SHOW_LENGTH_COUNTER = false;
+
 export interface SenderComponents {
   input?: React.ComponentType<TextareaProps>;
 }
@@ -538,15 +540,32 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
     );
   }, [props.prefix]);
 
-  let actionNode: React.ReactNode = (
-    <Flex className={`${actionListCls}-presets`}>
-      {loading ? (
-        <LoadingButton loading={loading} disabled={!!disabled} />
-      ) : (
-        <SendButton disabled={!!disabled} />
-      )}
-    </Flex>
+  const dictationControl = allowSpeech ? (
+    <DictationControl
+      disabled={!!disabled || !!readOnly || !!loading}
+      onActiveChange={setSpeechRecording}
+      onTranscript={(text) => {
+        const next = appendChatInputText(innerValue, text);
+        triggerValueChange(
+          props.maxLength ? next.slice(0, props.maxLength) : next,
+        );
+        (tokenEditorRef.current || inputRef.current)?.focus();
+      }}
+    />
+  ) : null;
+  const defaultActionNode = (
+    <>
+      {dictationControl}
+      <Flex className={`${actionListCls}-presets`}>
+        {loading ? (
+          <LoadingButton loading={loading} disabled={!!disabled} />
+        ) : (
+          <SendButton disabled={!!disabled} />
+        )}
+      </Flex>
+    </>
   );
+  let actionNode: React.ReactNode = defaultActionNode;
 
   if (typeof actions === "function") {
     actionNode = actions(actionNode, {
@@ -557,7 +576,12 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
       },
     });
   } else if (actions) {
-    actionNode = actions;
+    actionNode = (
+      <>
+        {dictationControl}
+        {actions}
+      </>
+    );
   }
 
   const contextValue = {
@@ -769,10 +793,11 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                   actionListCls,
                   classNames.actions,
                   dictationStyles.send,
+                  speechRecording && dictationStyles.actionGroupActive,
                 )}
                 style={styles.actions}
               >
-                {props.maxLength ? (
+                {SHOW_LENGTH_COUNTER && props.maxLength ? (
                   <div className={`${actionListCls}-length`}>
                     {Math.min(innerValue.length, props.maxLength)}/
                     {props.maxLength}
@@ -782,19 +807,6 @@ const ForwardSender = React.forwardRef<SenderRef, SenderProps>((props, ref) => {
                   {actionNode}
                 </ActionButtonContext.Provider>
               </div>
-              {allowSpeech && (
-                <DictationControl
-                  disabled={!!disabled || !!readOnly || !!loading}
-                  onActiveChange={setSpeechRecording}
-                  onTranscript={(text) => {
-                    const next = appendChatInputText(innerValue, text);
-                    triggerValueChange(
-                      props.maxLength ? next.slice(0, props.maxLength) : next,
-                    );
-                    (tokenEditorRef.current || inputRef.current)?.focus();
-                  }}
-                />
-              )}
             </div>
           </div>
         </div>

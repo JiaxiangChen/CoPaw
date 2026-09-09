@@ -26,7 +26,9 @@ vi.mock("./components/ActionButton", () => ({
 }));
 vi.mock("./components/ClearButton", () => ({ default: () => null }));
 vi.mock("./components/LoadingButton", () => ({ default: () => null }));
-vi.mock("./components/SendButton", () => ({ default: () => null }));
+vi.mock("./components/SendButton", () => ({
+  default: () => <button aria-label="发送消息" type="button" />,
+}));
 
 const skills = [
   {
@@ -79,6 +81,33 @@ describe("Sender skill mentions", () => {
 
     expect(onChange).not.toHaveBeenCalled();
     expect(input).toHaveTextContent("@br");
+  });
+
+  it("keeps dictation immediately before send and hides the character counter", () => {
+    render(
+      <Sender
+        allowSpeech
+        maxLength={10000}
+        actions={(defaultActions) => (
+          <div>
+            <button aria-label="上下文占用" type="button" />
+            {defaultActions}
+          </div>
+        )}
+      />,
+    );
+
+    const actionGroup = document.querySelector(".sender-actions-list");
+    const microphone = screen.getByRole("button", { name: "语音输入" });
+    const send = screen.getByRole("button", { name: "发送消息" });
+
+    expect(actionGroup).toContainElement(microphone);
+    expect(actionGroup).toContainElement(send);
+    expect(actionGroup).not.toHaveTextContent("0/10000");
+    expect(
+      microphone.compareDocumentPosition(send) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("uses the shared accessible menu and shows its no-match state", () => {
