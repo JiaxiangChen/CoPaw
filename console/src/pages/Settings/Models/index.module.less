@@ -1732,6 +1732,261 @@
   padding-top: 4px;
 }
 
+/* ---- Runtime configuration dialog ---- */
+.runtimeConfigModal {
+  :global(.ant-modal-content),
+  :global(.swe-modal-content) {
+    overflow: hidden;
+    border-radius: 16px;
+  }
+
+  :global(.ant-modal-header),
+  :global(.swe-modal-header) {
+    padding: 20px 24px 16px;
+  }
+
+  :global(.ant-modal-body),
+  :global(.swe-modal-body) {
+    padding: 20px 24px 24px;
+  }
+
+  :global(.ant-modal-footer),
+  :global(.swe-modal-footer) {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin: 0;
+    padding: 14px 24px 18px;
+    border-top: 1px solid var(--console-management-border);
+  }
+}
+
+.runtimeConfigTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.runtimeConfigModelId {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--console-management-text-muted);
+  font-family: var(--console-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtimeConfigForm {
+  color: var(--console-management-text);
+}
+
+.runtimeConfigGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px 56px;
+}
+
+.runtimeConfigColumn {
+  min-width: 0;
+}
+
+.runtimeConfigInput {
+  width: 100%;
+}
+
+.runtimeConfigForm :global(.ant-form-item),
+.runtimeConfigForm :global(.swe-form-item) {
+  margin-bottom: 14px;
+}
+
+.runtimeConfigForm :global(.ant-form-item-label > label),
+.runtimeConfigForm :global(.swe-form-item-label > label) {
+  color: var(--console-management-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.runtimeConfigForm :global(.ant-input-number),
+.runtimeConfigForm :global(.swe-input-number) {
+  min-height: 38px;
+  border-color: var(--console-management-border-strong);
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.runtimeConfigForm :global(.ant-input-number-input),
+.runtimeConfigForm :global(.swe-input-number-input) {
+  height: 36px;
+  font-size: 14px;
+}
+
+.runtimeConfigForm :global(.ant-input-number:hover),
+.runtimeConfigForm :global(.swe-input-number:hover) {
+  border-color: var(--console-management-primary);
+}
+
+.runtimeConfigForm :global(.ant-input-number-focused),
+.runtimeConfigForm :global(.swe-input-number-focused) {
+  border-color: var(--console-management-primary);
+  box-shadow: 0 0 0 3px rgba(55, 105, 252, 0.12);
+}
+
+.runtimeConfigPresets {
+  display: flex;
+  gap: 8px;
+  margin: -4px 0 14px;
+}
+
+.runtimeConfigPreset {
+  flex: 0 1 78px;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--console-management-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--console-management-surface);
+  border: 1px solid var(--console-management-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+
+  &:hover {
+    color: var(--console-management-primary);
+    background: var(--console-management-primary-soft);
+    border-color: var(--console-management-primary);
+  }
+
+  &:focus-visible {
+    outline: 3px solid rgba(55, 105, 252, 0.22);
+    outline-offset: 1px;
+  }
+}
+
+.runtimeConfigAdvanced {
+  margin-top: 2px;
+  padding-top: 18px;
+  border-top: 1px solid var(--console-management-border);
+}
+
+.runtimeConfigAdvancedGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.runtimeConfigThinkingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.runtimeConfigSectionLabel {
+  color: var(--console-management-text);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.runtimeConfigHint {
+  margin-top: 4px;
+  color: var(--console-management-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runtimeConfigGenerationHint {
+  margin-top: -4px;
+  color: var(--console-management-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runtimeConfigReasoning {
+  margin-bottom: 0 !important;
+}
+
+.runtimeConfigReasoningGroup {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.runtimeConfigReasoningOption {
+  display: flex !important;
+  align-items: center;
+  min-height: 38px;
+  margin-inline-end: 0 !important;
+  padding: 0 12px;
+  color: var(--console-management-text);
+  font-size: 14px;
+  background: var(--console-management-surface);
+  border: 1px solid var(--console-management-border-strong);
+  border-radius: 7px;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+
+  &:hover {
+    border-color: var(--console-management-primary);
+    background: var(--console-management-primary-soft);
+  }
+
+  :global(.ant-checkbox),
+  :global(.swe-checkbox) {
+    top: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .runtimeConfigGrid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .runtimeConfigModal {
+    :global(.ant-modal-header),
+    :global(.swe-modal-header),
+    :global(.ant-modal-body),
+    :global(.swe-modal-body) {
+      padding-right: 16px;
+      padding-left: 16px;
+    }
+
+    :global(.ant-modal-footer),
+    :global(.swe-modal-footer) {
+      padding-right: 16px;
+      padding-left: 16px;
+    }
+  }
+
+  .runtimeConfigTitle {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .runtimeConfigReasoningGroup {
+    grid-template-columns: 1fr;
+  }
+
+  .runtimeConfigAdvancedGrid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+
 @media (max-width: 1350px) {
   .contentInner {
     padding-right: 16px;

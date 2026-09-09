@@ -19,6 +19,21 @@ from swe.providers.provider_manager import ProviderManager
 from swe.providers.models import ModelSlotConfig
 
 
+class FakeTenantWorkspacePool:
+    """Record tenant bootstrap requests from active-model distribution."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+
+    async def ensure_bootstrap(
+        self,
+        tenant_id: str,
+        *,
+        source_id: str | None = None,
+    ) -> None:
+        self.calls.append((tenant_id, source_id))
+
+
 def _request(
     tenant_id: str = "tenant-source",
     source_id: str | None = None,
@@ -26,12 +41,18 @@ def _request(
     headers: dict[str, str] | None = None,
     app: Any | None = None,
 ) -> SimpleNamespace:
+    state = app.state if app is not None else None
+    if state is None:
+        state = SimpleNamespace()
+    if not hasattr(state, "tenant_workspace_pool"):
+        state.tenant_workspace_pool = FakeTenantWorkspacePool()
     request = SimpleNamespace(
         headers=headers or {},
         state=SimpleNamespace(
             tenant_id=tenant_id,
             source_id=source_id,
             scope_id=scope_id,
+            tenant_workspace_pool=state.tenant_workspace_pool,
         ),
     )
     if app is not None:
@@ -91,7 +112,7 @@ class FakeProvider:
     api_key: str = ""
     base_url: str = ""
     chat_model: str = "OpenAIChatModel"
-    generate_kwargs: dict[str, Any] = field(default_factory=dict)
+    model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def has_model(self, model_id: str) -> bool:
         return any(
@@ -109,7 +130,7 @@ class FakeProvider:
             "models": self.models,
             "extra_models": self.extra_models,
             "is_custom": self.is_custom,
-            "generate_kwargs": self.generate_kwargs,
+            "model_configs": self.model_configs,
         }
 
 
@@ -148,7 +169,7 @@ class FakeManager:
             models=list(payload.get("models") or []),
             extra_models=list(payload.get("extra_models") or []),
             is_custom=bool(payload.get("is_custom")),
-            generate_kwargs=dict(payload.get("generate_kwargs") or {}),
+            model_configs=dict(payload.get("model_configs") or {}),
         )
         self._providers[provider.id] = provider
 
@@ -256,7 +277,10 @@ def test_distribute_active_model_to_bootstrapped_tenant(
                 base_url="https://api.openai.com/v1",
                 models=[{"id": "gpt-5.4", "name": "GPT-5.4"}],
                 extra_models=[{"id": "gpt-5.4-mini", "name": "GPT-5.4 mini"}],
-                generate_kwargs={"temperature": 0.2},
+                model_configs={
+                    "gpt-5.4": {"temperature": 0.2},
+                    "gpt-5.4-mini": {"temperature": 0.8},
+                },
             ),
         },
     )
@@ -325,6 +349,9 @@ def test_distribute_active_model_to_bootstrapped_tenant(
     )
     assert ensured == ["tenant-existing"]
     assert target_manager.overwritten_payloads[0]["api_key"] == "sk-source"
+    assert target_manager.overwritten_payloads[0]["model_configs"] == {
+        "gpt-5.4": {"temperature": 0.2},
+    }
     assert target_manager.activated == [("openai", "gpt-5.4")]
 
 
@@ -342,7 +369,6 @@ def test_distribute_active_model_bootstraps_missing_tenant(
         },
     )
     target_manager = FakeManager()
-    bootstrap_calls: list[str] = []
 
     monkeypatch.setattr(
         providers_router,
@@ -379,16 +405,12 @@ def test_distribute_active_model_bootstraps_missing_tenant(
         def has_seeded_bootstrap(self) -> bool:
             return False
 
-        def ensure_seeded_bootstrap(self) -> dict[str, object]:
-            assert self.source_id == "ruice"
-            bootstrap_calls.append(self.tenant_id)
-            return {"minimal": True}
-
     monkeypatch.setattr(providers_router, "TenantInitializer", FakeInitializer)
 
+    request = _request(source_id="ruice")
     result = asyncio.run(
         providers_router.distribute_active_model(
-            _request(source_id="ruice"),
+            request,
             providers_router.ActiveModelDistributionRequest(
                 target_tenant_ids=["tenant-new"],
                 overwrite=True,
@@ -397,7 +419,9 @@ def test_distribute_active_model_bootstraps_missing_tenant(
         ),
     )
 
-    assert bootstrap_calls == ["tenant-new"]
+    assert request.state.tenant_workspace_pool.calls == [
+        ("tenant-new", "ruice"),
+    ]
     assert result.results[0].success is True
     assert result.results[0].bootstrapped is True
 
@@ -523,7 +547,7 @@ def test_distribute_active_model_overwrites_builtin_provider_and_switches_active
                 base_url="https://api.openai.com/v1",
                 models=[{"id": "gpt-4.1", "name": "GPT-4.1"}],
                 extra_models=[{"id": "gpt-5.4", "name": "GPT-5.4"}],
-                generate_kwargs={"temperature": 0.3},
+                model_configs={"gpt-5.4": {"temperature": 0.3}},
             ),
         },
     )
@@ -583,6 +607,7 @@ def test_distribute_active_model_overwrites_builtin_provider_and_switches_active
     assert overwritten.api_key == "sk-new"
     assert overwritten.base_url == "https://api.openai.com/v1"
     assert overwritten.has_model("gpt-5.4") is True
+    assert overwritten.model_configs == {"gpt-5.4": {"temperature": 0.3}}
     assert result.results[0].active_llm_updated == ModelSlotConfig(
         provider_id="openai",
         model="gpt-5.4",
@@ -608,7 +633,7 @@ def test_distribute_active_model_overwrites_custom_provider_and_switches_active_
                 models=[
                     {"id": "claude-enterprise", "name": "Claude Enterprise"},
                 ],
-                generate_kwargs={"top_p": 0.9},
+                model_configs={"claude-enterprise": {"top_p": 0.9}},
             ),
         },
     )
@@ -658,6 +683,7 @@ def test_distribute_active_model_overwrites_custom_provider_and_switches_active_
     assert overwritten.is_custom is True
     assert overwritten.api_key == "secret-token"
     assert overwritten.base_url == "https://corp.example/v1"
+    assert overwritten.model_configs == {"claude-enterprise": {"top_p": 0.9}}
     assert result.results[0].provider_updated == "corp-gateway"
     assert result.results[0].active_llm_updated == ModelSlotConfig(
         provider_id="corp-gateway",
@@ -883,6 +909,7 @@ def test_distribute_active_model_http_response_includes_task_id(
 
     app = FastAPI()
     app.state.db_connection = DisconnectedAsyncTaskDb()
+    app.state.tenant_workspace_pool = FakeTenantWorkspacePool()
     app.include_router(providers_router.router)
     app.dependency_overrides[providers_router.get_provider_manager] = (
         fake_manager
@@ -993,7 +1020,9 @@ def test_active_model_distribution_lazy_loads_missing_app_db(
     }
 
 
-def test_active_model_distribution_requires_async_task_db() -> None:
+def test_active_model_distribution_requires_async_task_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """模型分发必须提交异步任务，缺少任务库时返回明确错误。"""
     source_manager = FakeManager(
         active_model=ModelSlotConfig(provider_id="openai", model="gpt-5.4"),
@@ -1004,6 +1033,11 @@ def test_active_model_distribution_requires_async_task_db() -> None:
             ),
         },
     )
+
+    async def no_db(_request):  # noqa: ANN001
+        return None
+
+    monkeypatch.setattr(providers_router, "get_or_create_async_task_db", no_db)
 
     with pytest.raises(providers_router.HTTPException) as exc_info:
         asyncio.run(
@@ -1057,6 +1091,7 @@ def test_active_model_distribution_marks_failed_when_mark_running_fails() -> (
                 model="gpt-5.4",
             ),
             source_id="src1",
+            tenant_workspace_pool=FakeTenantWorkspacePool(),
         ),
     )
 

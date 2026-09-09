@@ -26,6 +26,7 @@ class FakeMarketplace:
         self.unpublish_expert = AsyncMock()
         self.install_expert = AsyncMock()
         self.distribute_expert = AsyncMock()
+        self.get_expert_distributions = AsyncMock()
         self.recall_expert = AsyncMock()
         self._get_expert_version_service = MagicMock()
         self.marketplace_root = Path("/tmp/market")
@@ -372,3 +373,42 @@ def test_distribution_and_recall_require_manager(
     assert forbidden.status_code == 403
     assert distributed.status_code == 200
     assert recalled.status_code == 200
+
+
+def test_expert_distributions_require_manager_and_return_holders(
+    client: TestClient,
+    manager_client: TestClient,
+    test_app: FastAPI,
+) -> None:
+    test_app.state.marketplace.get_expert_distributions.return_value = [
+        {
+            "target_user_id": "alice",
+            "target_user_name": "Alice",
+            "target_bbk_id": "100",
+            "distributed_at": None,
+        },
+    ]
+
+    forbidden = client.get(
+        "/market/experts/expert-1/distributions",
+        headers={"X-Source-Id": "SRC"},
+    )
+    response = manager_client.get(
+        "/market/experts/expert-1/distributions",
+        headers={"X-Source-Id": "SRC"},
+    )
+
+    assert forbidden.status_code == 403
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "target_user_id": "alice",
+            "target_user_name": "Alice",
+            "target_bbk_id": "100",
+            "distributed_at": None,
+        },
+    ]
+    test_app.state.marketplace.get_expert_distributions.assert_awaited_once_with(
+        "SRC",
+        "expert-1",
+    )

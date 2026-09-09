@@ -4,100 +4,156 @@
   bottom: 0;
   left: 0;
   z-index: 1000;
+  box-sizing: border-box;
+  container-type: inline-size;
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--console-management-border, #e5e7eb);
+  background: var(--console-management-surface, #fff);
+  box-shadow: 0 -4px 16px rgba(29, 36, 51, 0.04);
+  font-family: var(--console-font-ui);
+}
+
+.toolbarContent {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto 44px;
+  grid-template-areas: "selection actions close";
   align-items: center;
   gap: 16px;
-  min-height: 82px;
-  padding: 8px 24px calc(8px + env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(229, 231, 235, 0.9);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 -12px 30px rgba(35, 31, 27, 0.08);
-  backdrop-filter: blur(8px);
 }
 
 .toolbarSelection {
+  grid-area: selection;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-self: start;
-  gap: 12px;
+  gap: 4px 16px;
   min-width: 0;
+
+  :global(.ant-checkbox-wrapper) {
+    min-height: 44px;
+    align-items: center;
+    white-space: nowrap;
+  }
+}
+
+.selectionStatus {
+  color: var(--console-management-text-secondary, #4b5563);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
 }
 
 .toolbarActions {
+  grid-area: actions;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  gap: 8px;
 }
 
-.toolbarAction {
-  display: flex;
-  width: 88px;
-  height: 56px;
-  flex-direction: column;
+.toolbar .toolbarAction {
+  display: inline-flex;
+  height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 6px 4px;
-  color: #4b5563;
-  font-size: 14px;
-  line-height: 20px;
-  white-space: nowrap;
-}
-
-.toolbarAction :global(.anticon) {
-  color: #3769fc;
-  font-size: 24px;
-}
-
-.toolbarAction:hover,
-.toolbarAction:focus-visible {
-  color: #2957dc;
-  background: #eef4ff;
-}
-
-.toolbarClose {
-  justify-self: end;
-  color: #4b5563;
-}
-
-.emptyState {
-  grid-column: 1;
-  margin-top: -12px;
-  color: #8a94a6;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--console-management-border, #e5e7eb);
+  border-radius: 8px;
+  color: var(--console-management-text-secondary, #4b5563);
   font-size: 13px;
   line-height: 20px;
+  white-space: nowrap;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease;
+
+  :global(.anticon) {
+    color: var(--console-conversation-primary, #3769fc);
+    font-size: 16px;
+  }
+
+  &:not(:disabled):hover {
+    color: var(--console-conversation-primary, #3769fc);
+    border-color: var(--console-conversation-primary, #3769fc);
+    background: var(--console-management-primary-soft, #eef4ff);
+  }
+
+  &:disabled {
+    color: var(--console-management-text-muted, #8a94a6);
+    background: var(--console-management-surface-subtle, #f7f9fc);
+    cursor: not-allowed;
+
+    :global(.anticon) {
+      color: inherit;
+    }
+  }
 }
 
-.toolbar :global(.ant-checkbox-checked) :global(.ant-checkbox-inner),
-.toolbar :global(.ant-checkbox-indeterminate) :global(.ant-checkbox-inner) {
-  border-color: #3769fc;
-  background-color: #3769fc;
+.toolbar .toolbarClose {
+  grid-area: close;
+  width: 44px;
+  height: 44px;
+  color: var(--console-management-text-secondary, #4b5563);
+  border-radius: 8px;
+
+  :global(.anticon) {
+    font-size: 16px;
+  }
+}
+
+.toolbarAction:focus-visible,
+.toolbarClose:focus-visible {
+  outline: 2px solid var(--console-conversation-primary, #3769fc);
+  outline-offset: 2px;
+}
+
+.toolbar :global(.ant-checkbox-checked) :global(.ant-checkbox-inner) {
+  border-color: var(--console-conversation-primary, #3769fc);
+  background-color: var(--console-conversation-primary, #3769fc);
+}
+
+.toolbar
+  :global(.ant-checkbox-indeterminate)
+  :global(.ant-checkbox-inner)::after {
+  background-color: var(--console-conversation-primary, #3769fc);
+}
+
+@container (max-width: 560px) {
+  .toolbarContent {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-areas: "selection close" "actions actions";
+    gap: 8px;
+  }
+
+  .toolbarSelection {
+    gap: 4px 12px;
+  }
+
+  .toolbarActions {
+    .toolbarAction {
+      flex: 1;
+      min-width: 0;
+      padding-inline: 8px;
+    }
+  }
 }
 
 @media (max-width: 640px) {
   .toolbar {
-    gap: 8px;
-    min-height: 78px;
-    padding-right: 12px;
-    padding-left: 12px;
+    padding-inline: 12px;
   }
+}
 
-  .toolbarActions {
-    gap: 4px;
-  }
-
-  .toolbarAction {
-    width: 72px;
-    height: 56px;
-    font-size: 12px;
+@media (pointer: coarse) {
+  .toolbar .toolbarAction {
+    min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toolbar,
-  .toolbarAction {
-    transition: none;
+  .toolbarAction,
+  .toolbarClose {
+    transition: none !important;
   }
 }

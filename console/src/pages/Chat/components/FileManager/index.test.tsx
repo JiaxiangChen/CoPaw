@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { App, Modal } from "antd";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import FileColumn from "./FileColumn";
 import FileManager from "./index";
@@ -52,11 +53,27 @@ vi.mock("@/components/agentscope-chat/Markdown", () => ({
   default: () => <div>Markdown</div>,
 }));
 
-vi.mock("@/components/agentscope-chat/FilePreviewModal", () => ({
-  default: (props: { fileName: string }) => (
-    <div data-testid="session-file-preview">{props.fileName}</div>
-  ),
-}));
+vi.mock("@/components/agentscope-chat/FilePreviewModal", () => {
+  function MockFilePreviewModal(props: {
+    fileName: string;
+    nestedPreviewMode?: string;
+  }) {
+    const [nested, setNested] = useState(false);
+    return (
+      <div
+        data-testid="session-file-preview"
+        data-nested-preview-mode={props.nestedPreviewMode}
+      >
+        {nested ? "二级预览" : props.fileName}
+        <button type="button" onClick={() => setNested(true)}>
+          模拟打开详情
+        </button>
+      </div>
+    );
+  }
+
+  return { default: MockFilePreviewModal };
+});
 
 const rootPage = {
   root: "working" as const,
@@ -171,6 +188,17 @@ describe("FileManager", () => {
     expect(screen.getByLabelText("文件列表第 2 栏")).toBeInTheDocument();
     expect(screen.getByLabelText("文件列表第 3 栏")).toBeInTheDocument();
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "全屏查看文件管理器" }),
+    );
+    expect(document.documentElement).toHaveClass(
+      "copaw-file-manager-preview-fullscreen",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "退出全屏" }));
+    expect(document.documentElement).not.toHaveClass(
+      "copaw-file-manager-preview-fullscreen",
+    );
+
     fireEvent.click(screen.getByRole("button", { name: "关闭文件管理器" }));
 
     await waitFor(() =>
@@ -208,14 +236,39 @@ describe("FileManager", () => {
       screen.getByRole("tab", { name: "当前会话文件 1" }),
     ).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByLabelText("当前会话文件")).not.toBeInTheDocument();
+    expect(screen.getByTestId("session-file-preview"))
+      .toHaveTextContent("投资简报.html");
+    expect(screen.getByTestId("session-file-preview")).toHaveAttribute(
+      "data-nested-preview-mode",
+      "replace",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "模拟打开详情" }));
     expect(screen.getByTestId("session-file-preview")).toHaveTextContent(
-      "投资简报.html",
+      "二级预览",
+    );
+
+    window.dispatchEvent(
+      new CustomEvent("copaw:chat-workspace-file", {
+        detail: {
+          action: "register",
+          fileName: "会议纪要.md",
+          fileUrl: "/files/meeting.md",
+          enableClickTracking: false,
+        },
+      }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "展开会话文件列表" }),
     );
     expect(screen.getByLabelText("当前会话文件")).toHaveTextContent(
       "投资简报.html",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /会议纪要\.md/ }));
+    expect(screen.getByTestId("session-file-preview")).toHaveTextContent(
+      "会议纪要.md",
+    );
+    expect(screen.getByTestId("session-file-preview")).not.toHaveTextContent(
+      "二级预览",
     );
     fireEvent.click(
       screen.getByRole("button", { name: "收起会话文件列表" }),

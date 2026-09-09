@@ -313,7 +313,6 @@ async def test_update_config_updates_non_none_values() -> None:
             "api_key": "gem-new",
             "chat_model": "GeminiChatModel",
             "api_key_prefix": "gem-",
-            "generate_kwargs": {"temperature": 0.5},
         },
     )
 
@@ -321,7 +320,7 @@ async def test_update_config_updates_non_none_values() -> None:
 
     assert provider.name == "Gemini Custom"
     assert provider.api_key == "gem-new"
-    assert provider.generate_kwargs == {"temperature": 0.5}
+    assert "generate_kwargs" not in provider.model_dump()
     assert info.name == "Gemini Custom"
     assert info.api_key == "gem-new"
 

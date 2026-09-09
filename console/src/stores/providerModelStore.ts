@@ -3,6 +3,7 @@ import { request } from "../api/request";
 import type {
   ActiveModelsInfo,
   GetActiveModelsRequest,
+  ModelRuntimeConfig,
   ProviderInfo,
 } from "../api/types";
 import { getIframeContext } from "./iframeStore";
@@ -36,6 +37,11 @@ interface ProviderModelState {
     params?: GetActiveModelsRequest,
   ) => Promise<ActiveModelsInfo | null>;
   setActiveModels: (activeModels: ActiveModelsInfo | null) => void;
+  setModelRuntimeConfig: (
+    providerId: string,
+    modelId: string,
+    config: ModelRuntimeConfig,
+  ) => void;
   invalidate: (options?: { providers?: boolean; active?: boolean }) => void;
   reset: () => void;
 }
@@ -95,6 +101,22 @@ function activeCacheKey(params?: GetActiveModelsRequest): string {
 
 function isFresh(entry: { loadedAt: number }): boolean {
   return Date.now() - entry.loadedAt < MODEL_DATA_TTL_MS;
+}
+
+function mergeModelRuntimeConfig(
+  providers: ProviderInfo[],
+  providerId: string,
+  modelId: string,
+  config: ModelRuntimeConfig,
+): ProviderInfo[] {
+  return providers.map((provider) =>
+    provider.id === providerId
+      ? {
+          ...provider,
+          model_configs: { ...provider.model_configs, [modelId]: config },
+        }
+      : provider,
+  );
 }
 
 function readFreshProviders(key: string): ProviderInfo[] | null {
@@ -260,6 +282,30 @@ export const useProviderModelStore = create<ProviderModelState>((set) => ({
       activeCache.set(key, { activeModels, loadedAt: Date.now() });
     }
     set({ activeModels });
+  },
+
+  setModelRuntimeConfig(providerId, modelId, config) {
+    const key = providerCacheKey();
+    const cached = providerCache.get(key);
+    if (cached) {
+      providerCache.set(key, {
+        providers: mergeModelRuntimeConfig(
+          cached.providers,
+          providerId,
+          modelId,
+          config,
+        ),
+        loadedAt: cached.loadedAt,
+      });
+    }
+    set((state) => ({
+      providers: mergeModelRuntimeConfig(
+        state.providers,
+        providerId,
+        modelId,
+        config,
+      ),
+    }));
   },
 
   invalidate(options) {

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Collapse, Input, Radio, Select } from "@agentscope-ai/design";
 import { Alert, Spin, Tag } from "antd";
-import { CheckOutlined, CloseOutlined, SearchOutlined, UserOutlined } from "@ant-design/icons";
+import {
+  CheckOutlined,
+  CloseOutlined,
+  SearchOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useIframeStore } from "@/stores/iframeStore";
 import {
   fetchTenantsBySource,
   type TenantSourceInfo,
 } from "@/api/modules/userInfo";
-import type { UserSkillStatus } from "@/api/modules/market";
 import { BBK_ID_MAP, BBK_ID_TO_NAME_MAP } from "@/constants/bbk";
 import { DEFAULT_SOURCE_ID } from "@/constants/identity";
 import type { TenantSelectorProps } from "./types";
@@ -43,6 +47,27 @@ function haveSameTenantIds(left: string[], right: string[]): boolean {
   return leftTenantIds.every((tenantId) => rightSet.has(tenantId));
 }
 
+function buildTenantOptions(
+  directoryTenants: TenantSourceInfo[],
+  excludeTenantId?: string,
+  allowedTenantIds?: string[],
+  additionalTenantOptions?: TenantSourceInfo[],
+): TenantSourceInfo[] {
+  const merged = new Map<string, TenantSourceInfo>();
+  [...directoryTenants, ...(additionalTenantOptions ?? [])].forEach((item) => {
+    if (item.tenant_id !== excludeTenantId && !merged.has(item.tenant_id)) {
+      merged.set(item.tenant_id, item);
+    }
+  });
+
+  if (!allowedTenantIds) return Array.from(merged.values());
+
+  const allowed = new Set(allowedTenantIds);
+  return Array.from(merged.values()).filter((item) =>
+    allowed.has(item.tenant_id),
+  );
+}
+
 /**
  * 统一租户选择组件
  *
@@ -68,12 +93,16 @@ export function TenantSelector({
   onTargetModeChange,
   distributedUserIds,
   distributedTriggerKey,
+  allowedTenantIds,
+  allowManualIds = true,
+  additionalTenantOptions,
 }: TenantSelectorProps) {
   const { t } = useTranslation();
   const sourceId = useIframeStore((state) => state.source) || DEFAULT_SOURCE_ID;
 
   // 是否为技能分发场景（只有技能分发才会传入有数据的 userSkillStatusMap）
-  const isSkillDistribution = !!userSkillStatusMap && userSkillStatusMap.size > 0;
+  const isSkillDistribution =
+    !!userSkillStatusMap && userSkillStatusMap.size > 0;
 
   // 加载状态
   const [loading, setLoading] = useState(false);
@@ -93,7 +122,9 @@ export function TenantSelector({
   const [filterText, setFilterText] = useState("");
 
   // 用户模式：卡片选中的租户ID（列表中的）
-  const [selectedInListTenantIds, setSelectedInListTenantIds] = useState<string[]>([]);
+  const [selectedInListTenantIds, setSelectedInListTenantIds] = useState<
+    string[]
+  >([]);
 
   // 用户模式：额外输入的租户ID（不在列表中的）
   const [extraTenantIdsText, setExtraTenantIdsText] = useState("");
@@ -103,6 +134,7 @@ export function TenantSelector({
 
   // 模式切换标记（防止切换过程中的状态同步导致闪烁）
   const isModeSwitchingRef = useRef(false);
+  const [modeSwitchVersion, setModeSwitchVersion] = useState(0);
 
   // 打开时自动加载租户信息
   useEffect(() => {
@@ -110,18 +142,38 @@ export function TenantSelector({
     setError(null);
     fetchTenantsBySource(sourceId)
       .then((items) => {
-        const filtered = excludeTenantId
-          ? items.filter((item) => item.tenant_id !== excludeTenantId)
-          : items;
-        setTenantOptions(filtered);
+        setTenantOptions(
+          buildTenantOptions(
+            items,
+            excludeTenantId,
+            allowedTenantIds,
+            additionalTenantOptions,
+          ),
+        );
       })
       .catch((err) => {
+        const fallbackOptions = buildTenantOptions(
+          [],
+          excludeTenantId,
+          allowedTenantIds,
+          additionalTenantOptions,
+        );
+        if (fallbackOptions.length > 0) {
+          setTenantOptions(fallbackOptions);
+          return;
+        }
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
         onLoadError?.(error);
       })
       .finally(() => setLoading(false));
-  }, [sourceId, excludeTenantId, onLoadError]);
+  }, [
+    sourceId,
+    excludeTenantId,
+    onLoadError,
+    allowedTenantIds,
+    additionalTenantOptions,
+  ]);
 
   // 可用租户 ID 列表
   const availableTenantIds = useMemo(() => {
@@ -175,7 +227,9 @@ export function TenantSelector({
 
   // 额外ID中，不在列表中的部分（真正的额外ID）
   const extraTenantIds = useMemo(() => {
-    return parsedExtraTenantIds.filter((id) => !availableTenantIds.includes(id));
+    return parsedExtraTenantIds.filter(
+      (id) => !availableTenantIds.includes(id),
+    );
   }, [parsedExtraTenantIds, availableTenantIds]);
 
   // 额外ID中，已在列表中的部分（需要自动选中卡片）
@@ -185,7 +239,9 @@ export function TenantSelector({
 
   // 实际的卡片选中列表（手动选中 + 额外输入中已存在于列表的自动选中）
   const effectiveInListTenantIds = useMemo(() => {
-    return Array.from(new Set([...selectedInListTenantIds, ...inListExtraTenantIds]));
+    return Array.from(
+      new Set([...selectedInListTenantIds, ...inListExtraTenantIds]),
+    );
   }, [selectedInListTenantIds, inListExtraTenantIds]);
 
   // 最终合并的用户 ID 列表
@@ -194,7 +250,9 @@ export function TenantSelector({
       return filteredTenantIds;
     }
     // 用户模式：卡片选中的 + 额外输入的（额外输入中已在列表的通过 effectiveInListTenantIds 合并）
-    return Array.from(new Set([...effectiveInListTenantIds, ...extraTenantIds]));
+    return Array.from(
+      new Set([...effectiveInListTenantIds, ...extraTenantIds]),
+    );
   }, [targetMode, filteredTenantIds, effectiveInListTenantIds, extraTenantIds]);
 
   const selectedTenantInfos = useMemo(() => {
@@ -237,23 +295,25 @@ export function TenantSelector({
     // 如果外部状态为空，清空内部状态（避免循环）
     if (selectedTenantIds.length === 0) {
       setSelectedInListTenantIds((current) =>
-        current.length === 0 ? current : []
+        current.length === 0 ? current : [],
       );
       // 用户正在编辑时不重置额外输入框
       if (!isEditingExtra) {
-        setExtraTenantIdsText((current) =>
-          current === "" ? current : ""
-        );
+        setExtraTenantIdsText((current) => (current === "" ? current : ""));
       }
       return;
     }
 
     // 拆分：列表中的 → 卡片选中，不在列表中的 → 额外ID
-    const inList = selectedTenantIds.filter((id) => availableTenantIds.includes(id));
-    const extra = selectedTenantIds.filter((id) => !availableTenantIds.includes(id));
+    const inList = selectedTenantIds.filter((id) =>
+      availableTenantIds.includes(id),
+    );
+    const extra = selectedTenantIds.filter(
+      (id) => !availableTenantIds.includes(id),
+    );
 
     setSelectedInListTenantIds((current) =>
-      haveSameTenantIds(current, inList) ? current : inList
+      haveSameTenantIds(current, inList) ? current : inList,
     );
     // 用户正在编辑时不重置额外输入框内容
     if (!isEditingExtra) {
@@ -262,7 +322,13 @@ export function TenantSelector({
         return current === nextText ? current : nextText;
       });
     }
-  }, [availableTenantIds, selectedTenantIds, targetMode, isEditingExtra]);
+  }, [
+    availableTenantIds,
+    selectedTenantIds,
+    targetMode,
+    isEditingExtra,
+    modeSwitchVersion,
+  ]);
 
   // 内部状态变更通知外部
   // 注意：分成两个独立的 useEffect，避免依赖互相影响导致闪烁
@@ -313,7 +379,8 @@ export function TenantSelector({
     }
 
     // triggerKey 变化：用户点击 checkbox
-    const triggerKeyChanged = triggerKey > 0 && triggerKey !== prevTriggerKeyRef.current;
+    const triggerKeyChanged =
+      triggerKey > 0 && triggerKey !== prevTriggerKeyRef.current;
     if (triggerKeyChanged) {
       prevTriggerKeyRef.current = triggerKey;
     }
@@ -341,7 +408,11 @@ export function TenantSelector({
     } else if (triggerKeyChanged && !canSetProperly) {
       // triggerKey 变化但 tenantLookup 暂无数据：标记需要后续设置
       needsResetWhenTenantLookupReadyRef.current = true;
-    } else if (!triggerKeyChanged && needsResetWhenTenantLookupReadyRef.current && canSetProperly) {
+    } else if (
+      !triggerKeyChanged &&
+      needsResetWhenTenantLookupReadyRef.current &&
+      canSetProperly
+    ) {
       // tenantLookup 加载完成且有待处理的设置请求：执行设置
       if (targetMode === "bbk_id") {
         const bbkIdSet = new Set<string>();
@@ -362,22 +433,28 @@ export function TenantSelector({
   }, [distributedUserIds, distributedTriggerKey, targetMode, tenantLookup]);
 
   // 切换模式时清空选择（先清空状态，再切换模式，避免同步 useEffect 触发）
-  const handleModeChange = useCallback((mode: "bbk_id" | "user_id") => {
-    // 先清空所有状态
-    setSelectedBbkIds([]);
-    setFilterText("");
-    setSelectedInListTenantIds([]);
-    setExtraTenantIdsText("");
-    setIsEditingExtra(false);
-    // 设置模式切换标记，防止同步 useEffect 在切换过程中触发
-    isModeSwitchingRef.current = true;
-    // 最后切换模式
-    setTargetMode(mode);
-    // 在下一个渲染周期清除标记
-    requestAnimationFrame(() => {
-      isModeSwitchingRef.current = false;
-    });
-  }, []);
+  const handleModeChange = useCallback(
+    (mode: "bbk_id" | "user_id") => {
+      // 先清空所有状态
+      setSelectedBbkIds([]);
+      setFilterText("");
+      setSelectedInListTenantIds([]);
+      setExtraTenantIdsText("");
+      setIsEditingExtra(false);
+      // 设置模式切换标记，防止同步 useEffect 在切换过程中触发
+      isModeSwitchingRef.current = true;
+      // 最后切换模式
+      setTargetMode(mode);
+      // 在下一个渲染周期清除标记
+      requestAnimationFrame(() => {
+        isModeSwitchingRef.current = false;
+        if (selectedTenantIds.length > 0) {
+          setModeSwitchVersion((version) => version + 1);
+        }
+      });
+    },
+    [selectedTenantIds.length],
+  );
 
   // 全选/清空按钮（使用函数式更新避免依赖）
   const handleSelectAll = useCallback(() => {
@@ -394,26 +471,23 @@ export function TenantSelector({
   const handleUserCardClick = useCallback(
     (tenantId: string, selected: boolean) => {
       setSelectedInListTenantIds((prev) =>
-        selected ? prev.filter((id) => id !== tenantId) : [...prev, tenantId]
+        selected ? prev.filter((id) => id !== tenantId) : [...prev, tenantId],
       );
     },
-    []
+    [],
   );
 
   // 移除已选租户（使用函数式更新）
   // 同时清除手动选中和额外输入中的该ID
-  const handleRemoveSelected = useCallback(
-    (tenantId: string) => {
-      // 从手动选中列表移除
-      setSelectedInListTenantIds((prev) => prev.filter((id) => id !== tenantId));
-      // 从额外输入文本中移除
-      setExtraTenantIdsText((prev) => {
-        const ids = parseManualTenantIds(prev).filter((id) => id !== tenantId);
-        return ids.join("\n");
-      });
-    },
-    []
-  );
+  const handleRemoveSelected = useCallback((tenantId: string) => {
+    // 从手动选中列表移除
+    setSelectedInListTenantIds((prev) => prev.filter((id) => id !== tenantId));
+    // 从额外输入文本中移除
+    setExtraTenantIdsText((prev) => {
+      const ids = parseManualTenantIds(prev).filter((id) => id !== tenantId);
+      return ids.join("\n");
+    });
+  }, []);
 
   // 渲染租户名称
   const renderTenantName = useCallback(
@@ -423,7 +497,7 @@ export function TenantSelector({
         ? `${tenant.tenant_name} (${tenantId})`
         : tenantId;
     },
-    [tenantLookup]
+    [tenantLookup],
   );
 
   // 加载错误时显示提示
@@ -441,7 +515,9 @@ export function TenantSelector({
     <div className={styles.tenantSelector}>
       {/* 分发目标模式选择 */}
       <div className={styles.modeSection}>
-        <div className={styles.sectionLabel}>{t("tenantSelector.targetMode")}</div>
+        <div className={styles.sectionLabel}>
+          {t("tenantSelector.targetMode")}
+        </div>
         <Radio.Group
           value={targetMode}
           onChange={(event) => handleModeChange(event.target.value)}
@@ -493,13 +569,29 @@ export function TenantSelector({
                         <UserOutlined className={styles.collapseIcon} />
                         {group.bbkName}
                         <span className={styles.collapseCount}>
-                          {t("tenantSelector.userCount", { count: group.users.length })}
+                          {t("tenantSelector.userCount", {
+                            count: group.users.length,
+                          })}
                         </span>
                         {/* 机构统计 - 仅技能分发场景显示 */}
                         {isSkillDistribution && (
                           <span className={styles.collapseStats}>
-                            覆盖: {group.users.filter(u => userSkillStatusMap?.get(u.tenant_id)?.status === "update").length} |
-                            首次: {group.users.filter(u => userSkillStatusMap?.get(u.tenant_id)?.status === "first_time").length}
+                            覆盖:{" "}
+                            {
+                              group.users.filter(
+                                (u) =>
+                                  userSkillStatusMap?.get(u.tenant_id)
+                                    ?.status === "update",
+                              ).length
+                            }{" "}
+                            | 首次:{" "}
+                            {
+                              group.users.filter(
+                                (u) =>
+                                  userSkillStatusMap?.get(u.tenant_id)
+                                    ?.status === "first_time",
+                              ).length
+                            }
                           </span>
                         )}
                       </span>
@@ -507,7 +599,9 @@ export function TenantSelector({
                     children: (
                       <div className={styles.userDetailGrid}>
                         {group.users.map((user) => {
-                          const status = userSkillStatusMap?.get(user.tenant_id);
+                          const status = userSkillStatusMap?.get(
+                            user.tenant_id,
+                          );
                           return (
                             <div
                               key={user.tenant_id}
@@ -520,14 +614,22 @@ export function TenantSelector({
                               {/* 用户状态 - 仅技能分发场景显示 */}
                               {status && isSkillDistribution && (
                                 <div className={styles.userDetailStatus}>
-                                  {status.status === "update" && status.current_version && (
-                                    <span style={{ color: "#1890ff" }}>{status.current_version}→v{skillVersion || "新"}</span>
-                                  )}
+                                  {status.status === "update" &&
+                                    status.current_version && (
+                                      <span style={{ color: "#1890ff" }}>
+                                        {status.current_version}→v
+                                        {skillVersion || "新"}
+                                      </span>
+                                    )}
                                   {status.status === "first_time" && (
-                                    <span style={{ color: "#52c41a" }}>首次</span>
+                                    <span style={{ color: "#52c41a" }}>
+                                      首次
+                                    </span>
                                   )}
                                   {status.status === "conflict" && (
-                                    <span style={{ color: "#f5222d" }}>⚠ 自建冲突</span>
+                                    <span style={{ color: "#f5222d" }}>
+                                      ⚠ 自建冲突
+                                    </span>
                                   )}
                                 </div>
                               )}
@@ -589,26 +691,28 @@ export function TenantSelector({
                     })}
                   </span>
                   <div className={styles.tagList}>
-                    {[...effectiveInListTenantIds, ...extraTenantIds].map((tenantId) => {
-                      const isInList = availableTenantIds.includes(tenantId);
-                      const displayName = isInList
-                        ? renderTenantName(tenantId)
-                        : tenantId;
-                      return (
-                        <Tag
-                          key={tenantId}
-                          className={styles.selectedTag}
-                          closable
-                          closeIcon={<CloseOutlined />}
-                          onClose={(e) => {
-                            e.preventDefault();
-                            handleRemoveSelected(tenantId);
-                          }}
-                        >
-                          {displayName}
-                        </Tag>
-                      );
-                    })}
+                    {[...effectiveInListTenantIds, ...extraTenantIds].map(
+                      (tenantId) => {
+                        const isInList = availableTenantIds.includes(tenantId);
+                        const displayName = isInList
+                          ? renderTenantName(tenantId)
+                          : tenantId;
+                        return (
+                          <Tag
+                            key={tenantId}
+                            className={styles.selectedTag}
+                            closable
+                            closeIcon={<CloseOutlined />}
+                            onClose={(e) => {
+                              e.preventDefault();
+                              handleRemoveSelected(tenantId);
+                            }}
+                          >
+                            {displayName}
+                          </Tag>
+                        );
+                      },
+                    )}
                   </div>
                 </div>
               )}
@@ -620,9 +724,10 @@ export function TenantSelector({
                   const status = userSkillStatusMap?.get(tenantId);
                   const tenant = tenantLookup.get(tenantId);
                   // 分行名称 - 仅技能分发场景显示
-                  const branchName = isSkillDistribution && tenant?.bbk_id
-                    ? (BBK_ID_TO_NAME_MAP[tenant.bbk_id] || tenant.bbk_id)
-                    : "";
+                  const branchName =
+                    isSkillDistribution && tenant?.bbk_id
+                      ? BBK_ID_TO_NAME_MAP[tenant.bbk_id] || tenant.bbk_id
+                      : "";
                   return (
                     <button
                       key={tenantId}
@@ -630,9 +735,7 @@ export function TenantSelector({
                       onClick={() => handleUserCardClick(tenantId, selected)}
                       className={`${styles.userCard} ${
                         branchName ? styles.userCardWithBranch : ""
-                      } ${
-                        selected ? styles.userCardSelected : ""
-                      }`}
+                      } ${selected ? styles.userCardSelected : ""}`}
                     >
                       {branchName && (
                         <span className={styles.branchBadge}>{branchName}</span>
@@ -644,20 +747,25 @@ export function TenantSelector({
                       ) : (
                         <span className={styles.emptyIcon}>○</span>
                       )}
-                      <span className={styles.userName}>{renderTenantName(tenantId)}</span>
+                      <span className={styles.userName}>
+                        {renderTenantName(tenantId)}
+                      </span>
                       {/* 只有选中后才显示状态文字 */}
                       {status && selected && (
                         <span className={styles.userStatus}>
-                          {status.status === "update" && status.current_version && (
-                            <span className={styles.versionChange}>
-                              {status.current_version}→v{skillVersion || "新"}
-                            </span>
-                          )}
+                          {status.status === "update" &&
+                            status.current_version && (
+                              <span className={styles.versionChange}>
+                                {status.current_version}→v{skillVersion || "新"}
+                              </span>
+                            )}
                           {status.status === "first_time" && (
                             <span className={styles.firstTimeLabel}>首次</span>
                           )}
                           {status.status === "conflict" && (
-                            <span className={styles.conflictLabel}>⚠ 自建冲突</span>
+                            <span className={styles.conflictLabel}>
+                              ⚠ 自建冲突
+                            </span>
                           )}
                         </span>
                       )}
@@ -672,36 +780,42 @@ export function TenantSelector({
               </div>
 
               {/* 额外租户ID输入 */}
-              <div className={styles.extraInputSection}>
-                <div className={styles.sectionLabel}>
-                  {t("tenantSelector.extraInput")}
+              {allowManualIds ? (
+                <div className={styles.extraInputSection}>
+                  <div className={styles.sectionLabel}>
+                    {t("tenantSelector.extraInput")}
+                  </div>
+                  <div className={styles.hint}>
+                    {t("tenantSelector.extraInputHint")}
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={extraTenantIdsText}
+                    onChange={(e) => {
+                      setIsEditingExtra(true);
+                      setExtraTenantIdsText(e.target.value);
+                    }}
+                    onBlur={() => {
+                      setIsEditingExtra(false);
+                      // 编辑结束后，解析并通知外部
+                      const parsed = parseManualTenantIds(extraTenantIdsText);
+                      const extraIds = parsed.filter(
+                        (id) => !availableTenantIds.includes(id),
+                      );
+                      const inListIds = parsed.filter((id) =>
+                        availableTenantIds.includes(id),
+                      );
+                      setSelectedInListTenantIds((prev) =>
+                        Array.from(new Set([...prev, ...inListIds])),
+                      );
+                      // 整理文本格式
+                      setExtraTenantIdsText(extraIds.join("\n"));
+                    }}
+                    placeholder={t("tenantSelector.extraInputPlaceholder")}
+                    className={styles.manualInput}
+                  />
                 </div>
-                <div className={styles.hint}>
-                  {t("tenantSelector.extraInputHint")}
-                </div>
-                <textarea
-                  rows={3}
-                  value={extraTenantIdsText}
-                  onChange={(e) => {
-                    setIsEditingExtra(true);
-                    setExtraTenantIdsText(e.target.value);
-                  }}
-                  onBlur={() => {
-                    setIsEditingExtra(false);
-                    // 编辑结束后，解析并通知外部
-                    const parsed = parseManualTenantIds(extraTenantIdsText);
-                    const extraIds = parsed.filter((id) => !availableTenantIds.includes(id));
-                    const inListIds = parsed.filter((id) => availableTenantIds.includes(id));
-                    setSelectedInListTenantIds((prev) =>
-                      Array.from(new Set([...prev, ...inListIds]))
-                    );
-                    // 整理文本格式
-                    setExtraTenantIdsText(extraIds.join("\n"));
-                  }}
-                  placeholder={t("tenantSelector.extraInputPlaceholder")}
-                  className={styles.manualInput}
-                />
-              </div>
+              ) : null}
             </>
           )}
         </>

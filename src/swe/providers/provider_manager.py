@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from swe.providers.provider import (
     ModelInfo,
+    ModelRuntimeConfig,
     Provider,
     ProviderInfo,
 )
@@ -798,7 +799,11 @@ class ProviderManager:
             raise ValueError(
                 f"Active provider '{model.provider_id}' not found.",
             )
-        return provider.get_chat_model_instance(model.model)
+        model_config = provider.get_model_config(model.model)
+        return provider.get_chat_model_instance(
+            model.model,
+            generation_kwargs=provider.build_generation_kwargs(model_config),
+        )
 
     def _prepare_disk_storage(self):
         """Prepare directory structure"""
@@ -1035,7 +1040,7 @@ class ProviderManager:
                     builtin.base_url = provider.base_url
                 builtin.api_key = provider.api_key
                 builtin.extra_models = provider.extra_models
-                builtin.generate_kwargs.update(provider.generate_kwargs)
+                builtin.model_configs = provider.model_configs
             else:
                 self._reset_builtin_provider(provider_id)
 
@@ -1170,6 +1175,25 @@ class ProviderManager:
 
     def update_provider(self, provider_id: str, config: Dict) -> bool:
         return self._catalog_service().update_provider(provider_id, config)
+
+    def get_model_config(
+        self,
+        provider_id: str,
+        model_id: str,
+    ) -> ModelRuntimeConfig:
+        return self._catalog_service().get_model_config(provider_id, model_id)
+
+    def update_model_config(
+        self,
+        provider_id: str,
+        model_id: str,
+        updates: Dict,
+    ) -> ModelRuntimeConfig:
+        return self._catalog_service().update_model_config(
+            provider_id,
+            model_id,
+            updates,
+        )
 
     async def fetch_provider_models(
         self,
@@ -1415,7 +1439,7 @@ class ProviderManager:
                     builtin.base_url = provider.base_url
                 builtin.api_key = provider.api_key
                 builtin.extra_models = provider.extra_models
-                builtin.generate_kwargs.update(provider.generate_kwargs)
+                builtin.model_configs = provider.model_configs
         # Load custom providers
         for provider_file in self._repository.custom_provider_paths(
             self.tenant_id,

@@ -448,6 +448,17 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
     """
 
     _reply_task: asyncio.Task[Any] | None
+    _resolved_model_provider: Any | None
+
+    def _apply_model_input_budget(self, model_config: Any) -> None:
+        """Apply a selected model's context capacity to this run only."""
+        max_input_length = getattr(model_config, "max_input_length", None)
+        if max_input_length is not None:
+            self._agent_config.running.max_input_length = max_input_length
+
+    def _capture_model_provider_snapshot(self, provider: Any) -> None:
+        """Retain the Provider state selected when this Agent was created."""
+        self._resolved_model_provider = provider
 
     @staticmethod
     def _rebuild_mcp_client(client: Any) -> Any | None:
@@ -503,7 +514,8 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
             workspace_dir: Workspace directory for reading prompt files
                 (if None, uses global WORKING_DIR)
         """
-        self._agent_config = agent_config
+        self._agent_config = agent_config.model_copy(deep=True)
+        agent_config = self._agent_config
         self._env_context = env_context
         self._request_context = dict(request_context or {})
         self._mcp_clients = mcp_clients or []
@@ -518,6 +530,7 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         self._fallback_model_slot = fallback_model_slot
         self._fallback_model_provider = fallback_model_provider
         self._resolved_model_slot: dict[str, str] = {}
+        self._resolved_model_provider = None
         self._system_prompt_override = system_prompt_override
         self._source_tool_versions = tuple(source_tool_versions)
         self._skill_tool_registry = SkillToolRegistry()

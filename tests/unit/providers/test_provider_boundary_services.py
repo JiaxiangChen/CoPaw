@@ -78,6 +78,61 @@ def test_runtime_cache_uses_injected_model_cache_reset() -> None:
     assert invalidated_scopes == ["tenant-a"]
 
 
+def test_updating_model_config_invalidates_tenant_model_caches() -> None:
+    from swe.providers.provider_catalog_service import ProviderCatalogService
+
+    provider = OpenAIProvider(
+        id="openai",
+        name="OpenAI",
+        models=[ModelInfo(id="gpt-5", name="GPT-5")],
+    )
+
+    class FakeManager:
+        tenant_id = "tenant-a"
+        builtin_providers = {"openai": provider}
+        custom_providers: dict[str, OpenAIProvider] = {}
+
+        def __init__(self) -> None:
+            self.saved: list[OpenAIProvider] = []
+
+        def get_provider(self, provider_id: str) -> OpenAIProvider | None:
+            return provider if provider_id == "openai" else None
+
+        def _save_provider(
+            self,
+            saved_provider: OpenAIProvider,
+            *,
+            is_builtin: bool,
+        ) -> None:
+            assert is_builtin is True
+            self.saved.append(saved_provider)
+
+    class FakeRuntimeCache:
+        def __init__(self) -> None:
+            self.invalidated_scopes: list[str] = []
+
+        def invalidate_provider_scope(self, scope: str) -> None:
+            self.invalidated_scopes.append(scope)
+
+    manager = FakeManager()
+    runtime_cache = FakeRuntimeCache()
+    catalog = ProviderCatalogService(
+        manager,
+        repository=object(),
+        runtime_cache=runtime_cache,
+    )
+
+    config = catalog.update_model_config(
+        "openai",
+        "gpt-5",
+        {"temperature": 0.2},
+    )
+
+    assert config.temperature == 0.2
+    assert manager.saved == [provider]
+    assert runtime_cache.invalidated_scopes == ["tenant-a"]
+
+
 def test_catalog_deletes_custom_provider_through_repository_seam() -> None:
     from swe.providers.provider_catalog_service import ProviderCatalogService
 

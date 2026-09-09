@@ -18,6 +18,8 @@ from swe.agents.hook_runtime.models import (
     HookMatcherGroupConfig,
     HookSessionState,
     HookSessionOverlay,
+    MonitoredSkillHookSource,
+    SkillHookFileVersion,
     AdditionalContext,
     MergedHookResult,
     StopHookExecutionResult,
@@ -303,6 +305,22 @@ def test_hook_config_enabled_accepts_loaded_skill_sources() -> None:
     assert _hook_config_enabled(HookConfig(), _agent_config(), state)
 
 
+def test_hook_config_enabled_accepts_monitored_skill_sources() -> None:
+    state = HookSessionState(
+        monitored_skill_sources=[
+            MonitoredSkillHookSource(
+                source_id="skill:xlsx",
+                skill_name="xlsx",
+                skill_root="/workspace/skills/xlsx",
+                source_path="/workspace/skills/xlsx/hooks/hooks.json",
+                file_version=SkillHookFileVersion(exists=False),
+            ),
+        ],
+    )
+
+    assert _hook_config_enabled(HookConfig(), _agent_config(), state)
+
+
 @pytest.mark.asyncio
 async def test_create_session_skill_detector_loads_skill_hooks(
     tmp_path,
@@ -477,6 +495,49 @@ async def test_session_detector_skips_hooks_changed_after_snapshot(
     )
 
     assert not state.loaded_skill_sources
+
+
+@pytest.mark.asyncio
+async def test_skill_detector_monitors_initially_invalid_skill_hooks(
+    tmp_path,
+) -> None:
+    skill_root = tmp_path / "skills" / "xlsx"
+    (skill_root / "hooks").mkdir(parents=True)
+    (skill_root / "hooks" / "hooks.json").write_text(
+        "{",
+        encoding="utf-8",
+    )
+    state = HookSessionState()
+
+    def get_state() -> HookSessionState:
+        return state
+
+    def set_state(new_state: HookSessionState) -> None:
+        nonlocal state
+        state = new_state
+
+    detector = _create_session_skill_detector(
+        workspace_dir=tmp_path,
+        tenant_id="tenant-a",
+        user_id="user-1",
+        session_id="session-1",
+        channel="console",
+        source_id="source-1",
+        enabled_skills=["xlsx"],
+        get_hook_state=get_state,
+        set_hook_state=set_state,
+        approved_http_urls=set(),
+    )
+
+    await detector.start_skill(
+        "xlsx",
+        trigger_tool="user_message",
+        trigger_reason="declared",
+        load_hooks=True,
+    )
+
+    assert state.monitored_skill_sources[0].skill_name == "xlsx"
+    assert state.loaded_skill_sources == []
 
 
 @pytest.mark.asyncio

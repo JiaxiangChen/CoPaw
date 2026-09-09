@@ -38,7 +38,6 @@ const providerFixtures = [
     require_api_key: true,
     api_key: "sk-test",
     base_url: "https://api.openai.com",
-    generate_kwargs: {},
   },
   {
     id: "empty",
@@ -55,7 +54,6 @@ const providerFixtures = [
     require_api_key: true,
     api_key: "sk-empty",
     base_url: "https://example.com",
-    generate_kwargs: {},
   },
 ] satisfies ProviderInfo[];
 

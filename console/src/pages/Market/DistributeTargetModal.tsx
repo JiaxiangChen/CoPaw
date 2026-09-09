@@ -1,7 +1,7 @@
 /**
  * 通用分发目标弹窗。
  *
- * 支持技能和 MCP 分发，统一交互和布局。
+ * 支持技能、MCP 和专家分发，统一交互和布局。
  */
 import { useEffect, useMemo, useState } from "react";
 import { Modal, message } from "antd";
@@ -10,6 +10,7 @@ import type {
   UserSkillStatus,
   DistributionPreviewResponse,
   MarketSkill,
+  MarketExpert,
 } from "../../api/modules/market";
 import { marketMcpApi } from "../../api/modules/marketMcp";
 import { TenantSelector } from "../../components/TenantSelector";
@@ -18,12 +19,12 @@ import { fetchTenantsBySource } from "../../api/modules/userInfo";
 import type { MarketMCPItem } from "../../api/types";
 import type { TargetMode } from "../../components/TenantSelector/types";
 
-export type DistributeTargetType = "skill" | "mcp";
+export type DistributeTargetType = "skill" | "mcp" | "expert";
 
 interface DistributeTargetModalProps {
   open: boolean;
   type: DistributeTargetType;
-  item: MarketSkill | MarketMCPItem | null;
+  item: MarketSkill | MarketMCPItem | MarketExpert | null;
   sourceId: string;
   onClose: () => void;
   onSuccess: () => void;
@@ -131,7 +132,7 @@ export function DistributeTargetModal({
           payload,
         );
         message.success(`技能分发任务已提交：${result.task_id}`);
-      } else {
+      } else if (type === "mcp") {
         const result = await marketMcpApi.distributeMCP(
           (item as MarketMCPItem).item_id,
           {
@@ -140,6 +141,35 @@ export function DistributeTargetModal({
           },
         );
         message.success(`MCP 分发任务已提交：${result.task_id}`);
+      } else {
+        const result = await marketApi.distributeExpert(
+          sourceId,
+          (item as MarketExpert).item_id,
+          { target_type: "user_id", target_values: selectedTenantIds },
+        );
+        const failed = result.results.filter((entry) => !entry.success);
+        if (failed.length > 0) {
+          Modal.info({
+            title: result.distributed_count > 0 ? "部分分发成功" : "分发未生效",
+            content: (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div>成功分发 {result.distributed_count} 个用户</div>
+                <div>以下 {failed.length} 个用户分发失败：</div>
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                  {failed
+                    .map(
+                      (entry) =>
+                        `${entry.user_id}（${entry.reason || "未知原因"}）`,
+                    )
+                    .join("\n")}
+                </pre>
+              </div>
+            ),
+            okText: "关闭",
+          });
+        } else {
+          message.success(`已分发 ${result.distributed_count} 个用户`);
+        }
       }
       onSuccess();
       onClose();
@@ -153,7 +183,9 @@ export function DistributeTargetModal({
   const hintText =
     type === "skill"
       ? "将当前技能分发到目标用户的工作空间中，用户可在「我的技能」中查看。"
-      : "将当前市场 MCP 分发到目标租户的 default agent 中，如已存在同名 MCP 将覆盖。";
+      : type === "mcp"
+      ? "将当前市场 MCP 分发到目标租户的 default agent 中，如已存在同名 MCP 将覆盖。"
+      : "将当前专家分发到目标用户的 default agent 中。";
 
   return (
     <Modal

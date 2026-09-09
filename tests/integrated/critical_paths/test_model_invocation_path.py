@@ -67,3 +67,31 @@ async def test_provider_model_factory_wrappers_and_retry_are_in_invocation_path(
 
     assert response.content[0]["text"] == "retry ok"
     assert len(bottom_model.calls) == 2
+
+
+def test_provider_model_factory_passes_model_generation_config(
+    monkeypatch,
+) -> None:
+    bottom_model = DeterministicChatModel([])
+    provider = FakeProvider(
+        bottom_model,
+        generation_kwargs={"temperature": 0.2, "max_tokens": 4_096},
+    )
+    manager = FakeProviderManager(provider)
+
+    monkeypatch.setattr(
+        model_factory.ProviderManager,
+        "ensure_tenant_provider_storage",
+        lambda _tenant_id: None,
+    )
+    monkeypatch.setattr(
+        model_factory.ProviderManager,
+        "get_instance",
+        lambda _tenant_id=None: manager,
+    )
+
+    model_factory.create_model_and_formatter()
+
+    assert provider.request_generation_kwargs == [
+        {"temperature": 0.2, "max_tokens": 4_096},
+    ]
