@@ -112,6 +112,20 @@ describe("DictationControl", () => {
     expect(screen.getByRole("button", { name: "语音输入" })).toHaveFocus();
     expect(abort).toHaveBeenCalled();
   });
+  it("keeps the action row compact while listening and after no speech", async () => {
+    render(<Composer />);
+    await begin();
+    expect(
+      screen.queryByText("请说话，停止后填入输入框"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("正在启动麦克风…")).not.toBeInTheDocument();
+    expect(screen.queryByText("正在整理文字…")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "停止语音输入" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("未识别到语音");
+    expect(screen.getByRole("button", { name: "语音输入" })).toBeVisible();
+  });
   it("cancels active capture when the composer is disabled", async () => {
     const { rerender } = render(<Composer />);
     await begin();
