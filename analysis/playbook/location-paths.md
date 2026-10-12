@@ -243,6 +243,14 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 统计和技能明细各自通过 GET /task-type-report/export 导出后端 XLSX，传当前完整筛选、移除分页，包含未加载的行；模拟模式禁用导出。50000行以上后端返回413。契约见 docs/superpowers/specs/2026-09-14-claw-report-console/API.md。
 - 客户行为同时展示去重客户数和点击总次数：`insight_customer_count` / `insight_count`、`phone_customer_count` / `phone_count`；次数列位于对应覆盖率之后，非名单方案显示“—”。
 
+## 创建计划的经营场景可见范围
+
+- `src/swe/app/wealth_plans/router.py` 的 `_fetch_external_scene_skills()` 调用外部 `POST /api/agent/workspace/skill-config/list`，只传当前请求分行 `bbkId` 和 `category`；产品大类为空表示全部。
+- 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
+- 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
+- 排查入口：父系统 `iframeContext.bbk` → `X-Bbk-Id` → `request.state.bbk_id`；场景卡片来源文案 `skillBbkLabel` 只用于展示。
+- 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/test_router.py -q`。
+
 ## 财富规划任务类型与技能/MCP 下发
 
 - `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
