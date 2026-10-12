@@ -40,6 +40,7 @@ describe("Calendar", () => {
   it("日历事项显示当天命中的场景名而不是计划名", () => {
     render(
       <Calendar
+        sources={["分行关注", "行长关注", "我的关注"]}
         visible={[PLAN]}
         dimension="week"
         anchor="2026-09-14"

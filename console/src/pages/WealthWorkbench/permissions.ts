@@ -17,6 +17,14 @@
 /** 工作台角色；unknown 为未识别身份的伪角色（deny by default，无任何权限） */
 export type WealthRole = "rm" | "president" | "middle" | "unknown";
 
+/** 看板来源范围；与后端管理角色的来源过滤保持一致。 */
+export const BOARD_SOURCES_BY_ROLE: Record<WealthRole, readonly string[]> = {
+  rm: ["分行关注", "行长关注", "我的关注"],
+  president: ["分行关注", "行长关注"],
+  middle: ["分行关注"],
+  unknown: [],
+};
+
 /** 受权限控制的页面组；tasks 代表今日任务 / 待触达客户 / 已完成三页 */
 export type WealthPage = "board" | "create" | "tasks";
 

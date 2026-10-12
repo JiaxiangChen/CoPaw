@@ -2,6 +2,13 @@
 
 本文档只收录仓库中已经出现过、且有明确入口可追的高频报错。
 
+## 财富规划看板“全部”混入不适用岗位的关注来源
+
+- 可见范围：行长（含 RB0108 理财主管）查看本行“分行关注、行长关注”；中台只查看本行“分行关注”。客户经理仍按本行创建/分发关系查看规划。
+- 后端：`roles.py` 的 `get_visible_source_labels()` 同时用于 `WealthPlanStore.list_for_viewer()` 的内存/SQL 查询和详情接口的来源校验。仅隐藏前端分类无法阻止“全部”混入其他来源，也无法限制直接访问详情。
+- 前端：`permissions.ts` 的 `BOARD_SOURCES_BY_ROLE` 控制看板分类、概览数量、日历、列表和图例。前后端来源规则需同步；这是按规划来源过滤，不是按场景名称删除或合并不同规划。
+- 排查入口：`src/swe/app/wealth_plans/roles.py`、`store.py`、`router.py` 及 `console/src/pages/WealthWorkbench/Board/`。验证同分行、跨分行、创建人/目标用户，以及管理岗位别名。
+
 ## 财富工作台在旧内核浏览器报 hidePopover is not a function
 
 - 原因：Toast 直接调用原生 Popover API；不支持该 API 的浏览器在组件初始化隐藏提示时就会报错，显示提示时也可能报 `showPopover is not a function`。
