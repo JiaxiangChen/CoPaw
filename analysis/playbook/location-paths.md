@@ -274,3 +274,14 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
+
+### 财富规划分发目标
+
+- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，调用 `POST /user-info/positions/by-branch`。
+- 后端代理：`src/swe/app/routers/user_info.py::query_user_positions`，POST 到网关 `getUserPostionByBrn`；凭证来自环境配置的 `SWE_USER_POSITION_HEADER_KEY` 和 `SWE_USER_POSITION_HEADER_VALUE`，两个环境暂为 `xxx`、`yyyy`，可通过环境变量覆盖。
+- 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值，修改后重启后端生效。
+- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mOrgCode ← orgCode (vorgcode)`、`mOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
+- 上游成功标记为 `code=success`；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
+- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先调用 `POST /user-info/branches/by-branch`，入参为登录分行 `bbk`、`mOrgLvl=30`、`sysId=retailbanking`，再将所选条目的 `mOrgCode/mOrgLvl` 直接传给人员接口（不递归展开 `leaf=false`）。
+- 支行上游 `BranchTreeInfoService` 地址由 `SWE_BRANCH_TREE_API_URL` 在 dev/prd 中配置，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `wmcomsrvgatewayxc.paas.cmbchina.cn`，复用人员接口的 header 凭证配置。
+- 中台可跨支行累计选择人员；当前候选列表与全选操作仅针对当前支行，已选人员信息保留用于发布及移除。快速切换支行时过期响应不更新当前列表。

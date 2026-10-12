@@ -572,6 +572,24 @@ USER_INFO_API_URL = EnvVarLoader.get_str(
     "",
 )
 
+# 机构岗位人员查询地址，由 dev/prd 环境配置提供。
+USER_POSITION_API_URL = EnvVarLoader.get_str(
+    "SWE_USER_POSITION_API_URL",
+    "",
+)
+USER_POSITION_HEADER_KEY = EnvVarLoader.get_str(
+    "SWE_USER_POSITION_HEADER_KEY",
+    "",
+)
+USER_POSITION_HEADER_VALUE = EnvVarLoader.get_str(
+    "SWE_USER_POSITION_HEADER_VALUE",
+    "",
+)
+BRANCH_TREE_API_URL = EnvVarLoader.get_str(
+    "SWE_BRANCH_TREE_API_URL",
+    "",
+)
+
 # market 服务内部端点配置。
 # bootstrap 完成后回调 market 同步 swe_skills 表，仅限集群内部访问；
 # token 留空表示 market 侧不校验（开发模式）。
