@@ -35,12 +35,15 @@ describe("TargetPicker 全选", () => {
     });
   });
 
-  it("保留已有选择并选中全部人员，全部选中后禁用", () => {
+  it("保留已有选择并全选，支持取消全选和再次全选", () => {
     render(<TargetPicker />);
     fireEvent.click(screen.getByRole("button", { name: "全选" }));
 
     expect(useWealthStore.getState().targetSapIds).toEqual(["1", "2", "3"]);
-    expect(screen.getByRole("button", { name: "全选" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "取消全选" }));
+    expect(useWealthStore.getState().targetSapIds).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "全选" }));
+    expect(useWealthStore.getState().targetSapIds).toEqual(["1", "2", "3"]);
 
     fireEvent.click(screen.getByRole("button", { name: "移除李四" }));
     expect(screen.getByRole("button", { name: "全选" })).toBeEnabled();
@@ -54,7 +57,9 @@ describe("TargetPicker 全选", () => {
     fireEvent.click(screen.getByRole("button", { name: "全选搜索结果" }));
 
     expect(useWealthStore.getState().targetSapIds).toEqual(["1", "2"]);
-    expect(screen.getByRole("button", { name: "全选搜索结果" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "取消全选搜索结果" }));
+    expect(useWealthStore.getState().targetSapIds).toEqual(["1"]);
+    expect(screen.getByRole("button", { name: "全选搜索结果" })).toBeEnabled();
   });
 
   it("加载中或无匹配结果时禁用全选", () => {
