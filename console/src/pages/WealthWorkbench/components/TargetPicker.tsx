@@ -33,6 +33,9 @@ export function TargetPicker() {
   }, [targets, keyword]);
 
   const selected = targets.filter((t) => targetSapIds.includes(t.sapId));
+  const allVisibleSelected = visible.every((t) =>
+    targetSapIds.includes(t.sapId),
+  );
 
   return (
     <div className={styles.targetPicker}>
@@ -44,6 +47,22 @@ export function TargetPicker() {
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
         />
+        <button
+          type="button"
+          className={styles.btn}
+          disabled={
+            !targetsLoaded || visible.length === 0 || allVisibleSelected
+          }
+          onClick={() => {
+            for (const target of visible) {
+              if (!targetSapIds.includes(target.sapId)) {
+                toggleTarget(target.sapId);
+              }
+            }
+          }}
+        >
+          {keyword.trim() ? "全选搜索结果" : "全选"}
+        </button>
         <span className={styles.targetCount}>
           已选 <strong>{targetSapIds.length}</strong> 人
         </span>
