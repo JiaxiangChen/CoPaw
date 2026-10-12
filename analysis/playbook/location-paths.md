@@ -251,6 +251,10 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 排查入口：父系统 `iframeContext.bbk` → `X-Bbk-Id` → `request.state.bbk_id`；场景卡片来源文案 `skillBbkLabel` 只用于展示。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/test_router.py -q`。
 
+## 财富工作台岗位角色映射
+
+- 财富岗位映射需同时维护 `console/src/pages/WealthWorkbench/permissions.ts` 与 `src/swe/app/wealth_plans/roles.py`；`RB0108` 为理财主管岗（综合），映射为 `president`，沿用支行行长的页面权限、分行规划可见范围、分发要求和“行长关注”发布来源。
+
 ## 财富规划任务类型与技能/MCP 下发
 
 - `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。

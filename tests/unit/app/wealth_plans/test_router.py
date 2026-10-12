@@ -527,6 +527,47 @@ def test_list_personal_roles_visible_by_branch_and_relation(
     assert other_branch_items["items"] == []
 
 
+def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
+    """RB0108 理财主管岗（综合）可查看本分行规划，发布来源为行长关注。"""
+    created = client.post(
+        "/api/wealth/plans",
+        json=plan_payload(),
+        headers={**VIEWER, "X-Bbk-Id": "100"},
+    ).json()
+    supervisor = {
+        "X-User-Id": "supervisor",
+        "X-Bbk-Id": "100",
+        "X-Position-Id": "RB0108",
+    }
+    items = client.get("/api/wealth/plans", headers=supervisor).json()["items"]
+    assert [item["id"] for item in items] == [created["id"]]
+    assert items[0]["editable"] is False
+    assert (
+        client.get(
+            "/api/wealth/plans",
+            headers={**supervisor, "X-Bbk-Id": "200"},
+        ).json()["items"]
+        == []
+    )
+
+    supervisor_payload = plan_payload(name="主管规划")
+    supervisor_payload["scenes"][0].update(
+        start_date="2026-10-01",
+        end_date="2026-10-31",
+    )
+    published = client.post(
+        "/api/wealth/plans",
+        json=supervisor_payload,
+        headers=supervisor,
+    )
+    assert published.status_code == 200
+    detail = client.get(
+        f"/api/wealth/plans/{published.json()['id']}",
+        headers=supervisor,
+    ).json()
+    assert detail["source_label"] == "行长关注"
+
+
 def test_list_branch_wide_for_president_and_middle(client: TestClient) -> None:
     created = client.post(
         "/api/wealth/plans",
