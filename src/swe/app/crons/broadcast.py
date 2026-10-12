@@ -11,7 +11,7 @@ from typing import Optional
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 DAY_TO_INDEX = {name: index for index, name in enumerate(DAY_NAMES)}
 DEFAULT_BROADCAST_OFFSET_WINDOW_HOURS = 4
-MIN_BROADCAST_OFFSET_WINDOW_HOURS = 1
+MIN_BROADCAST_OFFSET_WINDOW_HOURS = 0
 MAX_BROADCAST_OFFSET_WINDOW_HOURS = 24
 NUM_TO_DAY = {
     "0": "sun",
@@ -45,7 +45,7 @@ def compute_broadcast_offsets(
         window_hours < MIN_BROADCAST_OFFSET_WINDOW_HOURS
         or window_hours > MAX_BROADCAST_OFFSET_WINDOW_HOURS
     ):
-        raise ValueError("broadcast offset window must be between 1 and 24 hours")
+        raise ValueError("broadcast offset window must be between 0 and 24 hours")
     if count <= 0:
         return []
     if count == 1:

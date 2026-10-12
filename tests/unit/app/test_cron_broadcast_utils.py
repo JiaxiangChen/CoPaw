@@ -20,10 +20,14 @@ def test_compute_broadcast_offsets_uses_configured_hour_window():
     assert compute_broadcast_offsets(4, window_hours=24) == [0, 480, 960, 1440]
 
 
-@pytest.mark.parametrize("window_hours", [0, 25])
+@pytest.mark.parametrize("window_hours", [-1, 25])
 def test_compute_broadcast_offsets_rejects_invalid_hour_window(window_hours):
-    with pytest.raises(ValueError, match="between 1 and 24"):
+    with pytest.raises(ValueError, match="between 0 and 24"):
         compute_broadcast_offsets(3, window_hours=window_hours)
+
+
+def test_compute_broadcast_offsets_zero_window_preserves_original_schedule():
+    assert compute_broadcast_offsets(3, window_hours=0) == [0, 0, 0]
 
 
 def test_shift_daily_cron_uses_job_timezone_and_crosses_day_boundary():
