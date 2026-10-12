@@ -58,7 +58,12 @@ from .publish import (
     delete_removed_scene_jobs,
     launch_publish,
 )
-from .roles import ROLE_RM, can_view_branch_wide, resolve_role
+from .roles import (
+    ROLE_RM,
+    can_view_branch_wide,
+    get_visible_source_labels,
+    resolve_role,
+)
 from .store import WealthPlanStore, new_plan_id
 
 logger = logging.getLogger(__name__)
@@ -522,6 +527,9 @@ async def _get_visible_plan(
     if record is None:
         raise HTTPException(status_code=404, detail="plan not found")
     if not bbk_id or record.bbk_id != bbk_id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    source_labels = get_visible_source_labels(role)
+    if source_labels is not None and record.source_label not in source_labels:
         raise HTTPException(status_code=403, detail="forbidden")
     is_creator = record.sap_id == viewer
     is_target = any(target.sap_id == viewer for target in record.targets)

@@ -294,6 +294,7 @@ async def test_broadcast_invoked_for_other_targets(
     monkeypatch.setattr(cron_api, "_build_broadcast_context", build_context)
     monkeypatch.setattr(cron_api, "_schedule_broadcast_task", schedule)
     assert await _broadcast_scene_job(request, plan, job) == "broadcast-1"
+    assert contexts[0]["enable_offset"] is False
     if batch_enabled:
         assert contexts[0]["enable_batch_dispatch"] is True
         apply_batch.assert_not_awaited()

@@ -28,6 +28,7 @@ function scheduledSceneName(plan: Plan, day: string): string {
 }
 
 export function Calendar({
+  sources,
   visible,
   dimension,
   anchor,
@@ -36,6 +37,7 @@ export function Calendar({
   onDimension,
   onShowDetails,
 }: {
+  sources: readonly string[];
   visible: Plan[];
   dimension: "week" | "month";
   anchor: string;
@@ -122,9 +124,12 @@ export function Calendar({
             <span>
               <i></i>分行关注
             </span>
-            <span>
-              <i className={styles.purple}></i>行长 / 我的关注
-            </span>
+            {sources.some((source) => source !== "分行关注") && (
+              <span>
+                <i className={styles.purple}></i>
+                {sources.includes("我的关注") ? "行长 / 我的关注" : "行长关注"}
+              </span>
+            )}
           </div>
           <div className={styles.switch} aria-label="日历维度">
             <button

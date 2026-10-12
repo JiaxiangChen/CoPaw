@@ -6,10 +6,12 @@
 
 规划可见范围先按 bbk_id 隔离，再按角色收窄：
 - 客户经理及未知角色：自己创建的规划 + 分发给自己的规划；
-- 支行行长 / 分行中台：本行全部规划。
+- 支行行长：本行分行关注、行长关注规划；分行中台：本行分行关注规划。
 """
 
 from __future__ import annotations
+
+from .models import SOURCE_LABEL_BY_ROLE
 
 ROLE_RM = "rm"
 ROLE_PRESIDENT = "president"
@@ -27,6 +29,19 @@ POSITION_ROLE_MAP: dict[str, str] = {
 
 BRANCH_WIDE_ROLES = (ROLE_PRESIDENT, ROLE_MIDDLE)
 
+_VISIBLE_SOURCE_LABELS_BY_ROLE = {
+    ROLE_PRESIDENT: (
+        SOURCE_LABEL_BY_ROLE[ROLE_MIDDLE],
+        SOURCE_LABEL_BY_ROLE[ROLE_PRESIDENT],
+    ),
+    ROLE_MIDDLE: (SOURCE_LABEL_BY_ROLE[ROLE_MIDDLE],),
+}
+
+
+def get_visible_source_labels(role: str) -> tuple[str, ...] | None:
+    """管理角色按来源收窄；其余角色沿用创建/分发关系判断。"""
+    return _VISIBLE_SOURCE_LABELS_BY_ROLE.get(role)
+
 
 def resolve_role(position_id: str | None) -> str:
     """按岗位编号解析角色；缺失或未命中返回 unknown（最少权限）。"""
@@ -36,5 +51,5 @@ def resolve_role(position_id: str | None) -> str:
 
 
 def can_view_branch_wide(role: str) -> bool:
-    """该角色是否可查看本行全部规划。"""
+    """该角色是否具有本行管理范围（仍需按来源过滤）。"""
     return role in BRANCH_WIDE_ROLES

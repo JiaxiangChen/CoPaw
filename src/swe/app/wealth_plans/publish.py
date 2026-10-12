@@ -237,13 +237,14 @@ async def _broadcast_scene_job(
     plan: WealthPlanRecord,
     job: CronJobSpec,
 ) -> str | None:
-    """分发场景任务并启用批调度；目标仅创建人本人时跳过。"""
+    """按原排程分发场景任务并启用批调度；目标仅创建人本人时跳过。"""
     target_ids = [t.sap_id for t in plan.targets if t.sap_id != plan.sap_id]
     if not target_ids:
         return None
     body = CronBroadcastRequest(
         target_tenant_ids=target_ids,
         enable_batch_dispatch=True,
+        enable_offset=False,
     )
     response = await broadcast_job(
         request,

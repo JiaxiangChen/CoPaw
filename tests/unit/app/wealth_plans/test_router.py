@@ -532,7 +532,7 @@ def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
-        headers={**VIEWER, "X-Bbk-Id": "100"},
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB1101"},
     ).json()
     supervisor = {
         "X-User-Id": "supervisor",
@@ -572,7 +572,7 @@ def test_list_branch_wide_for_president_and_middle(client: TestClient) -> None:
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
-        headers={**VIEWER, "X-Bbk-Id": "100"},
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB0301"},
     ).json()
 
     president = {
@@ -609,7 +609,7 @@ def test_detail_visibility_combines_branch_and_role_scope(
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
-        headers={**VIEWER, "X-Bbk-Id": "100"},
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB1101"},
     ).json()
     management_peer = {
         "X-User-Id": "wangly",
@@ -1275,3 +1275,56 @@ async def test_board_status_distributing_while_running(
     creator_view = client.get("/api/wealth/plans", headers=VIEWER).json()
 
     assert creator_view["items"][0]["board_status"] == "分发中"
+
+
+@pytest.mark.parametrize(
+    "position,allowed_sources",
+    [
+        ("RB1101", {"分行关注", "行长关注"}),
+        ("RB0306", {"分行关注", "行长关注"}),
+        ("RB0108", {"分行关注", "行长关注"}),
+        ("RB0301", {"分行关注"}),
+        ("RB0305", {"分行关注"}),
+    ],
+)
+async def test_management_list_and_detail_share_source_scope(
+    client: TestClient,
+    store: WealthPlanStore,
+    position: str,
+    allowed_sources: set[str],
+) -> None:
+    from swe.app.wealth_plans.models import PlanTargetRecord, WealthPlanRecord
+
+    records = [
+        WealthPlanRecord(
+            id=plan_id,
+            sap_id=creator,
+            name=plan_id,
+            bbk_id="100",
+            source_label=source,
+            targets=[PlanTargetRecord(sap_id="viewer")],
+        )
+        for plan_id, creator, source in [
+            ("branch", "viewer", "分行关注"),
+            ("president", "viewer", "行长关注"),
+            ("personal", "viewer", "我的关注"),
+            ("target-personal", "other", "我的关注"),
+        ]
+    ]
+    for record in records:
+        await store.create(record)
+    headers = {
+        "X-User-Id": "viewer",
+        "X-Bbk-Id": "100",
+        "X-Position-Id": position,
+    }
+    items = client.get("/api/wealth/plans", headers=headers).json()["items"]
+    assert {item["source_label"] for item in items} == allowed_sources
+    for record in records:
+        response = client.get(
+            f"/api/wealth/plans/{record.id}",
+            headers=headers,
+        )
+        assert response.status_code == (
+            200 if record.source_label in allowed_sources else 403
+        )
