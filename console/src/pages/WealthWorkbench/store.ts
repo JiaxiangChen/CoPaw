@@ -20,7 +20,10 @@ import {
   type WealthPage,
   type WealthRole,
 } from "./permissions";
-import { fetchDistributeTargets } from "./distributeTargets";
+import {
+  fetchDistributeTargets,
+  type DistributeBranch,
+} from "./distributeTargets";
 import {
   buildTaskTree,
   CYCLE_LABELS,
@@ -90,6 +93,9 @@ interface WealthState {
   /** 分发目标用户池（仅行长/中台加载） */
   targets: DistributeTarget[];
   targetsLoaded: boolean;
+  /** 中台当前浏览的支行；targets 保留跨支行人员信息用于发布。 */
+  targetBranch: DistributeBranch | null;
+  branchTargetSapIds: string[];
   /** 已选中的分发目标 sapId 列表 */
   targetSapIds: string[];
   dialog: DialogState | null;
@@ -114,7 +120,8 @@ interface WealthState {
   loadDoneCustomers: () => Promise<void>;
 
   // —— 分发目标（行长/中台） ——
-  loadTargets: () => Promise<void>;
+  loadTargets: (branch?: DistributeBranch) => Promise<void>;
+  resetTargetBranch: () => void;
   toggleTarget: (sapId: string) => void;
 
   // —— 经营场景（按分类点击查询，每次都取最新数据） ——
@@ -248,6 +255,8 @@ export {
   validTaskDate,
 } from "./utils";
 
+let targetRequestSeq = 0;
+
 export const useWealthStore = create<WealthState>()((set, get) => ({
   initialized: false,
   accountId: "rm",
@@ -266,6 +275,8 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   editingId: null,
   targets: [],
   targetsLoaded: false,
+  targetBranch: null,
+  branchTargetSapIds: [],
   targetSapIds: [],
   dialog: null,
   acting: false,
@@ -348,10 +359,34 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     set({ doneCustomers, doneLoading: false });
   },
 
-  loadTargets: async () => {
-    if (get().targetsLoaded) return;
-    const targets = await fetchDistributeTargets();
-    set({ targets, targetsLoaded: true });
+  resetTargetBranch: () => {
+    targetRequestSeq += 1;
+    set({ targetBranch: null, branchTargetSapIds: [], targetsLoaded: false });
+  },
+
+  loadTargets: async (branch) => {
+    if (get().accountId === "middle" && !branch) return;
+    if (!branch && get().targetsLoaded) return;
+    const requestSeq = ++targetRequestSeq;
+    set({
+      targetsLoaded: false,
+      targetBranch: branch ?? null,
+      branchTargetSapIds: [],
+    });
+    const targets = await fetchDistributeTargets(branch);
+    if (requestSeq !== targetRequestSeq) return;
+    set((state) => ({
+      targets:
+        branch || state.editingId
+          ? Array.from(
+              new Map(
+                [...state.targets, ...targets].map((t) => [t.sapId, t]),
+              ).values(),
+            )
+          : targets,
+      branchTargetSapIds: targets.map((t) => t.sapId),
+      targetsLoaded: true,
+    }));
   },
 
   toggleTarget: (sapId) => {
@@ -468,9 +503,9 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
         items: draft.items.map((x) =>
           x.id === id
             ? {
-              ...x,
-              schedule: { ...(x.schedule ?? DEFAULT_SCHEDULE), ...patch },
-            }
+                ...x,
+                schedule: { ...(x.schedule ?? DEFAULT_SCHEDULE), ...patch },
+              }
             : x,
         ),
       },
@@ -504,8 +539,25 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     if (!p) return;
     const items = p.items ? JSON.parse(JSON.stringify(p.items)) : [];
     const draft = normalizeItems({ name: p.name, items });
-    // 分发目标不回填：编辑时以当前选择为准重新发布
-    set({ draft, editingId: id, targetSapIds: p.targetSapIds ?? [] });
+    const targetSapIds = p.targetSapIds ?? [];
+    const targets = targetSapIds.map(
+      (sapId) =>
+        p.targets?.find((target) => target.sapId === sapId) ?? {
+          sapId,
+          name: sapId,
+          orgName: "",
+        },
+    );
+    targetRequestSeq += 1;
+    set({
+      draft,
+      editingId: id,
+      targetSapIds,
+      targets,
+      targetsLoaded: false,
+      targetBranch: null,
+      branchTargetSapIds: [],
+    });
   },
 
   /** 离开创建页时清除编辑态（与原型 navigate() 行为一致：草稿本身保留） */

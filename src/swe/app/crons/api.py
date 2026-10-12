@@ -2365,10 +2365,17 @@ async def broadcast_job(
         offset_window_hours=body.offset_window_hours,
     )
     post_broadcast: Callable[[], Awaitable[None]] | None = None
-    if (
-        body.enable_batch_dispatch is not None
-        and body.enable_batch_dispatch
+    if body.enable_batch_dispatch is not None and (
+        body.enable_batch_dispatch
         != _broadcast_dispatch_intents_enabled(source_job)
+        or (
+            body.enable_batch_dispatch
+            and body.offset_window_hours
+            != (source_job.meta or {}).get(
+                BATCH_DISPATCH_OFFSET_WINDOW_HOURS_META_KEY,
+                DEFAULT_BROADCAST_OFFSET_WINDOW_HOURS,
+            )
+        )
     ):
 
         async def _apply_requested_dispatch_mode() -> None:

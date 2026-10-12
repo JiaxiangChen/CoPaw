@@ -11,12 +11,91 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ...constant import USER_INFO_API_URL
+from ...constant import BRANCH_TREE_API_URL, USER_INFO_API_URL
+from ...constant import USER_POSITION_API_URL as _USER_POSITION_API_URL
+from ...constant import USER_POSITION_HEADER_KEY, USER_POSITION_HEADER_VALUE
 from ...utils.bbk import get_bbk_id_by_name
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/user-info", tags=["user-info"])
+
+_USER_POSITION_HEADERS = {
+    USER_POSITION_HEADER_KEY: USER_POSITION_HEADER_VALUE,
+}
+
+
+def _user_position_headers(request: Request) -> dict[str, str]:
+    """组装请求级凭证和登录态，优先使用前端传入的 cookie。"""
+    headers = _USER_POSITION_HEADERS.copy()
+    cookie = request.headers.get("x-header-cookie") or request.headers.get(
+        "cookie",
+    )
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+class UserPositionQueryRequest(BaseModel):
+    """机构岗位人员查询参数，来自登录上下文。"""
+
+    bbkOrgId: str = Field(..., min_length=1)
+    mOrgCode: str = Field(..., min_length=1)
+    mOrgLvl: int = Field(..., ge=0)
+
+
+@router.post("/positions/by-branch", summary="查询机构岗位人员")
+async def query_user_positions(
+    body: UserPositionQueryRequest,
+    request: Request,
+) -> dict:
+    """代理查询分发目标人员，凭证仅在服务端发送。"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                _USER_POSITION_API_URL,
+                json=body.model_dump(),
+                headers=_user_position_headers(request),
+            )
+        response.raise_for_status()
+        return response.json()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, "User position API timeout") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, "User position API error") from exc
+    except (httpx.RequestError, ValueError) as exc:
+        raise HTTPException(502, "User position API unavailable") from exc
+
+
+class BranchTreeQueryRequest(BaseModel):
+    """分行下属机构查询参数。"""
+
+    mOrgCode: str = Field(..., min_length=1)
+    mOrgLvl: int = Field(..., ge=0)
+    sysId: str = Field(..., min_length=1)
+
+
+@router.post("/branches/by-branch", summary="查询分行下属支行")
+async def query_branch_tree(
+    body: BranchTreeQueryRequest,
+    request: Request,
+) -> list[dict]:
+    """代理查询机构列表，复用机构岗位人员接口的凭证配置。"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                BRANCH_TREE_API_URL,
+                json=body.model_dump(),
+                headers=_user_position_headers(request),
+            )
+        response.raise_for_status()
+        return response.json()
+    except httpx.TimeoutException as exc:
+        raise HTTPException(504, "Branch tree API timeout") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(502, "Branch tree API error") from exc
+    except (httpx.RequestError, ValueError) as exc:
+        raise HTTPException(502, "Branch tree API unavailable") from exc
 
 
 class UserInfoQueryRequest(BaseModel):

@@ -23,9 +23,9 @@ import {
 import { selectCurrentAccount, useWealthStore } from "../store";
 import { fetchAvailableSceneCount, fetchSkillStats } from "../api";
 import type { Plan, SkillStat } from "../types";
+import { BOARD_SOURCES_BY_ROLE } from "../permissions";
 import { Calendar } from "./Calendar";
 
-const BOARD_TABS = ["全部", "分行关注", "行长关注", "我的关注"];
 const PERIODS = ["本季", "本月", "本周", "今日", "T+1日"];
 
 /** 发布中轮询间隔（毫秒） */
@@ -44,6 +44,8 @@ function statusClass(status: string) {
 
 export default function Board() {
   const account = useWealthStore(selectCurrentAccount);
+  const boardSources = BOARD_SOURCES_BY_ROLE[account.id];
+  const boardTabs = ["全部", ...boardSources];
   const plans = useWealthStore((s) => s.plans);
   const plansLoaded = useWealthStore((s) => s.plansLoaded);
   const openDialog = useWealthStore((s) => s.openDialog);
@@ -56,7 +58,7 @@ export default function Board() {
   const [boardTab, setBoardTab] = useState("全部");
   const [period, setPeriod] = useState("本月");
   const [boardMode, setBoardMode] = useState<"calendar" | "list">("calendar");
-  const [dimension, setDimension] = useState<"week" | "month">("month");
+  const [dimension, setDimension] = useState<"week" | "month">("week");
   const [anchor, setAnchor] = useState(todayKey);
   const [availableScenes, setAvailableScenes] = useState<number | null>(null);
 
@@ -78,8 +80,14 @@ export default function Board() {
   const [rangeStart, rangeEnd] = range;
 
   const all = useMemo(
-    () => plans.filter((p) => p.start <= rangeEnd && p.end >= rangeStart),
-    [plans, rangeStart, rangeEnd],
+    () =>
+      plans.filter(
+        (p) =>
+          boardSources.includes(p.source) &&
+          p.start <= rangeEnd &&
+          p.end >= rangeStart,
+      ),
+    [plans, boardSources, rangeStart, rangeEnd],
   );
   const visible = useMemo(
     () => all.filter((p) => boardTab === "全部" || p.source === boardTab),
@@ -261,14 +269,14 @@ export default function Board() {
                       </td>
                       <td>{customersText(p)}</td>
                       <td>{tasksText(p)}</td>
-                      <td>
+                      {/* <td>
                         <div className={styles.progressLine}>
                           <div className={styles.progress}>
                             <span style={{ width: `${p.rate}%` }}></span>
                           </div>
                           <b>{p.rate}%</b>
                         </div>
-                      </td>
+                      </td> */}
                       <td>
                         <span
                           className={cx(styles.status, statusClass(p.status))}
@@ -421,7 +429,7 @@ export default function Board() {
         <div className={styles.sectionHead}>
           <h2>当前工作重点</h2>
           <div className={styles.tabs}>
-            {BOARD_TABS.map((t) => (
+            {boardTabs.map((t) => (
               <button
                 key={t}
                 className={cx(styles.tab, boardTab === t && styles.active)}
@@ -465,6 +473,7 @@ export default function Board() {
           </div>
         ) : boardMode === "calendar" ? (
           <Calendar
+            sources={boardSources}
             visible={visible}
             dimension={dimension}
             anchor={anchor}

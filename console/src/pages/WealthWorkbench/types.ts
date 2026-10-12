@@ -82,6 +82,8 @@ export interface Plan {
   items?: PlanItem[];
   /** 发布时的分发目标 sapId 列表；客户经理为本人 userId */
   targetSapIds?: string[];
+  /** 已保存的分发目标信息，用于编辑回显及重新发布。 */
+  targets?: DistributeTarget[];
 }
 
 /** 创建计划页的草稿（会话级，不持久化） */
@@ -104,7 +106,7 @@ export interface SkillStat {
 }
 
 /** 分发目标用户（行长/中台发布规划时选择的下属客户经理） */ export interface DistributeTarget {
-  /** 用户 ID（sapId，即 /user-info/tenants/by-source 返回的 tenant_id） */
+  /** 发布目标 SAP ID（机构岗位人员接口返回的 sapID） */
   sapId: string;
   name: string;
   /** 所属机构名称（可能为空） */

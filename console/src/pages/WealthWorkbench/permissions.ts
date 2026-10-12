@@ -17,6 +17,14 @@
 /** 工作台角色；unknown 为未识别身份的伪角色（deny by default，无任何权限） */
 export type WealthRole = "rm" | "president" | "middle" | "unknown";
 
+/** 看板来源范围；与后端管理角色的来源过滤保持一致。 */
+export const BOARD_SOURCES_BY_ROLE: Record<WealthRole, readonly string[]> = {
+  rm: ["分行关注", "行长关注", "我的关注"],
+  president: ["分行关注", "行长关注"],
+  middle: ["分行关注"],
+  unknown: [],
+};
+
 /** 受权限控制的页面组；tasks 代表今日任务 / 待触达客户 / 已完成三页 */
 export type WealthPage = "board" | "create" | "tasks";
 
@@ -38,12 +46,14 @@ export const FALLBACK_ROLE: WealthRole = "unknown";
 /**
  * positionId → 角色映射表（父系统岗位编号清单）：
  * - RB0101 客户经理；RB1101 / RB0306 均为支行行长；RB0301 / RB0305 均为分行中台。
+ * - RB0108 理财主管岗（综合），与支行行长使用同一权限角色。
  * 新增岗位类型时在此登记；未知编号由 resolveRole 回退 FALLBACK_ROLE 并留痕。
  */
 export const POSITION_ROLE_MAP: Record<string, WealthRole> = {
   RB0101: "rm",
   RB1101: "president",
   RB0306: "president",
+  RB0108: "president", // 理财主管岗（综合），权限等同支行行长
   RB0301: "middle",
   RB0305: "middle",
 };

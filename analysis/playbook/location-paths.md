@@ -243,11 +243,27 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 统计和技能明细各自通过 GET /task-type-report/export 导出后端 XLSX，传当前完整筛选、移除分页，包含未加载的行；模拟模式禁用导出。50000行以上后端返回413。契约见 docs/superpowers/specs/2026-09-14-claw-report-console/API.md。
 - 客户行为同时展示去重客户数和点击总次数：`insight_customer_count` / `insight_count`、`phone_customer_count` / `phone_count`；次数列位于对应覆盖率之后，非名单方案显示“—”。
 
+## 创建计划的经营场景可见范围
+
+- `src/swe/app/wealth_plans/router.py` 的 `_fetch_external_scene_skills()` 调用外部 `POST /api/agent/workspace/skill-config/list`，只传当前请求分行 `bbkId` 和 `category`；产品大类为空表示全部。
+- 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
+- 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
+- 排查入口：父系统 `iframeContext.bbk` → `X-Bbk-Id` → `request.state.bbk_id`；场景卡片来源文案 `skillBbkLabel` 只用于展示。
+- 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/test_router.py -q`。
+
+## 财富工作台岗位角色映射
+
+- 财富岗位映射需同时维护 `console/src/pages/WealthWorkbench/permissions.ts` 与 `src/swe/app/wealth_plans/roles.py`；`RB0108` 为理财主管岗（综合），映射为 `president`，沿用支行行长的页面权限、分行规划可见范围、分发要求和“行长关注”发布来源。
+- 行长角色查看“行长关注”时，除同一 `bbk_id` 外，还要求当前用户 ID 与规划创建人 `sap_id` 一致；同 BBK 的两位行长不能互看，即使另一位行长在分发对象中。列表的 SQL/内存过滤与详情权限均需同步维护，入口为 `WealthPlanStore.list_for_viewer()`、`_visible_to()` 和路由 `_get_visible_plan()`。分行关注仍按原管理范围可见，客户经理仍可查看同 BBK 下分发给自己的行长关注。当前用户优先取 `request.state.tenant_id`，其次取 `X-User-Id`。
+
 ## 财富规划任务类型与技能/MCP 下发
 
 - `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
 - `src/swe/app/wealth_plans/publish.py` 的 `_build_job_spec` 按场景判断：空数组创建 `workflow`，非空数组保持 `agent`。只判断数组是否为空，`["    "]` 仍按非空处理。
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
+- 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`、`enable_offset=False`、`offset_window_hours=0`；首次分发完成后启用父任务批调度并同步子任务。父批调度在外部平台的注册时间与目标子任务均使用规划原排程，不按默认 4 小时窗口提前或错峰。窗口变化时，即使父任务已启用批调度，重新分发也会更新窗口和外部平台任务。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
+- 已发布的存量财富规划不会仅因代码更新自动改写外部平台；部署后需修改/重新发布相应规划，确认父任务的 `batch_dispatch_offset_window_hours`、`batch_dispatch_offset_minutes` 均为 `0`，外部批任务 cron 为原排程。其他入口默认仍使用 4 小时窗口。
+- 批调度切换失败查看广播任务的 `failure_summary`；检查 `SWE_CRON_DISPATCH_INTENTS_ENABLED` 与调度服务配置。不要仅给广播上下文设批调度标志，否则会漏掉父任务的调度注册与子任务同步。
 - 创建/广播定时任务的顺序不变；`workflow` 保留 `scene_id` 作为 `skill_ids`，其 `text` 和 `request` 由 `CronJobSpec` 校验器清空。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/ -q`。
 
@@ -262,3 +278,21 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
+
+### 财富规划分发目标
+
+- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，调用 `POST /user-info/positions/by-branch`。
+- 后端代理：`src/swe/app/routers/user_info.py::query_user_positions`，POST 到网关 `getUserPostionByBrn`；凭证来自环境配置的 `SWE_USER_POSITION_HEADER_KEY` 和 `SWE_USER_POSITION_HEADER_VALUE`，两个环境暂为 `xxx`、`yyyy`，可通过环境变量覆盖。
+- 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值，修改后重启后端生效。
+- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mOrgCode ← orgCode (vorgcode)`、`mOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
+- 上游成功标记为 `code=success`；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
+- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先调用 `POST /user-info/branches/by-branch`，入参为登录分行 `bbk`、`mOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，每次选择机构后继续用该条目的 `mOrgCode/mOrgLvl` 查询 `BranchTreeInfoService`；有下级就展开下一列，直到返回空数组才将末级机构参数传给人员接口，不依赖 `leaf` 字段判定末级。
+- 支行上游 `BranchTreeInfoService` 地址由 `SWE_BRANCH_TREE_API_URL` 在 dev/prd 中配置，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `wmcomsrvgatewayxc.paas.cmbchina.cn`，复用人员接口的 header 凭证配置。
+- 中台可跨支行累计选择人员；当前候选列表与全选操作仅针对当前支行，已选人员信息保留用于发布及移除。快速切换支行时过期响应不更新当前列表。
+
+- 两个外部接口均透传 `Cookie`：优先使用前端统一请求层的 `x-header-cookie`（保留切换用户后的上下文），为空时读取请求 `Cookie`；每次独立组装 header，不修改共享凭证字典。
+- 中台支行级联选择器支持前端模糊搜索，对已加载的机构按支行名称或机构编码进行包含匹配，忽略英文大小写和搜索词首尾空格；搜索不额外请求支行接口，也不改变跨支行累计选择。
+
+- 级联查询失败时显示重试，不当作末级；切换上级清空当前候选人员并使旧请求失效，但保留跨支行累计的人员选择。子支行按需加载并缓存，搜索范围仅包含已经加载的机构。
+- 业务例外：`mOrgCode=121516` 在任意层级直接视为末级，跳过下级支行查询，用该条目的 `mOrgCode/mOrgLvl` 查询人员。
+- 修改规划的人员回显：`api.ts::mapPlan` 保留计划返回的 `targets.sap_id/name`；`store.ts::editPlan` 恢复 ID 与姓名缓存，并重置当前支行候选状态。后续人员加载保留编辑计划的历史目标信息；历史目标无姓名时回显 ID。计划未保存机构路径，修改页的级联路径需重新选择，但已选人员无需重新勾选。

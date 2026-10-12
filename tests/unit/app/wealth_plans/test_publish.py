@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -44,6 +45,15 @@ def make_plan(targets: list[str]) -> WealthPlanRecord:
 
 def fake_request() -> SimpleNamespace:
     return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                workflow_config_store=SimpleNamespace(
+                    resolve_first_skill=AsyncMock(
+                        return_value=SimpleNamespace(binding_id="binding-1"),
+                    ),
+                ),
+            ),
+        ),
         state=SimpleNamespace(
             tenant_id="zhangwl",
             bbk_id="100",
@@ -217,25 +227,81 @@ async def test_broadcast_skipped_when_only_creator_is_target() -> None:
     assert result is None
 
 
-async def test_broadcast_invoked_for_other_targets() -> None:
+@pytest.mark.parametrize("batch_window", [None, 4, 0])
+@pytest.mark.parametrize("relations", [[], ["mcp-customer"]])
+async def test_broadcast_invoked_for_other_targets(
+    monkeypatch: pytest.MonkeyPatch,
+    batch_window: int | None,
+    relations: list[str],
+) -> None:
+    from swe.app.crons import api as cron_api
+    from swe.app.wealth_plans import publish
+
     plan = make_plan(["zhangwl", "chenjy"])
-    job = SimpleNamespace(id="job-1")
-    captured: dict[str, object] = {}
+    job = _build_job_spec(
+        fake_request(),
+        plan,
+        make_scene(mcp_relations=relations),
+        "job-1",
+    )
+    if batch_window is not None:
+        job.meta["broadcast_dispatch_intents_enabled"] = True
+        job.meta["batch_dispatch_offset_window_hours"] = batch_window
+    request = fake_request()
+    request.app = SimpleNamespace(state=SimpleNamespace())
+    manager = SimpleNamespace(get_job=AsyncMock(return_value=job))
+    monkeypatch.setattr(
+        publish,
+        "get_cron_manager",
+        AsyncMock(return_value=manager),
+    )
+    apply_batch = AsyncMock()
+    monkeypatch.setattr(
+        cron_api,
+        "_apply_batch_dispatch_after_broadcast",
+        apply_batch,
+    )
+    contexts = []
 
-    # 广播链路重依赖 request/app.state，这里仅验证目标过滤逻辑：
-    # 本人应被剔除，仅剩 chenjy。通过打补丁截获归一化入参。
-    import swe.app.wealth_plans.publish as publish_module
+    def build_context(_request, _job, targets, identities, **options):
+        contexts.append(options)
+        assert targets == ["chenjy"]
+        return SimpleNamespace()
 
-    def fake_normalize(body):
-        captured["target_tenant_ids"] = list(body.target_tenant_ids)
-        raise RuntimeError("stop here")
+    async def schedule(
+        _request,
+        source,
+        context,
+        targets,
+        post_broadcast=None,
+    ):
+        assert source is job
+        assert targets == ["chenjy"]
+        if post_broadcast:
+            await post_broadcast()
+        return (
+            cron_api.CronBroadcastTaskSnapshot(
+                task_id="broadcast-1",
+                agent_id="default",
+                source_id="RMASSIST",
+                tenant_id="zhangwl",
+                job_id=job.id,
+                target_key="targets",
+                tenant_count=len(targets),
+            ),
+            False,
+        )
 
-    original = publish_module._normalize_broadcast_targets
-    publish_module._normalize_broadcast_targets = fake_normalize
-    try:
-        with pytest.raises(RuntimeError, match="stop here"):
-            await _broadcast_scene_job(None, plan, job)  # type: ignore[arg-type]
-    finally:
-        publish_module._normalize_broadcast_targets = original
-
-    assert captured["target_tenant_ids"] == ["chenjy"]
+    monkeypatch.setattr(cron_api, "_build_broadcast_context", build_context)
+    monkeypatch.setattr(cron_api, "_schedule_broadcast_task", schedule)
+    assert await _broadcast_scene_job(request, plan, job) == "broadcast-1"
+    assert contexts[0]["enable_offset"] is False
+    assert contexts[0]["offset_window_hours"] == 0
+    if batch_window == 0:
+        assert contexts[0]["enable_batch_dispatch"] is True
+        apply_batch.assert_not_awaited()
+    else:
+        apply_batch.assert_awaited_once()
+        assert apply_batch.await_args.kwargs["enable"] is True
+        assert apply_batch.await_args.kwargs["offset_window_hours"] == 0
+        assert apply_batch.await_args.kwargs["tenant_ids"] == ["chenjy"]

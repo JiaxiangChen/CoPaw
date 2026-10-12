@@ -11,6 +11,15 @@ import {
 } from "./permissions";
 
 describe("WealthWorkbench permissions", () => {
+  it("RB0108 理财主管岗（综合）沿用支行行长权限", () => {
+    const role = resolveRole("RB0108");
+    expect(role).toBe("president");
+    expect(canAccessPage(role, "board")).toBe(true);
+    expect(canAccessPage(role, "create")).toBe(true);
+    expect(canAccessPage(role, "tasks")).toBe(false);
+    expect(needsDistributeTargets(role)).toBe(true);
+  });
+
   it("矩阵与原型一致：三角色可看板/创建，仅客户经理有任务页", () => {
     for (const role of ["rm", "president", "middle"] as const) {
       expect(canAccessPage(role, "board")).toBe(true);

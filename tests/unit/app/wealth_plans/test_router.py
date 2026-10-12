@@ -17,6 +17,43 @@ from swe.app.wealth_plans.store import WealthPlanStore
 VIEWER = {"X-User-Id": "zhangwl", "X-Bbk-Id": "100"}
 
 
+async def test_create_and_update_shared_scene_keep_current_plan_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    store: WealthPlanStore,
+) -> None:
+    async def fetch_shared_scene(request, category):
+        return [
+            SceneSkillItem(
+                skillId="skill-wealth-insurance-1",
+                senceName="保障潜客经营",
+                category="insurance",
+                bbkId="100",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        wealth_router,
+        "_fetch_external_scene_skills",
+        fetch_shared_scene,
+    )
+    monkeypatch.setattr(wealth_router, "launch_publish", lambda *args: None)
+    request = SimpleNamespace(
+        state=SimpleNamespace(bbk_id="110"),
+        headers=VIEWER,
+        app=SimpleNamespace(state=SimpleNamespace(wealth_plan_store=store)),
+    )
+    body = PlanUpsertRequest(**plan_payload())
+
+    created = await wealth_router.create_plan(request, body)
+    await store.set_publish_status(created.id, "published")
+    updated = await wealth_router.update_plan(request, created.id, body)
+
+    assert updated.id == created.id
+    record = await store.get(created.id)
+    assert record.bbk_id == "110"
+    assert record.scenes[0].scene_id == "skill-wealth-insurance-1"
+
+
 @pytest.mark.parametrize(
     "start,end,expected_status",
     [
@@ -351,8 +388,10 @@ def test_create_plan_derives_source_label_from_request_role(
     assert plans[0]["source_label"] == "我的关注"
 
 
+@pytest.mark.parametrize("skill_bbk_id", ["110", "100"])
 async def test_scene_branch_validation_accepts_current_branch_skill(
     monkeypatch: pytest.MonkeyPatch,
+    skill_bbk_id: str,
 ) -> None:
     request = SimpleNamespace(state=SimpleNamespace(bbk_id="110"))
     body = PlanUpsertRequest(**plan_payload())
@@ -363,7 +402,7 @@ async def test_scene_branch_validation_accepts_current_branch_skill(
                 skillId="skill-wealth-insurance-1",
                 senceName="保障潜客经营",
                 category="insurance",
-                bbkId="110",
+                bbkId=skill_bbk_id,
             ),
         ]
 
@@ -488,11 +527,58 @@ def test_list_personal_roles_visible_by_branch_and_relation(
     assert other_branch_items["items"] == []
 
 
+def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
+    """RB0108 沿用行长的创建人隔离，发布来源为行长关注。"""
+    created = client.post(
+        "/api/wealth/plans",
+        json=plan_payload(),
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB1101"},
+    ).json()
+    supervisor = {
+        "X-User-Id": "supervisor",
+        "X-Bbk-Id": "100",
+        "X-Position-Id": "RB0108",
+    }
+    items = client.get("/api/wealth/plans", headers=supervisor).json()["items"]
+    assert items == []
+    assert (
+        client.get(
+            f"/api/wealth/plans/{created['id']}",
+            headers=supervisor,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/api/wealth/plans",
+            headers={**supervisor, "X-Bbk-Id": "200"},
+        ).json()["items"]
+        == []
+    )
+
+    supervisor_payload = plan_payload(name="主管规划")
+    supervisor_payload["scenes"][0].update(
+        start_date="2026-10-01",
+        end_date="2026-10-31",
+    )
+    published = client.post(
+        "/api/wealth/plans",
+        json=supervisor_payload,
+        headers=supervisor,
+    )
+    assert published.status_code == 200
+    detail = client.get(
+        f"/api/wealth/plans/{published.json()['id']}",
+        headers=supervisor,
+    ).json()
+    assert detail["source_label"] == "行长关注"
+
+
 def test_list_branch_wide_for_president_and_middle(client: TestClient) -> None:
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
-        headers={**VIEWER, "X-Bbk-Id": "100"},
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB0301"},
     ).json()
 
     president = {
@@ -529,7 +615,7 @@ def test_detail_visibility_combines_branch_and_role_scope(
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
-        headers={**VIEWER, "X-Bbk-Id": "100"},
+        headers={**VIEWER, "X-Bbk-Id": "100", "X-Position-Id": "RB1101"},
     ).json()
     management_peer = {
         "X-User-Id": "wangly",
@@ -541,8 +627,21 @@ def test_detail_visibility_combines_branch_and_role_scope(
         f"/api/wealth/plans/{created['id']}",
         headers=management_peer,
     )
-    assert detail.status_code == 200
-    assert detail.json()["editable"] is False
+    assert detail.status_code == 403
+    assert (
+        client.get(
+            f"/api/wealth/plans/{created['id']}",
+            headers={**VIEWER, "X-Position-Id": "RB1101"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/wealth/plans",
+            headers=management_peer,
+        ).json()["items"]
+        == []
+    )
 
     target = {
         "X-User-Id": "chenjy",
@@ -1195,3 +1294,63 @@ async def test_board_status_distributing_while_running(
     creator_view = client.get("/api/wealth/plans", headers=VIEWER).json()
 
     assert creator_view["items"][0]["board_status"] == "分发中"
+
+
+@pytest.mark.parametrize(
+    "position,allowed_sources",
+    [
+        ("RB1101", {"分行关注", "行长关注"}),
+        ("RB0306", {"分行关注", "行长关注"}),
+        ("RB0108", {"分行关注", "行长关注"}),
+        ("RB0301", {"分行关注"}),
+        ("RB0305", {"分行关注"}),
+    ],
+)
+async def test_management_list_and_detail_share_source_scope(
+    client: TestClient,
+    store: WealthPlanStore,
+    position: str,
+    allowed_sources: set[str],
+) -> None:
+    from swe.app.wealth_plans.models import PlanTargetRecord, WealthPlanRecord
+
+    records = [
+        WealthPlanRecord(
+            id=plan_id,
+            sap_id=creator,
+            name=plan_id,
+            bbk_id="100",
+            source_label=source,
+            targets=[PlanTargetRecord(sap_id="viewer")],
+        )
+        for plan_id, creator, source in [
+            ("branch", "viewer", "分行关注"),
+            ("president", "viewer", "行长关注"),
+            ("personal", "viewer", "我的关注"),
+            ("target-personal", "other", "我的关注"),
+            ("peer-president", "other", "行长关注"),
+            ("peer-branch", "other", "分行关注"),
+        ]
+    ]
+    for record in records:
+        await store.create(record)
+    headers = {
+        "X-User-Id": "viewer",
+        "X-Bbk-Id": "100",
+        "X-Position-Id": position,
+    }
+    items = client.get("/api/wealth/plans", headers=headers).json()["items"]
+    assert {item["source_label"] for item in items} == allowed_sources
+    assert "peer-president" not in {item["id"] for item in items}
+    assert "peer-branch" in {item["id"] for item in items}
+    for record in records:
+        response = client.get(
+            f"/api/wealth/plans/{record.id}",
+            headers=headers,
+        )
+        assert response.status_code == (
+            200
+            if record.source_label in allowed_sources
+            and record.id != "peer-president"
+            else 403
+        )

@@ -21,7 +21,12 @@ from .models import (
     PlanTargetRecord,
     WealthPlanRecord,
 )
-from .roles import ROLE_MIDDLE, ROLE_PRESIDENT, ROLE_RM, can_view_branch_wide
+from .roles import (
+    ROLE_MIDDLE,
+    ROLE_PRESIDENT,
+    ROLE_RM,
+    get_visible_source_labels,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,31 +223,39 @@ class WealthPlanStore:
     ) -> list[WealthPlanRecord]:
         """按所属分行及角色可见范围查询，并按创建时间倒序。
 
-        行长/中台查看本行全部规划；其余角色仅查看自己创建或分发给自己的
-        本行规划。bbk_id 缺失时不返回数据。
+        行长查看本行分行关注及自己创建的行长关注，中台仅查看分行关注；其余角色仅查看
+        自己创建或分发给自己的本行规划。bbk_id 缺失时不返回数据。
         """
         if not bbk_id:
             return []
-        branch_wide = can_view_branch_wide(role)
+        source_labels = get_visible_source_labels(role)
         if not self.is_available:
             records = [
                 record
                 for record in self._plans.values()
-                if self._visible_to(record, sap_id, branch_wide, bbk_id)
+                if self._visible_to(record, sap_id, role, bbk_id)
             ]
             records.sort(
                 key=lambda r: r.created_at or datetime.min,
                 reverse=True,
             )
             return copy.deepcopy(records)
-        if branch_wide:
+        if source_labels is not None:
+            placeholders = ", ".join(["%s"] * len(source_labels))
+            creator_filter = ""
+            params = (bbk_id, *source_labels)
+            if role == ROLE_PRESIDENT:
+                creator_filter = "AND (p.source_label <> %s OR p.sap_id = %s)"
+                params += (SOURCE_LABEL_BY_ROLE[ROLE_PRESIDENT], sap_id)
             rows = await self.db.fetch_all(
                 f"""
                 SELECT p.* FROM {_PLAN_TABLE} p
                 WHERE p.bbk_id = %s
+                  AND p.source_label IN ({placeholders})
+                  {creator_filter}
                 ORDER BY p.created_at DESC
                 """,
-                (bbk_id,),
+                params,
             )
         else:
             rows = await self.db.fetch_all(
@@ -586,11 +599,20 @@ class WealthPlanStore:
     def _visible_to(
         record: WealthPlanRecord,
         sap_id: str,
-        branch_wide: bool,
+        role: str,
         bbk_id: str,
     ) -> bool:
         if record.bbk_id != bbk_id:
             return False
-        if branch_wide or record.sap_id == sap_id:
+        if (
+            role == ROLE_PRESIDENT
+            and record.source_label == SOURCE_LABEL_BY_ROLE[ROLE_PRESIDENT]
+            and record.sap_id != sap_id
+        ):
+            return False
+        source_labels = get_visible_source_labels(role)
+        if source_labels is not None:
+            return record.source_label in source_labels
+        if record.sap_id == sap_id:
             return True
         return any(target.sap_id == sap_id for target in record.targets)

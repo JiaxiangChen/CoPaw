@@ -1,7 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWealthStore } from "../store";
+import type { WealthRole } from "../permissions";
+import { todayKey } from "../utils";
 import Board from "./index";
 
 vi.mock("../api", async (importOriginal) => {
@@ -14,8 +16,9 @@ vi.mock("../api", async (importOriginal) => {
 });
 
 describe("Board", () => {
+  afterEach(cleanup);
   beforeEach(() => {
-    useWealthStore.setState({ plans: [], plansLoaded: false });
+    useWealthStore.setState({ accountId: "rm", plans: [], plansLoaded: false });
   });
 
   it("规划加载中展示稳定占位，加载完成后才展示真实空态", () => {
@@ -33,5 +36,56 @@ describe("Board", () => {
 
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("当前筛选条件下暂无规划")).toBeInTheDocument();
+  });
+
+  it.each<[WealthRole, readonly string[]]>([
+    ["rm", ["分行关注", "行长关注", "我的关注"]],
+    ["president", ["分行关注", "行长关注"]],
+    ["middle", ["分行关注"]],
+  ])("%s 的分类、全部数量及列表只包含可见来源", (role, sources) => {
+    const allSources = ["分行关注", "行长关注", "我的关注"];
+    useWealthStore.setState({
+      accountId: role,
+      plansLoaded: true,
+      plans: allSources.map((source, index) => ({
+        id: `plan-${index}`,
+        name: `${source}规划`,
+        source,
+        desc: "测试规划",
+        customers: 0,
+        tasks: 0,
+        rate: 0,
+        status: "已自动下发",
+        period: "本周",
+        start: todayKey(),
+        end: todayKey(),
+        items: [],
+      })),
+    });
+    render(
+      <MemoryRouter>
+        <Board />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByRole("button", { name: `全部（${sources.length}）` }),
+    ).toBeInTheDocument();
+    for (const source of allSources) {
+      expect(screen.queryByRole("button", { name: `${source}（1）` })).toEqual(
+        sources.includes(source) ? expect.anything() : null,
+      );
+    }
+    expect(screen.queryByText("行长 / 我的关注")).toEqual(
+      role === "rm" ? expect.anything() : null,
+    );
+    expect(screen.queryByText("行长关注")).toEqual(
+      role === "president" ? expect.anything() : null,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
+    for (const source of allSources) {
+      expect(screen.queryByText(`${source}规划`)).toEqual(
+        sources.includes(source) ? expect.anything() : null,
+      );
+    }
   });
 });

@@ -1033,6 +1033,8 @@ class CronManager:  # pylint: disable=too-many-public-methods
         offset_window_hours: int,
     ) -> tuple[str, int, str]:
         cron = spec.schedule.cron if spec.schedule else ""
+        if offset_window_hours == 0:
+            return cron, 0, ""
         timezone_name = (
             spec.schedule.timezone
             if spec.schedule and spec.schedule.timezone

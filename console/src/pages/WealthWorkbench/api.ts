@@ -163,6 +163,11 @@ function mapPlan(view: PlanView): Plan {
     end: view.period_end ?? "",
     items,
     targetSapIds: view.targets.map((t) => t.sap_id),
+    targets: view.targets.map((t) => ({
+      sapId: t.sap_id,
+      name: t.name || t.sap_id,
+      orgName: "",
+    })),
   };
 }
 

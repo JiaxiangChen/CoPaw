@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import cx from "classnames";
 import styles from "../index.module.less";
 import { useCanAccess, useWealthStore } from "../store";
-import { buildTaskTree, todayKey } from "../utils";
+// import { buildTaskTree, todayKey } from "../utils";
 import { Icon } from "./Icon";
 
 export function Sidebar({
@@ -18,7 +18,7 @@ export function Sidebar({
   collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
-  const plans = useWealthStore((s) => s.plans);
+  // const plans = useWealthStore((s) => s.plans);
   const plansLoaded = useWealthStore((s) => s.plansLoaded);
   const pendingCustomers = useWealthStore((s) => s.pendingCustomers);
   const doneCustomers = useWealthStore((s) => s.doneCustomers);
@@ -30,9 +30,9 @@ export function Sidebar({
   const navigate = useNavigate();
 
   const current = location.pathname;
-  const todayTaskCount = buildTaskTree(plans, todayKey()).flatMap(
-    (group) => group.nodes,
-  ).length;
+  // const todayTaskCount = buildTaskTree(plans, todayKey()).flatMap(
+  //   (group) => group.nodes,
+  // ).length;
 
   useEffect(() => {
     if (!hasTasks || !plansLoaded) return;
@@ -93,9 +93,11 @@ export function Sidebar({
                   >
                     <Icon name="list" />
                     <span className={styles.navLabel}>今日任务</span>
+                    {/* 暂不展示今日任务角标，恢复前需改为有名单的经营场景数。
                     {todayTaskCount > 0 && (
                       <span className={styles.badge}>{todayTaskCount}</span>
                     )}
+                    */}
                   </button>
                   <button
                     className={cx(

@@ -58,7 +58,13 @@ from .publish import (
     delete_removed_scene_jobs,
     launch_publish,
 )
-from .roles import ROLE_RM, can_view_branch_wide, resolve_role
+from .roles import (
+    ROLE_PRESIDENT,
+    ROLE_RM,
+    can_view_branch_wide,
+    get_visible_source_labels,
+    resolve_role,
+)
 from .store import WealthPlanStore, new_plan_id
 
 logger = logging.getLogger(__name__)
@@ -73,6 +79,7 @@ _SKILL_CONFIG_PATH = "/api/agent/workspace/skill-config/list"
 _SKILL_STATS_PATH = "/api/agent/workspace/skill-stats"
 _NAME_LIST_PATH = "/api/agent/workspace/name-list"
 _SKILL_CONFIG_TIMEOUT_SECONDS = 8
+_SHARED_SCENE_BBK_ID = "100"
 
 _SNAP_RUNNING = "running"
 _SNAP_COMPLETED = "completed"
@@ -332,7 +339,7 @@ async def _validate_plan_scenes_for_branch(
     request: Request,
     body: PlanUpsertRequest,
 ) -> None:
-    """仅允许规划使用当前登录用户所属分行的技能场景。"""
+    """允许规划使用当前分行及 bbkId=100 的共享技能场景。"""
     current_bbk_id = str(
         getattr(request.state, "bbk_id", None) or "",
     ).strip()
@@ -350,7 +357,8 @@ async def _validate_plan_scenes_for_branch(
         (item.skillId, item.category)
         for group in scene_groups
         for item in group
-        if str(item.bbkId or "").strip() == current_bbk_id
+        if str(item.bbkId or "").strip()
+        in {current_bbk_id, _SHARED_SCENE_BBK_ID}
     }
     if any(
         (scene.scene_id, scene.category) not in allowed_scenes
@@ -358,7 +366,7 @@ async def _validate_plan_scenes_for_branch(
     ):
         raise HTTPException(
             status_code=403,
-            detail="所选经营场景不属于当前分行或已失效",
+            detail="所选经营场景不属于当前分行或共享场景（100），或已失效",
         )
 
 
@@ -520,6 +528,15 @@ async def _get_visible_plan(
     if record is None:
         raise HTTPException(status_code=404, detail="plan not found")
     if not bbk_id or record.bbk_id != bbk_id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if (
+        role == ROLE_PRESIDENT
+        and record.source_label == SOURCE_LABEL_BY_ROLE[ROLE_PRESIDENT]
+        and record.sap_id != viewer
+    ):
+        raise HTTPException(status_code=403, detail="forbidden")
+    source_labels = get_visible_source_labels(role)
+    if source_labels is not None and record.source_label not in source_labels:
         raise HTTPException(status_code=403, detail="forbidden")
     is_creator = record.sap_id == viewer
     is_target = any(target.sap_id == viewer for target in record.targets)
