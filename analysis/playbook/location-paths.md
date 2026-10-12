@@ -260,6 +260,8 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
 - `src/swe/app/wealth_plans/publish.py` 的 `_build_job_spec` 按场景判断：空数组创建 `workflow`，非空数组保持 `agent`。只判断数组是否为空，`["    "]` 仍按非空处理。
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
+- 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`；首次分发完成后启用父任务批调度并同步子任务，已启用的规划继续按批调度分发。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
+- 批调度切换失败查看广播任务的 `failure_summary`；检查 `SWE_CRON_DISPATCH_INTENTS_ENABLED` 与调度服务配置。不要仅给广播上下文设批调度标志，否则会漏掉父任务的调度注册与子任务同步。
 - 创建/广播定时任务的顺序不变；`workflow` 保留 `scene_id` 作为 `skill_ids`，其 `text` 和 `request` 由 `CronJobSpec` 校验器清空。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/ -q`。
 
@@ -282,6 +284,8 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值，修改后重启后端生效。
 - 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mOrgCode ← orgCode (vorgcode)`、`mOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
 - 上游成功标记为 `code=success`；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
-- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先调用 `POST /user-info/branches/by-branch`，入参为登录分行 `bbk`、`mOrgLvl=30`、`sysId=retailbanking`，再将所选条目的 `mOrgCode/mOrgLvl` 直接传给人员接口（不递归展开 `leaf=false`）。
+- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先调用 `POST /user-info/branches/by-branch`，入参为登录分行 `bbk`、`mOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，再将所选条目的 `mOrgCode/mOrgLvl` 直接传给人员接口（不递归展开 `leaf=false`）。
 - 支行上游 `BranchTreeInfoService` 地址由 `SWE_BRANCH_TREE_API_URL` 在 dev/prd 中配置，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `wmcomsrvgatewayxc.paas.cmbchina.cn`，复用人员接口的 header 凭证配置。
 - 中台可跨支行累计选择人员；当前候选列表与全选操作仅针对当前支行，已选人员信息保留用于发布及移除。快速切换支行时过期响应不更新当前列表。
+
+- 两个外部接口均透传 `Cookie`：优先使用前端统一请求层的 `x-header-cookie`（保留切换用户后的上下文），为空时读取请求 `Cookie`；每次独立组装 header，不修改共享凭证字典。
