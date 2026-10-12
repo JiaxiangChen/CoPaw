@@ -260,6 +260,8 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
 - `src/swe/app/wealth_plans/publish.py` 的 `_build_job_spec` 按场景判断：空数组创建 `workflow`，非空数组保持 `agent`。只判断数组是否为空，`["    "]` 仍按非空处理。
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
+- 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`；首次分发完成后启用父任务批调度并同步子任务，已启用的规划继续按批调度分发。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
+- 批调度切换失败查看广播任务的 `failure_summary`；检查 `SWE_CRON_DISPATCH_INTENTS_ENABLED` 与调度服务配置。不要仅给广播上下文设批调度标志，否则会漏掉父任务的调度注册与子任务同步。
 - 创建/广播定时任务的顺序不变；`workflow` 保留 `scene_id` 作为 `skill_ids`，其 `text` 和 `request` 由 `CronJobSpec` 校验器清空。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/ -q`。
 
