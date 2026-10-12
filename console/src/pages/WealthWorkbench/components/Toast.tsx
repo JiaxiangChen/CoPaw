@@ -24,6 +24,13 @@ export function Toast({ container }: { container?: HTMLElement | null }) {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    // 旧内核通过现有样式显示提示，不设置会让元素默认隐藏的 popover 属性。
+    if (
+      typeof element.showPopover !== "function" ||
+      typeof element.hidePopover !== "function"
+    ) {
+      return;
+    }
     element.setAttribute("popover", "manual");
     if (visible) element.showPopover();
     else element.hidePopover();
@@ -32,6 +39,7 @@ export function Toast({ container }: { container?: HTMLElement | null }) {
   const content = (
     <div
       ref={ref}
+      hidden={!visible}
       className={cx(styles.toast, visible && styles.visible)}
       role="status"
       aria-live="polite"

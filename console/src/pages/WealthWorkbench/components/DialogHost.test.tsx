@@ -88,4 +88,47 @@ describe("DialogHost feedback", () => {
     act(() => vi.advanceTimersByTime(2000));
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it.each(["both", "showPopover", "hidePopover"])(
+    "Popover API 缺少 %s 时，页面和弹窗提示仍可显示并按原计时隐藏",
+    (missing) => {
+      for (const method of ["showPopover", "hidePopover"] as const) {
+        if (missing === "both" || missing === method) {
+          Object.defineProperty(HTMLElement.prototype, method, {
+            configurable: true,
+            writable: true,
+            value: undefined,
+          });
+        }
+      }
+
+      const { container } = render(<DialogHost />);
+      expect(screen.queryByRole("status")).toBeNull();
+      act(() => useWealthStore.getState().toast("页面提示"));
+      expect(screen.getByRole("status")).toBeVisible();
+      expect(screen.getByRole("status")).not.toHaveAttribute("popover");
+      act(() => vi.advanceTimersByTime(3200));
+      expect(screen.queryByRole("status")).toBeNull();
+
+      act(() =>
+        useWealthStore.getState().openDialog({
+          title: "发布工作规划",
+          body: "确认配置",
+          buttons: [],
+        }),
+      );
+      act(() => useWealthStore.getState().toast("发布失败"));
+      const dialog = container.querySelector("dialog")!;
+      expect(dialog).toContainElement(screen.getByRole("status"));
+      expect(screen.getByRole("status")).toBeVisible();
+      act(() => vi.advanceTimersByTime(2000));
+      act(() => useWealthStore.getState().toast("发布失败"));
+      act(() => vi.advanceTimersByTime(1200));
+      act(() => useWealthStore.getState().closeDialog());
+      expect(dialog).not.toContainElement(screen.getByRole("status"));
+      expect(screen.getByRole("status")).toHaveTextContent("发布失败");
+      act(() => vi.advanceTimersByTime(2000));
+      expect(screen.queryByRole("status")).toBeNull();
+    },
+  );
 });
