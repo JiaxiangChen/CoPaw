@@ -17,6 +17,43 @@ from swe.app.wealth_plans.store import WealthPlanStore
 VIEWER = {"X-User-Id": "zhangwl", "X-Bbk-Id": "100"}
 
 
+async def test_create_and_update_shared_scene_keep_current_plan_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    store: WealthPlanStore,
+) -> None:
+    async def fetch_shared_scene(request, category):
+        return [
+            SceneSkillItem(
+                skillId="skill-wealth-insurance-1",
+                senceName="保障潜客经营",
+                category="insurance",
+                bbkId="100",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        wealth_router,
+        "_fetch_external_scene_skills",
+        fetch_shared_scene,
+    )
+    monkeypatch.setattr(wealth_router, "launch_publish", lambda *args: None)
+    request = SimpleNamespace(
+        state=SimpleNamespace(bbk_id="110"),
+        headers=VIEWER,
+        app=SimpleNamespace(state=SimpleNamespace(wealth_plan_store=store)),
+    )
+    body = PlanUpsertRequest(**plan_payload())
+
+    created = await wealth_router.create_plan(request, body)
+    await store.set_publish_status(created.id, "published")
+    updated = await wealth_router.update_plan(request, created.id, body)
+
+    assert updated.id == created.id
+    record = await store.get(created.id)
+    assert record.bbk_id == "110"
+    assert record.scenes[0].scene_id == "skill-wealth-insurance-1"
+
+
 @pytest.mark.parametrize(
     "start,end,expected_status",
     [
@@ -351,8 +388,10 @@ def test_create_plan_derives_source_label_from_request_role(
     assert plans[0]["source_label"] == "我的关注"
 
 
+@pytest.mark.parametrize("skill_bbk_id", ["110", "100"])
 async def test_scene_branch_validation_accepts_current_branch_skill(
     monkeypatch: pytest.MonkeyPatch,
+    skill_bbk_id: str,
 ) -> None:
     request = SimpleNamespace(state=SimpleNamespace(bbk_id="110"))
     body = PlanUpsertRequest(**plan_payload())
@@ -363,7 +402,7 @@ async def test_scene_branch_validation_accepts_current_branch_skill(
                 skillId="skill-wealth-insurance-1",
                 senceName="保障潜客经营",
                 category="insurance",
-                bbkId="110",
+                bbkId=skill_bbk_id,
             ),
         ]
 
@@ -486,6 +525,47 @@ def test_list_personal_roles_visible_by_branch_and_relation(
     assert target_items["items"][0]["editable"] is False
     assert outsider_items["items"] == []
     assert other_branch_items["items"] == []
+
+
+def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
+    """RB0108 理财主管岗（综合）可查看本分行规划，发布来源为行长关注。"""
+    created = client.post(
+        "/api/wealth/plans",
+        json=plan_payload(),
+        headers={**VIEWER, "X-Bbk-Id": "100"},
+    ).json()
+    supervisor = {
+        "X-User-Id": "supervisor",
+        "X-Bbk-Id": "100",
+        "X-Position-Id": "RB0108",
+    }
+    items = client.get("/api/wealth/plans", headers=supervisor).json()["items"]
+    assert [item["id"] for item in items] == [created["id"]]
+    assert items[0]["editable"] is False
+    assert (
+        client.get(
+            "/api/wealth/plans",
+            headers={**supervisor, "X-Bbk-Id": "200"},
+        ).json()["items"]
+        == []
+    )
+
+    supervisor_payload = plan_payload(name="主管规划")
+    supervisor_payload["scenes"][0].update(
+        start_date="2026-10-01",
+        end_date="2026-10-31",
+    )
+    published = client.post(
+        "/api/wealth/plans",
+        json=supervisor_payload,
+        headers=supervisor,
+    )
+    assert published.status_code == 200
+    detail = client.get(
+        f"/api/wealth/plans/{published.json()['id']}",
+        headers=supervisor,
+    ).json()
+    assert detail["source_label"] == "行长关注"
 
 
 def test_list_branch_wide_for_president_and_middle(client: TestClient) -> None:

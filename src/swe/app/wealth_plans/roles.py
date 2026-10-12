@@ -20,6 +20,7 @@ POSITION_ROLE_MAP: dict[str, str] = {
     "RB0101": ROLE_RM,
     "RB1101": ROLE_PRESIDENT,
     "RB0306": ROLE_PRESIDENT,
+    "RB0108": ROLE_PRESIDENT,  # 理财主管岗（综合），权限等同支行行长
     "RB0301": ROLE_MIDDLE,
     "RB0305": ROLE_MIDDLE,
 }

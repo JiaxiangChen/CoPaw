@@ -73,6 +73,7 @@ _SKILL_CONFIG_PATH = "/api/agent/workspace/skill-config/list"
 _SKILL_STATS_PATH = "/api/agent/workspace/skill-stats"
 _NAME_LIST_PATH = "/api/agent/workspace/name-list"
 _SKILL_CONFIG_TIMEOUT_SECONDS = 8
+_SHARED_SCENE_BBK_ID = "100"
 
 _SNAP_RUNNING = "running"
 _SNAP_COMPLETED = "completed"
@@ -332,7 +333,7 @@ async def _validate_plan_scenes_for_branch(
     request: Request,
     body: PlanUpsertRequest,
 ) -> None:
-    """仅允许规划使用当前登录用户所属分行的技能场景。"""
+    """允许规划使用当前分行及 bbkId=100 的共享技能场景。"""
     current_bbk_id = str(
         getattr(request.state, "bbk_id", None) or "",
     ).strip()
@@ -350,7 +351,8 @@ async def _validate_plan_scenes_for_branch(
         (item.skillId, item.category)
         for group in scene_groups
         for item in group
-        if str(item.bbkId or "").strip() == current_bbk_id
+        if str(item.bbkId or "").strip()
+        in {current_bbk_id, _SHARED_SCENE_BBK_ID}
     }
     if any(
         (scene.scene_id, scene.category) not in allowed_scenes
@@ -358,7 +360,7 @@ async def _validate_plan_scenes_for_branch(
     ):
         raise HTTPException(
             status_code=403,
-            detail="所选经营场景不属于当前分行或已失效",
+            detail="所选经营场景不属于当前分行或共享场景（100），或已失效",
         )
 
 
