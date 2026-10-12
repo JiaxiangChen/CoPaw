@@ -235,12 +235,13 @@ def test_internal_cron_callback_dispatches_job_param_tenant() -> None:
     )
 
 
-def test_internal_cron_callback_forwards_scheduler_execution_identity() -> (
-    None
-):
+@pytest.mark.parametrize("task_type", ["agent", "text", "workflow"])
+def test_internal_cron_callback_forwards_scheduler_execution_identity(
+    task_type: str,
+) -> None:
     cron_manager = SimpleNamespace(
         run_job=AsyncMock(),
-        get_job=AsyncMock(return_value=SimpleNamespace(task_type="agent")),
+        get_job=AsyncMock(return_value=SimpleNamespace(task_type=task_type)),
     )
     manager = SimpleNamespace(
         get_agent=AsyncMock(
@@ -269,23 +270,24 @@ def test_internal_cron_callback_forwards_scheduler_execution_identity() -> (
     )
 
     assert response.status_code == 200
-    cron_manager.run_job.assert_awaited_once_with(
-        "job-1",
-        is_manual=False,
-        source_id=None,
-        dispatch_meta={
-            "scheduled_fire_at": "2026-09-08T02:30:00Z",
-            "external_execution_id": "scheduler-log-1",
-        },
-    )
+    cron_manager.run_job.assert_awaited_once()
+    args, kwargs = cron_manager.run_job.await_args
+    assert args == ("job-1",)
+    assert kwargs["is_manual"] is False
+    assert kwargs["source_id"] is None
+    metadata = kwargs["dispatch_meta"]
+    assert metadata["scheduled_fire_at"] == "2026-09-08T02:30:00Z"
+    assert metadata["external_execution_id"] == "scheduler-log-1"
+    assert "cron_execution_key" not in metadata
 
 
-def test_internal_cron_callback_generates_identity_for_legacy_scheduler() -> (
-    None
-):
+@pytest.mark.parametrize("task_type", ["agent", "text", "workflow"])
+def test_internal_cron_callback_generates_identity_for_legacy_scheduler(
+    task_type: str,
+) -> None:
     cron_manager = SimpleNamespace(
         run_job=AsyncMock(),
-        get_job=AsyncMock(return_value=SimpleNamespace(task_type="agent")),
+        get_job=AsyncMock(return_value=SimpleNamespace(task_type=task_type)),
     )
     manager = SimpleNamespace(
         get_agent=AsyncMock(

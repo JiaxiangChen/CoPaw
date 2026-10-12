@@ -496,6 +496,7 @@ async def _run_job_callback(
     if getattr(job, "task_type", None) in {
         "agent",
         "text",
+        "workflow",
     } and not _has_callback_execution_identity(dispatch_meta):
         dispatch_meta["cron_execution_key"] = f"legacy:{uuid.uuid4()}"
     dispatch_meta.update(
