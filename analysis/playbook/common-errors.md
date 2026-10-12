@@ -2,6 +2,12 @@
 
 本文档只收录仓库中已经出现过、且有明确入口可追的高频报错。
 
+## 财富工作台在旧内核浏览器报 hidePopover is not a function
+
+- 原因：Toast 直接调用原生 Popover API；不支持该 API 的浏览器在组件初始化隐藏提示时就会报错，显示提示时也可能报 `showPopover is not a function`。
+- 处理：同时检测 `showPopover`、`hidePopover` 是否为函数，仅在完整支持时设置 `popover="manual"` 并调用原生方法；否则由 `hidden` 属性及现有 `.toast.visible` 样式控制提示。保留弹窗内 Portal，确保提示位于原生弹窗遮罩之上，关闭弹窗时保留自动消失计时。
+- 排查入口：`console/src/pages/WealthWorkbench/components/Toast.tsx`、`DialogHost.test.tsx`。回归覆盖两个方法均缺失、任一方法缺失、页面初始化、弹窗提示、重复提示及关闭弹窗后的计时。
+
 ## 财富工作台确认发布后提示被弹窗遮住
 
 - 原因：`DialogHost` 使用原生 `dialog.showModal()` 进入浏览器顶层；普通页面 Toast 会被弹窗遮罩覆盖，提高页面 `z-index` 无法解决。发布失败时弹窗保留，因此失败信息容易被遮住。
