@@ -56,7 +56,7 @@ export default function Board() {
   const [boardTab, setBoardTab] = useState("全部");
   const [period, setPeriod] = useState("本月");
   const [boardMode, setBoardMode] = useState<"calendar" | "list">("calendar");
-  const [dimension, setDimension] = useState<"week" | "month">("month");
+  const [dimension, setDimension] = useState<"week" | "month">("week");
   const [anchor, setAnchor] = useState(todayKey);
   const [availableScenes, setAvailableScenes] = useState<number | null>(null);
 
