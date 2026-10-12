@@ -43,6 +43,51 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("中台按支行累计分发", () => {
+  it.each([false, true])("121516 在子层=%s 时直接查人员", async (nested) => {
+    const special = {
+      mOrgCode: "121516",
+      mOrgName: "特殊机构",
+      mOrgLvl: 70,
+      leaf: false,
+    };
+    if (nested) mockRequest.mockResolvedValueOnce(branches);
+    mockRequest
+      .mockResolvedValueOnce([special])
+      .mockResolvedValueOnce(people("0001", "张三"));
+    render(<TargetPicker />);
+    const select = screen.getByRole("combobox", { name: "选择支行" });
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.mouseDown(select);
+    if (nested)
+      fireEvent.click(
+        await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
+      );
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /特殊机构/ }),
+    );
+    await screen.findByRole("button", { name: /张三/ });
+    expect(mockRequest).toHaveBeenCalledTimes(nested ? 3 : 2);
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      "/user-info/positions/by-branch",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          bbkOrgId: "755",
+          mOrgCode: "121516",
+          mOrgLvl: 70,
+        }),
+      },
+    );
+    const branchQueries = mockRequest.mock.calls.filter(
+      ([url]) => url === "/user-info/branches/by-branch",
+    );
+    expect(
+      branchQueries.every(
+        ([, options]) =>
+          JSON.parse(String(options?.body)).mOrgCode !== "121516",
+      ),
+    ).toBe(true);
+  });
   it("探索新的上级时使旧人员查询失效", async () => {
     let finishOld!: (value: unknown) => void;
     mockRequest.mockReturnValueOnce(
