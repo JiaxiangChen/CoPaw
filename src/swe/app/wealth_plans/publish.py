@@ -16,11 +16,13 @@ from fastapi import Request
 
 from ..crons.api import (
     CronBroadcastRequest,
+    _bind_workflow_config,
     _build_broadcast_context,
     _build_child_management_context,
     _list_broadcast_children_for_tenants,
     _normalize_broadcast_targets,
     _schedule_broadcast_task,
+    _workflow_store,
     get_cron_manager,
 )
 from ..crons.models import (
@@ -147,6 +149,8 @@ async def _publish_all_scenes(
     for scene in plan.scenes:
         job_id = scene.cron_job_id or str(uuid4())
         job = _build_job_spec(request, plan, scene, job_id)
+        if job.task_type == "workflow":
+            job = await _bind_workflow_config(job, _workflow_store(request))
         await mgr.create_or_replace_job(job)
         broadcast_task_id = await _broadcast_scene_job(
             request,
