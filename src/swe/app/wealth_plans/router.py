@@ -59,6 +59,7 @@ from .publish import (
     launch_publish,
 )
 from .roles import (
+    ROLE_PRESIDENT,
     ROLE_RM,
     can_view_branch_wide,
     get_visible_source_labels,
@@ -527,6 +528,12 @@ async def _get_visible_plan(
     if record is None:
         raise HTTPException(status_code=404, detail="plan not found")
     if not bbk_id or record.bbk_id != bbk_id:
+        raise HTTPException(status_code=403, detail="forbidden")
+    if (
+        role == ROLE_PRESIDENT
+        and record.source_label == SOURCE_LABEL_BY_ROLE[ROLE_PRESIDENT]
+        and record.sap_id != viewer
+    ):
         raise HTTPException(status_code=403, detail="forbidden")
     source_labels = get_visible_source_labels(role)
     if source_labels is not None and record.source_label not in source_labels:

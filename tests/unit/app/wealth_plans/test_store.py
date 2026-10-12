@@ -291,7 +291,14 @@ async def test_list_for_viewer_branch_wide_for_president_and_middle() -> None:
     rm_view = await store.list_for_viewer("wangly", "rm", "100")
     no_bbk_view = await store.list_for_viewer("wangly", "president", None)
 
-    assert {r.id for r in president_view} == {"plan-1", "plan-2"}
+    assert president_view == []
+    assert {
+        r.id
+        for r in await store.list_for_viewer("zhangwl", "president", "100")
+    } == {"plan-1"}
+    assert {
+        r.id for r in await store.list_for_viewer("liuxt", "president", "100")
+    } == {"plan-2"}
     assert middle_view == []
     assert rm_view == []
     assert no_bbk_view == []
@@ -327,9 +334,9 @@ async def test_list_for_viewer_database_query_is_branch_wide_for_management() ->
     sql, params = db.fetch_all.await_args.args
     normalized_sql = " ".join(sql.split())
     assert "WHERE p.bbk_id = %s" in normalized_sql
-    assert "p.sap_id" not in normalized_sql
+    assert "p.source_label <> %s OR p.sap_id = %s" in normalized_sql
     assert "p.source_label IN (%s, %s)" in normalized_sql
-    assert params == ("100", "分行关注", "行长关注")
+    assert params == ("100", "分行关注", "行长关注", "行长关注", "wangly")
 
 
 @pytest.mark.asyncio
