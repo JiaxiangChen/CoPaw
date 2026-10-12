@@ -254,6 +254,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 ## 财富工作台岗位角色映射
 
 - 财富岗位映射需同时维护 `console/src/pages/WealthWorkbench/permissions.ts` 与 `src/swe/app/wealth_plans/roles.py`；`RB0108` 为理财主管岗（综合），映射为 `president`，沿用支行行长的页面权限、分行规划可见范围、分发要求和“行长关注”发布来源。
+- 行长角色查看“行长关注”时，除同一 `bbk_id` 外，还要求当前用户 ID 与规划创建人 `sap_id` 一致；同 BBK 的两位行长不能互看，即使另一位行长在分发对象中。列表的 SQL/内存过滤与详情权限均需同步维护，入口为 `WealthPlanStore.list_for_viewer()`、`_visible_to()` 和路由 `_get_visible_plan()`。分行关注仍按原管理范围可见，客户经理仍可查看同 BBK 下分发给自己的行长关注。当前用户优先取 `request.state.tenant_id`，其次取 `X-User-Id`。
 
 ## 财富规划任务类型与技能/MCP 下发
 
@@ -293,3 +294,5 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 中台支行级联选择器支持前端模糊搜索，对已加载的机构按支行名称或机构编码进行包含匹配，忽略英文大小写和搜索词首尾空格；搜索不额外请求支行接口，也不改变跨支行累计选择。
 
 - 级联查询失败时显示重试，不当作末级；切换上级清空当前候选人员并使旧请求失效，但保留跨支行累计的人员选择。子支行按需加载并缓存，搜索范围仅包含已经加载的机构。
+- 业务例外：`mOrgCode=121516` 在任意层级直接视为末级，跳过下级支行查询，用该条目的 `mOrgCode/mOrgLvl` 查询人员。
+- 修改规划的人员回显：`api.ts::mapPlan` 保留计划返回的 `targets.sap_id/name`；`store.ts::editPlan` 恢复 ID 与姓名缓存，并重置当前支行候选状态。后续人员加载保留编辑计划的历史目标信息；历史目标无姓名时回显 ID。计划未保存机构路径，修改页的级联路径需重新选择，但已选人员无需重新勾选。

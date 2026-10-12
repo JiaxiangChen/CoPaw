@@ -26,8 +26,8 @@ const branchOptions = (items: DistributeBranch[]): BranchOption[] =>
     ...branch,
     value: branch.mOrgCode,
     label: `${branch.mOrgName}（${branch.mOrgCode}）`,
-    // 必须通过下级查询的空数组确认末级，不依赖上游 leaf。
-    isLeaf: false,
+    // 121516 按业务规则直接视为末级，其余机构通过下级空数组确认。
+    isLeaf: branch.mOrgCode === "121516",
   }));
 
 function updateBranchPath(

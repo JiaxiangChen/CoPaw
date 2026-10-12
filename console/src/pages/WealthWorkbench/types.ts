@@ -82,6 +82,8 @@ export interface Plan {
   items?: PlanItem[];
   /** 发布时的分发目标 sapId 列表；客户经理为本人 userId */
   targetSapIds?: string[];
+  /** 已保存的分发目标信息，用于编辑回显及重新发布。 */
+  targets?: DistributeTarget[];
 }
 
 /** 创建计划页的草稿（会话级，不持久化） */

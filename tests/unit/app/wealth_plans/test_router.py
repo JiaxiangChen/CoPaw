@@ -528,7 +528,7 @@ def test_list_personal_roles_visible_by_branch_and_relation(
 
 
 def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
-    """RB0108 理财主管岗（综合）可查看本分行规划，发布来源为行长关注。"""
+    """RB0108 沿用行长的创建人隔离，发布来源为行长关注。"""
     created = client.post(
         "/api/wealth/plans",
         json=plan_payload(),
@@ -540,8 +540,14 @@ def test_financial_supervisor_has_president_scope(client: TestClient) -> None:
         "X-Position-Id": "RB0108",
     }
     items = client.get("/api/wealth/plans", headers=supervisor).json()["items"]
-    assert [item["id"] for item in items] == [created["id"]]
-    assert items[0]["editable"] is False
+    assert items == []
+    assert (
+        client.get(
+            f"/api/wealth/plans/{created['id']}",
+            headers=supervisor,
+        ).status_code
+        == 403
+    )
     assert (
         client.get(
             "/api/wealth/plans",
@@ -621,8 +627,21 @@ def test_detail_visibility_combines_branch_and_role_scope(
         f"/api/wealth/plans/{created['id']}",
         headers=management_peer,
     )
-    assert detail.status_code == 200
-    assert detail.json()["editable"] is False
+    assert detail.status_code == 403
+    assert (
+        client.get(
+            f"/api/wealth/plans/{created['id']}",
+            headers={**VIEWER, "X-Position-Id": "RB1101"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/wealth/plans",
+            headers=management_peer,
+        ).json()["items"]
+        == []
+    )
 
     target = {
         "X-User-Id": "chenjy",
@@ -1309,6 +1328,8 @@ async def test_management_list_and_detail_share_source_scope(
             ("president", "viewer", "行长关注"),
             ("personal", "viewer", "我的关注"),
             ("target-personal", "other", "我的关注"),
+            ("peer-president", "other", "行长关注"),
+            ("peer-branch", "other", "分行关注"),
         ]
     ]
     for record in records:
@@ -1320,11 +1341,16 @@ async def test_management_list_and_detail_share_source_scope(
     }
     items = client.get("/api/wealth/plans", headers=headers).json()["items"]
     assert {item["source_label"] for item in items} == allowed_sources
+    assert "peer-president" not in {item["id"] for item in items}
+    assert "peer-branch" in {item["id"] for item in items}
     for record in records:
         response = client.get(
             f"/api/wealth/plans/{record.id}",
             headers=headers,
         )
         assert response.status_code == (
-            200 if record.source_label in allowed_sources else 403
+            200
+            if record.source_label in allowed_sources
+            and record.id != "peer-president"
+            else 403
         )
