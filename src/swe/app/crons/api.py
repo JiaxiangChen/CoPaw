@@ -1460,6 +1460,15 @@ async def _run_broadcast_task(
 ) -> None:
     semaphore = asyncio.Semaphore(_get_cron_broadcast_concurrency())
     await store.mark_running(task_id)
+    logger.info(
+        "cron broadcast task started: task=%s source_job=%s source=%s "
+        "agent=%s target_tenant_ids=%s",
+        task_id,
+        context.source_job.id,
+        context.source_id,
+        context.agent_id,
+        tenant_ids,
+    )
 
     async def _run_target(tenant_id: str, offset: int) -> None:
         async with semaphore:
@@ -1468,6 +1477,16 @@ async def _run_broadcast_task(
             await store.record_target_result(
                 task_id,
                 result.model_dump(mode="json"),
+            )
+            logger.info(
+                "cron broadcast target result: task=%s source_job=%s "
+                "tenant=%s success=%s child_job=%s error=%s",
+                task_id,
+                context.source_job.id,
+                tenant_id,
+                result.success,
+                result.job_id,
+                result.error,
             )
 
     try:
@@ -1481,6 +1500,15 @@ async def _run_broadcast_task(
             await post_broadcast()
         await store.finish_task(task_id)
     except Exception as exc:  # pylint: disable=broad-except
+        logger.exception(
+            "cron broadcast task failed: task=%s source_job=%s source=%s "
+            "agent=%s target_count=%d",
+            task_id,
+            context.source_job.id,
+            context.source_id,
+            context.agent_id,
+            len(tenant_ids),
+        )
         await store.record_task_failed(task_id, str(exc))
 
 
@@ -2112,6 +2140,14 @@ async def _broadcast_to_tenant(
             target_bbk_id,
         )
     except Exception as exc:  # pylint: disable=broad-except
+        logger.exception(
+            "cron broadcast target failed: source_job=%s tenant=%s "
+            "source=%s agent=%s",
+            context.source_job.id,
+            tenant_id,
+            context.source_id,
+            context.agent_id,
+        )
         return CronBroadcastTenantResult(
             tenant_id=tenant_id,
             success=False,
