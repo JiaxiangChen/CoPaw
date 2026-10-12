@@ -20,15 +20,17 @@ export interface DistributeBranch {
 
 /** 按当前登录分行查询可选择的下属机构。 */
 export async function fetchDistributeBranches(): Promise<DistributeBranch[]> {
-  const { bbk } = useIframeStore.getState();
-  if (!bbk) return [];
+  const { bbk, sysId, orgLvl } = useIframeStore.getState();
+  if (!bbk || !sysId || !orgLvl?.trim()) return [];
+  const mOrgLvl = Number(orgLvl);
+  if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return [];
   try {
     return await request<DistributeBranch[]>("/user-info/branches/by-branch", {
       method: "POST",
       body: JSON.stringify({
         mOrgCode: bbk,
-        mOrgLvl: 30,
-        sysId: "retailbanking",
+        mOrgLvl,
+        sysId,
       }),
     });
   } catch (error) {

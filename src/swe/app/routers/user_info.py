@@ -58,7 +58,7 @@ class BranchTreeQueryRequest(BaseModel):
 
     mOrgCode: str = Field(..., min_length=1)
     mOrgLvl: int = Field(..., ge=0)
-    sysId: str = "retailbanking"
+    sysId: str = Field(..., min_length=1)
 
 
 @router.post("/branches/by-branch", summary="查询分行下属支行")

@@ -25,9 +25,12 @@ const people = (sapID: string, userName: string) => ({
 
 beforeEach(() => {
   mockRequest.mockReset();
-  useIframeStore
-    .getState()
-    .setContext({ bbk: "755", orgCode: "755480", orgLvl: "70" });
+  useIframeStore.getState().setContext({
+    bbk: "755",
+    orgCode: "755480",
+    orgLvl: "70",
+    sysId: "cookie-system",
+  });
   useWealthStore.setState({
     accountId: "middle",
     targets: [],
@@ -40,6 +43,29 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("中台按支行累计分发", () => {
+  it.each([null, "", " ", "NaN", "70.5", "-1"])(
+    "cookie 机构级别 %s 无效时不查询支行",
+    async (orgLvl) => {
+      useIframeStore.getState().setContext({ orgLvl });
+      render(<TargetPicker />);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("option", { name: "当前分行暂无可选支行" }),
+        ).toBeInTheDocument(),
+      );
+      expect(mockRequest).not.toHaveBeenCalled();
+    },
+  );
+  it("缺少 cookie 系统标识时不查询支行", async () => {
+    useIframeStore.getState().setContext({ sysId: null });
+    render(<TargetPicker />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("option", { name: "当前分行暂无可选支行" }),
+      ).toBeInTheDocument(),
+    );
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
   it("先查支行，按返回层级查人员，跨支行保留选择和姓名", async () => {
     mockRequest
       .mockResolvedValueOnce(branches)
@@ -59,8 +85,8 @@ describe("中台按支行累计分发", () => {
         method: "POST",
         body: JSON.stringify({
           mOrgCode: "755",
-          mOrgLvl: 30,
-          sysId: "retailbanking",
+          mOrgLvl: 70,
+          sysId: "cookie-system",
         }),
       },
     );

@@ -99,10 +99,14 @@ async def test_query_branch_tree_forwards_branch_and_credential(client):
         json=payload,
         request=httpx.Request("POST", user_info.BRANCH_TREE_API_URL),
     )
-    body = user_info.BranchTreeQueryRequest(mOrgCode="755", mOrgLvl=30)
+    body = user_info.BranchTreeQueryRequest(
+        mOrgCode="755",
+        mOrgLvl=30,
+        sysId="cookie-system",
+    )
     assert await user_info.query_branch_tree(body) == payload
     client.post.assert_awaited_once_with(
         user_info.BRANCH_TREE_API_URL,
-        json={"mOrgCode": "755", "mOrgLvl": 30, "sysId": "retailbanking"},
+        json={"mOrgCode": "755", "mOrgLvl": 30, "sysId": "cookie-system"},
         headers={"xxx": "yyyy"},
     )
