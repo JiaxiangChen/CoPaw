@@ -376,13 +376,14 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     const targets = await fetchDistributeTargets(branch);
     if (requestSeq !== targetRequestSeq) return;
     set((state) => ({
-      targets: branch
-        ? Array.from(
-            new Map(
-              [...state.targets, ...targets].map((t) => [t.sapId, t]),
-            ).values(),
-          )
-        : targets,
+      targets:
+        branch || state.editingId
+          ? Array.from(
+              new Map(
+                [...state.targets, ...targets].map((t) => [t.sapId, t]),
+              ).values(),
+            )
+          : targets,
       branchTargetSapIds: targets.map((t) => t.sapId),
       targetsLoaded: true,
     }));
@@ -538,8 +539,25 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     if (!p) return;
     const items = p.items ? JSON.parse(JSON.stringify(p.items)) : [];
     const draft = normalizeItems({ name: p.name, items });
-    // 分发目标不回填：编辑时以当前选择为准重新发布
-    set({ draft, editingId: id, targetSapIds: p.targetSapIds ?? [] });
+    const targetSapIds = p.targetSapIds ?? [];
+    const targets = targetSapIds.map(
+      (sapId) =>
+        p.targets?.find((target) => target.sapId === sapId) ?? {
+          sapId,
+          name: sapId,
+          orgName: "",
+        },
+    );
+    targetRequestSeq += 1;
+    set({
+      draft,
+      editingId: id,
+      targetSapIds,
+      targets,
+      targetsLoaded: false,
+      targetBranch: null,
+      branchTargetSapIds: [],
+    });
   },
 
   /** 离开创建页时清除编辑态（与原型 navigate() 行为一致：草稿本身保留） */
