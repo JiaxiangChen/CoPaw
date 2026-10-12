@@ -1655,7 +1655,7 @@ def test_broadcast_can_disable_offset_shift():
     assert target_second.created[0].meta["broadcast_offset_minutes"] == 0
 
 
-@pytest.mark.parametrize("offset_window_hours", [0, 25])
+@pytest.mark.parametrize("offset_window_hours", [-1, 25])
 def test_broadcast_rejects_invalid_offset_window_hours(offset_window_hours):
     source_manager = _Manager(
         {

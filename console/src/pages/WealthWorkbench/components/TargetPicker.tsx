@@ -3,7 +3,8 @@
  * 用户池来自 distributeTargets.ts（按登录机构查询岗位人员，查不到时显示无数据），
  * 选中结果写入 store.targetSapIds，发布规划时随请求上传。
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Cascader } from "antd";
 import cx from "classnames";
 import styles from "../index.module.less";
 import { useWealthStore } from "../store";
@@ -13,6 +14,37 @@ import {
 } from "../distributeTargets";
 import { Icon } from "./Icon";
 
+interface BranchOption extends DistributeBranch {
+  value: string;
+  label: string;
+  isLeaf: boolean;
+  children?: BranchOption[];
+}
+
+const branchOptions = (items: DistributeBranch[]): BranchOption[] =>
+  items.map((branch) => ({
+    ...branch,
+    value: branch.mOrgCode,
+    label: `${branch.mOrgName}（${branch.mOrgCode}）`,
+    // 必须通过下级查询的空数组确认末级，不依赖上游 leaf。
+    isLeaf: false,
+  }));
+
+function updateBranchPath(
+  options: BranchOption[],
+  path: string[],
+  patch: Partial<BranchOption>,
+): BranchOption[] {
+  return options.map((option) => {
+    if (option.value !== path[0]) return option;
+    if (path.length === 1) return { ...option, ...patch };
+    return {
+      ...option,
+      children: updateBranchPath(option.children ?? [], path.slice(1), patch),
+    };
+  });
+}
+
 export function TargetPicker() {
   const isMiddle = useWealthStore((s) => s.accountId === "middle");
   const targetBranch = useWealthStore((s) => s.targetBranch);
@@ -21,10 +53,17 @@ export function TargetPicker() {
   const targetsLoaded = useWealthStore((s) => s.targetsLoaded);
   const targetSapIds = useWealthStore((s) => s.targetSapIds);
   const loadTargets = useWealthStore((s) => s.loadTargets);
+  const resetTargetBranch = useWealthStore((s) => s.resetTargetBranch);
   const toggleTarget = useWealthStore((s) => s.toggleTarget);
   const [keyword, setKeyword] = useState("");
-  const [branches, setBranches] = useState<DistributeBranch[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [branchesLoaded, setBranchesLoaded] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branchPath, setBranchPath] = useState<BranchOption[]>([]);
+  const [branchPending, setBranchPending] = useState(false);
+  const [branchError, setBranchError] = useState(false);
+  const [branchReload, setBranchReload] = useState(0);
+  const branchRequestSeq = useRef(0);
 
   useEffect(() => {
     if (!isMiddle) {
@@ -32,16 +71,63 @@ export function TargetPicker() {
       return;
     }
     let cancelled = false;
+    branchRequestSeq.current += 1;
+    resetTargetBranch();
+    setBranchPath([]);
+    setBranchError(false);
+    setBranchPending(false);
     setBranchesLoaded(false);
     void fetchDistributeBranches().then((items) => {
       if (cancelled) return;
-      setBranches(items);
+      setBranchError(items === null);
+      setBranches(branchOptions(items ?? []));
       setBranchesLoaded(true);
     });
     return () => {
       cancelled = true;
+      branchRequestSeq.current += 1;
     };
-  }, [isMiddle, loadTargets]);
+  }, [isMiddle, loadTargets, resetTargetBranch, branchReload]);
+
+  const selectBranchPath = async (values: string[], path: BranchOption[]) => {
+    const branch = path[path.length - 1];
+    if (!branch) return;
+    const requestSeq = ++branchRequestSeq.current;
+    setBranchPath(path);
+    setBranchError(false);
+    setKeyword("");
+    resetTargetBranch();
+    if (branch.isLeaf) {
+      setBranchOpen(false);
+      setBranchPending(false);
+      await loadTargets(branch);
+      return;
+    }
+    if (branch.children?.length) {
+      setBranchPending(false);
+      // 等待搜索结果选择完成后展开已缓存的下一层。
+      await Promise.resolve();
+      if (requestSeq === branchRequestSeq.current) setBranchOpen(true);
+      return;
+    }
+    setBranchPending(true);
+    const children = await fetchDistributeBranches(branch);
+    if (requestSeq !== branchRequestSeq.current) return;
+    setBranchPending(false);
+    if (children === null) {
+      setBranchOpen(false);
+      setBranchError(true);
+      return;
+    }
+    setBranchOpen(children.length > 0);
+    setBranches((items) =>
+      updateBranchPath(items, values, {
+        children: children.length ? branchOptions(children) : undefined,
+        isLeaf: children.length === 0,
+      }),
+    );
+    if (!children.length) await loadTargets(branch);
+  };
 
   const visible = useMemo(() => {
     const candidates = isMiddle
@@ -66,33 +152,67 @@ export function TargetPicker() {
       {isMiddle && (
         <div className={styles.field}>
           <label htmlFor="distribute-branch">选择支行</label>
-          <select
+          <Cascader<BranchOption>
             id="distribute-branch"
-            className={styles.input}
-            value={targetBranch?.mOrgCode ?? ""}
-            disabled={!branchesLoaded || branches.length === 0}
-            onChange={(e) => {
-              const branch = branches.find(
-                (item) => item.mOrgCode === e.target.value,
-              );
-              if (!branch) return;
-              setKeyword("");
-              void loadTargets(branch);
+            className={styles.branchSelect}
+            dropdownStyle={{
+              maxWidth: "calc(100vw - 32px)",
+              overflowX: "auto",
             }}
-          >
-            <option value="" disabled>
-              {!branchesLoaded
+            aria-label="选择支行"
+            open={branchOpen}
+            onDropdownVisibleChange={setBranchOpen}
+            changeOnSelect
+            allowClear={false}
+            value={branchPath.map((branch) => branch.value)}
+            disabled={!branchesLoaded || branches.length === 0}
+            placeholder={
+              !branchesLoaded
                 ? "正在加载支行…"
                 : branches.length
-                ? "请选择支行"
-                : "当前分行暂无可选支行"}
-            </option>
-            {branches.map((branch) => (
-              <option key={branch.mOrgCode} value={branch.mOrgCode}>
-                {branch.mOrgName}（{branch.mOrgCode}）
-              </option>
-            ))}
-          </select>
+                ? "搜索或逐级选择支行"
+                : branchError
+                ? "支行加载失败"
+                : "当前分行暂无可选支行"
+            }
+            notFoundContent="未找到匹配的支行"
+            options={branches}
+            showSearch={{
+              filter: (input, path) =>
+                path.some((option) =>
+                  option.label
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase()),
+                ),
+            }}
+            onChange={(values, path) => {
+              void selectBranchPath(values as string[], path);
+            }}
+          />
+        </div>
+      )}
+      {branchPending && (
+        <p role="status" className={styles.pageNote}>
+          正在查询子支行…
+        </p>
+      )}
+      {branchError && (
+        <div role="alert" className={styles.field}>
+          <span>支行查询失败，请重试</span>
+          <button
+            type="button"
+            className={styles.btn}
+            onClick={() => {
+              if (branchPath.length)
+                void selectBranchPath(
+                  branchPath.map((branch) => branch.value),
+                  branchPath,
+                );
+              else setBranchReload((value) => value + 1);
+            }}
+          >
+            重试
+          </button>
         </div>
       )}
       <div className={styles.targetToolbar}>
@@ -126,7 +246,11 @@ export function TargetPicker() {
 
       <div className={styles.targetList} role="group" aria-label="分发目标列表">
         {isMiddle && !targetBranch ? (
-          <div className={styles.empty}>请先选择支行，再选择分发人员</div>
+          <div className={styles.empty}>
+            {branchPath.length
+              ? "请继续选择子支行，末级支行确认后加载分发人员"
+              : "请先选择支行，再选择分发人员"}
+          </div>
         ) : !targetsLoaded ? (
           <div className={styles.empty}>正在加载用户列表…</div>
         ) : visible.length ? (

@@ -245,6 +245,7 @@ async def _broadcast_scene_job(
         target_tenant_ids=target_ids,
         enable_batch_dispatch=True,
         enable_offset=False,
+        offset_window_hours=0,
     )
     response = await broadcast_job(
         request,

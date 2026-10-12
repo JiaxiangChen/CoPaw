@@ -19,23 +19,27 @@ export interface DistributeBranch {
 }
 
 /** 按当前登录分行查询可选择的下属机构。 */
-export async function fetchDistributeBranches(): Promise<DistributeBranch[]> {
+export async function fetchDistributeBranches(
+  branch?: DistributeBranch,
+): Promise<DistributeBranch[] | null> {
   const { bbk, sysId, orgLvl } = useIframeStore.getState();
-  if (!bbk || !sysId || !orgLvl?.trim()) return [];
-  const mOrgLvl = Number(orgLvl);
-  if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return [];
+  const mOrgCode = branch?.mOrgCode ?? bbk;
+  const level = branch ? String(branch.mOrgLvl) : orgLvl;
+  if (!mOrgCode || !sysId || !level?.trim()) return branch ? null : [];
+  const mOrgLvl = Number(level);
+  if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return branch ? null : [];
   try {
     return await request<DistributeBranch[]>("/user-info/branches/by-branch", {
       method: "POST",
       body: JSON.stringify({
-        mOrgCode: bbk,
+        mOrgCode,
         mOrgLvl,
         sysId,
       }),
     });
   } catch (error) {
-    console.warn("[Wealth] 分发支行查询失败，按无数据处理", error);
-    return [];
+    console.warn("[Wealth] 分发支行查询失败", error);
+    return null;
   }
 }
 

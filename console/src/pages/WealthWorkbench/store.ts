@@ -121,6 +121,7 @@ interface WealthState {
 
   // —— 分发目标（行长/中台） ——
   loadTargets: (branch?: DistributeBranch) => Promise<void>;
+  resetTargetBranch: () => void;
   toggleTarget: (sapId: string) => void;
 
   // —— 经营场景（按分类点击查询，每次都取最新数据） ——
@@ -356,6 +357,11 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
       sapId,
     );
     set({ doneCustomers, doneLoading: false });
+  },
+
+  resetTargetBranch: () => {
+    targetRequestSeq += 1;
+    set({ targetBranch: null, branchTargetSapIds: [], targetsLoaded: false });
   },
 
   loadTargets: async (branch) => {

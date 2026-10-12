@@ -227,11 +227,11 @@ async def test_broadcast_skipped_when_only_creator_is_target() -> None:
     assert result is None
 
 
-@pytest.mark.parametrize("batch_enabled", [False, True])
+@pytest.mark.parametrize("batch_window", [None, 4, 0])
 @pytest.mark.parametrize("relations", [[], ["mcp-customer"]])
 async def test_broadcast_invoked_for_other_targets(
     monkeypatch: pytest.MonkeyPatch,
-    batch_enabled: bool,
+    batch_window: int | None,
     relations: list[str],
 ) -> None:
     from swe.app.crons import api as cron_api
@@ -244,8 +244,9 @@ async def test_broadcast_invoked_for_other_targets(
         make_scene(mcp_relations=relations),
         "job-1",
     )
-    if batch_enabled:
+    if batch_window is not None:
         job.meta["broadcast_dispatch_intents_enabled"] = True
+        job.meta["batch_dispatch_offset_window_hours"] = batch_window
     request = fake_request()
     request.app = SimpleNamespace(state=SimpleNamespace())
     manager = SimpleNamespace(get_job=AsyncMock(return_value=job))
@@ -295,10 +296,12 @@ async def test_broadcast_invoked_for_other_targets(
     monkeypatch.setattr(cron_api, "_schedule_broadcast_task", schedule)
     assert await _broadcast_scene_job(request, plan, job) == "broadcast-1"
     assert contexts[0]["enable_offset"] is False
-    if batch_enabled:
+    assert contexts[0]["offset_window_hours"] == 0
+    if batch_window == 0:
         assert contexts[0]["enable_batch_dispatch"] is True
         apply_batch.assert_not_awaited()
     else:
         apply_batch.assert_awaited_once()
         assert apply_batch.await_args.kwargs["enable"] is True
+        assert apply_batch.await_args.kwargs["offset_window_hours"] == 0
         assert apply_batch.await_args.kwargs["tenant_ids"] == ["chenjy"]
