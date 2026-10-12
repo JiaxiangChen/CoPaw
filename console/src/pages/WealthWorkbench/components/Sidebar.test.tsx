@@ -41,16 +41,16 @@ describe("Sidebar", () => {
     mocks.state.plansLoaded = true;
   });
 
-  it("显示今日、待触达和已完成数量角标", async () => {
+  it("隐藏今日任务角标，保留待触达和已完成数量角标", async () => {
     render(
       <MemoryRouter initialEntries={["/wealth/board"]}>
         <Sidebar collapsed={false} onToggleCollapse={vi.fn()} />
       </MemoryRouter>,
     );
 
-    expect(
-      within(screen.getByRole("button", { name: /今日任务/ })).getByText("3"),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /今日任务/ }).textContent).toBe(
+      "今日任务",
+    );
     expect(
       within(screen.getByRole("button", { name: /待触达客户/ })).getByText("2"),
     ).toBeTruthy();
