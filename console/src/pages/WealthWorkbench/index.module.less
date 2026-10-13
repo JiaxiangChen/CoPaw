@@ -2876,6 +2876,15 @@
     font-size: 12px;
     cursor: pointer;
   }
+  .customDatebox {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .boardDateRange:global(.ant-picker) {
+    width: 270px;
+    height: 34px;
+  }
   .taskDatePicker:global(.ant-picker) :global(.ant-picker-suffix) {
     color: var(--muted);
     font-size: 13px;
@@ -3203,6 +3212,7 @@
   max-height: 320px;
   overflow: auto;
   white-space: normal;
+  overflow-wrap: anywhere;
   line-height: 1.65;
 }
 
@@ -3392,19 +3402,62 @@
     white-space: normal;
   }
   .customerTable.metricsTable.sceneTable {
-    min-width: 1460px;
+    min-width: 1510px;
     th:nth-child(1),
     td:nth-child(1),
-    th:nth-child(2),
-    td:nth-child(2),
     th:nth-child(6),
     td:nth-child(6) {
       width: 100px;
+    }
+    th:nth-child(2),
+    td:nth-child(2) {
+      width: 135px;
+      white-space: normal;
+    }
+    td:nth-child(2) .tag {
+      box-sizing: border-box;
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .sceneCol {
       width: 160px;
       white-space: normal;
       overflow-wrap: anywhere;
+    }
+    .opportunityPreview {
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      max-height: 4.95em;
+    }
+    .metricsCol {
+      width: auto;
+    }
+    &.opportunityTable .opportunityCol,
+    &.opportunityTable .reason {
+      width: 240px;
+      min-width: 0;
+    }
+    &.todayCustomerTable th:nth-child(6),
+    &.todayCustomerTable td:nth-child(6) {
+      width: 135px;
+    }
+    &.completedTable {
+      // 固定操作列合计 755px，指标区至少保留 520px（窄屏 356px）。
+      min-width: 1275px;
+      .channelCol {
+        width: 100px;
+        white-space: normal;
+      }
+      .executionCol {
+        width: 160px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      th:last-child,
+      td:last-child {
+        width: 100px;
+      }
     }
   }
   .customerTable.metricsTable.opportunityTable .executionCol {
@@ -3424,6 +3477,27 @@
   }
   .customerMetrics {
     width: 100%;
+  }
+  .customerLabels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .customerScenes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    li {
+      min-width: 0;
+    }
+    .metricItem:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
   }
   .metricGrid {
     display: grid;
@@ -3523,7 +3597,10 @@
       min-width: 960px;
     }
     .customerTable.metricsTable.sceneTable {
-      min-width: 1296px;
+      min-width: 1346px;
+    }
+    .customerTable.metricsTable.sceneTable.completedTable {
+      min-width: 1111px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;

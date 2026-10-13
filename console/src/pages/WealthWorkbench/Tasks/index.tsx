@@ -13,6 +13,7 @@ import styles from "../index.module.less";
 import { Icon } from "../components/Icon";
 import { CustomerSchemePreview } from "../components/CustomerSchemePreview";
 import { CustomerMetrics } from "../components/CustomerMetrics";
+import { CustomerScenes } from "../components/CustomerScenes";
 import { buildCustomerGroups } from "./customerGroups";
 import { buildInsightUrl, buildTelUrl, fetchSchemeSignature } from "../api";
 import { useCanAccess, useWealthStore } from "../store";
@@ -222,15 +223,21 @@ function labelTagClass(label: string) {
 
 /** 重点标签单元格：空值使用低强调度占位标签，避免表格出现空洞。 */
 export function CustomerLabel({ label }: { label: string }) {
-  const value = label.trim();
+  const labels = label
+    .split("、")
+    .map((value) => value.trim())
+    .filter(Boolean);
   return (
-    <span
-      className={cx(
-        styles.tag,
-        value ? labelTagClass(value) : styles.emptyTag,
+    <span className={styles.customerLabels}>
+      {labels.length ? (
+        labels.map((value) => (
+          <span key={value} className={cx(styles.tag, labelTagClass(value))}>
+            {value}
+          </span>
+        ))
+      ) : (
+        <span className={cx(styles.tag, styles.emptyTag)}>暂无标签</span>
       )}
-    >
-      {value || "暂无标签"}
     </span>
   );
 }
@@ -332,7 +339,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     [page, pool, isBiz, selectedTask, selectedCategory, search, taskLabel],
   );
   const groups = useMemo(() => buildCustomerGroups(list, isBiz), [list, isBiz]);
-  const columnCount = (doneView ? 6 : isBiz ? 4 : 5) + 1 + Number(showScenes);
+  const columnCount = isBiz ? 5 : 7;
   const tableGroups = groups.length
     ? groups
     : [{ key: "empty", fields: [], customers: [] }];
@@ -791,6 +798,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                         : styles.opportunityTable,
                       styles.metricsTable,
                       showScenes && styles.sceneTable,
+                      page === "today" && !isBiz && styles.todayCustomerTable,
                     )}
                   >
                     <thead>
@@ -842,13 +850,15 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             经营场景
                           </th>
                         )}
-                        <th className={styles.opportunityCol}>
-                          {doneView ? "经营任务" : "经营机会"}
-                        </th>
+                        {!doneView && (
+                          <th className={styles.opportunityCol}>经营机会</th>
+                        )}
                         <th scope="col" className={styles.metricsCol}>
                           客户指标
                         </th>
-                        <th>{doneView ? "触达方式" : "经营方案"}</th>
+                        <th className={doneView ? styles.channelCol : undefined}>
+                          {doneView ? "触达方式" : "经营方案"}
+                        </th>
                         <th className={styles.executionCol}>
                           {doneView ? "完成时间" : "执行"}
                         </th>
@@ -867,23 +877,23 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             )}
                             {showScenes && (
                               <td className={styles.sceneCol}>
-                                {c.skillNames?.join("、") || "--"}
+                                <CustomerScenes key={c.id} names={c.skillNames} />
                               </td>
                             )}
-                            <td className={styles.reason}>
-                              {doneView ? (
-                                c.task
-                              ) : (
+                            {!doneView && (
+                              <td className={styles.reason}>
                                 <Opportunities customer={c} multiple={!isBiz} />
-                              )}
-                            </td>
+                              </td>
+                            )}
                             <td className={styles.metricsCol}>
                               <CustomerMetrics
                                 key={c.id}
                                 fields={c.dynamicFields}
                               />
                             </td>
-                            <td>
+                            <td
+                              className={doneView ? styles.channelCol : undefined}
+                            >
                               {doneView ? (
                                 <>
                                   <Icon
