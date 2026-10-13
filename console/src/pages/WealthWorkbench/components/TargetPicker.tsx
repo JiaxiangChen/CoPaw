@@ -60,7 +60,6 @@ export function TargetPicker() {
   const [branchesLoaded, setBranchesLoaded] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchPath, setBranchPath] = useState<BranchOption[]>([]);
-  const [branchPending, setBranchPending] = useState(false);
   const [branchError, setBranchError] = useState(false);
   const [branchReload, setBranchReload] = useState(0);
   const branchRequestSeq = useRef(0);
@@ -75,7 +74,6 @@ export function TargetPicker() {
     resetTargetBranch();
     setBranchPath([]);
     setBranchError(false);
-    setBranchPending(false);
     setBranchesLoaded(false);
     void fetchDistributeBranches().then((items) => {
       if (cancelled) return;
@@ -99,21 +97,17 @@ export function TargetPicker() {
     resetTargetBranch();
     if (branch.isLeaf) {
       setBranchOpen(false);
-      setBranchPending(false);
       await loadTargets(branch);
       return;
     }
     if (branch.children?.length) {
-      setBranchPending(false);
       // 等待搜索结果选择完成后展开已缓存的下一层。
       await Promise.resolve();
       if (requestSeq === branchRequestSeq.current) setBranchOpen(true);
       return;
     }
-    setBranchPending(true);
     const children = await fetchDistributeBranches(branch);
     if (requestSeq !== branchRequestSeq.current) return;
-    setBranchPending(false);
     if (children === null) {
       setBranchOpen(false);
       setBranchError(true);
@@ -220,11 +214,6 @@ export function TargetPicker() {
         </span>
       </div>
 
-      {branchPending && (
-        <p role="status" className={styles.pageNote}>
-          正在查询子支行…
-        </p>
-      )}
       {branchError && (
         <div role="alert" className={styles.field}>
           <span>支行查询失败，请重试</span>

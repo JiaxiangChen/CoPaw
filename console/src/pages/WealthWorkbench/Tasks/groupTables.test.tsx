@@ -77,6 +77,88 @@ beforeEach(() => {
 });
 
 describe("经营分类独立表格", () => {
+  it("今日任务各分类内待处理优先，同状态保持原顺序，不改变分类和缓存顺序", () => {
+    const template = state.customers[0];
+    state.customers = [
+      { name: "A1", age: "48", touched: 1 },
+      { name: "B1", age: "50", touched: 1 },
+      { name: "A2", age: "48", touched: 0 },
+      { name: "A3", age: "48", touched: 3 },
+      { name: "B2", age: "50", touched: 0 },
+      { name: "A4", age: "48", touched: 0 },
+    ].map(({ name, age, touched }) => ({
+      ...template,
+      id: name,
+      name,
+      touched,
+      groupFields: [{ name: "age", label: "年龄", value: age }],
+    }));
+    render(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    const names = (table: HTMLElement) =>
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0].textContent);
+    expect(screen.getAllByRole("table").map(names)).toEqual([
+      ["A2", "A3", "A4", "A1"],
+      ["B2", "B1"],
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+    expect(names(screen.getByRole("table"))).toEqual([
+      "A2",
+      "A3",
+      "B2",
+      "A4",
+      "A1",
+      "B1",
+    ]);
+    expect(state.customers.map((customer) => customer.name)).toEqual([
+      "A1",
+      "B1",
+      "A2",
+      "A3",
+      "B2",
+      "A4",
+    ]);
+  });
+
+  it("已完成列表与记录弹窗将强接触展示为已接触，其他方式保持原值", () => {
+    state.doneCustomers = state.customers.map((customer, index) => ({
+      ...customer,
+      done: true,
+      channel: ["强接触", "电话", "企微"][index],
+    }));
+    render(
+      <MemoryRouter>
+        <Tasks page="done" />
+      </MemoryRouter>,
+    );
+    const cells = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[4]);
+    expect(cells[0]).toHaveTextContent("已接触");
+    expect(cells[0]).not.toHaveTextContent("强接触");
+    expect(cells[1]).toHaveTextContent("电话");
+    expect(cells[2]).toHaveTextContent("企微");
+    fireEvent.click(
+      within(cells[0].closest("tr")!).getByRole("button", { name: "查看记录" }),
+    );
+    const calls = state.openDialog.mock.calls;
+    const dialog = calls[calls.length - 1]?.[0];
+    expect(dialog.title).toBe("客户触达记录");
+    const { container } = render(dialog.body);
+    expect(
+      within(container).getByText("触达方式").parentElement,
+    ).toHaveTextContent("已接触");
+    expect(container).not.toHaveTextContent("强接触");
+    expect(state.doneCustomers[0].channel).toBe("强接触");
+  });
+
   it("已完成复用三项汇总，按自身筛选名单统计，不依赖今日任务缓存", () => {
     state.doneCustomers = state.customers.map((customer) => ({
       ...customer,
@@ -312,16 +394,16 @@ describe("经营分类独立表格", () => {
         .map((row) => within(row).getAllByRole("cell")[statusColumn]);
       expect(cells.map((cell) => cell.textContent)).toEqual([
         "未接触",
+        "--",
+        "--",
+        "--",
+        "--",
+        "--",
         "已接触",
-        "--",
-        "--",
-        "--",
-        "--",
-        "--",
       ]);
       cells.forEach((cell, index) => {
         expect(cell.firstElementChild).toHaveClass(
-          index === 1 ? styles.green : styles.emptyTag,
+          index === 6 ? styles.green : styles.emptyTag,
         );
       });
       expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 7 人");
