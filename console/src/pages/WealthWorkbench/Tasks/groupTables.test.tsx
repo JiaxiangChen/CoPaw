@@ -77,6 +77,31 @@ beforeEach(() => {
 });
 
 describe("经营分类独立表格", () => {
+  it("已完成复用三项汇总，按自身筛选名单统计，不依赖今日任务缓存", () => {
+    state.doneCustomers = state.customers.map((customer) => ({
+      ...customer,
+      touched: 1,
+      done: true,
+    }));
+    state.customers = [];
+    render(
+      <MemoryRouter>
+        <Tasks page="done" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/累计已完成|今日已完成/)).not.toBeInTheDocument();
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 3 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 3 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "搜索客户或经营机会" }),
+      { target: { value: "客户1" } },
+    );
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 1 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 1 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+  });
+
   it.each(["business", "customer"] as const)(
     "%s 接触状态筛选联动名单、人数统计，支持清除和未知状态",
     (view) => {

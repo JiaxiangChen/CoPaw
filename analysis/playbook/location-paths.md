@@ -279,6 +279,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富任务名单动态字段
 
+- 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 待处理”，按各自当前筛选名单计算；已完成页不再展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。待触达和已完成沿用名单映射的 `done` 判断，正常已完成名单待处理为 0。“今日已触达”文案沿用三页统一表达，不新增完成日期过滤。
 - 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `GET /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。

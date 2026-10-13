@@ -396,10 +396,6 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     loadDoneCustomers,
   ]);
 
-  const doneToday = customers.filter(
-    (c) => c.done && (taskLabel === "全部" || matchLabel(c.label, taskLabel)),
-  ).length;
-
   // 标签筛选浮层：外部点击 / Escape / 滚动 / 缩放时关闭
   useEffect(() => {
     if (!tagFilterOpen) return;
@@ -711,30 +707,17 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                     : "今日任务：客户经营"}
             </h3>
             <div className={styles.summaryMetrics}>
-              {doneView ? (
-                <>
-                  <span>
-                    累计已完成 <b>{list.length}</b> 人
-                  </span>
-                  <span>
-                    今日已完成 <b>{doneToday}</b> 人
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>
-                    目标客户 <b>{list.length}</b> 人
-                  </span>
-                  <span>
-                    今日已触达 <b>{contactedCount}</b> 人
-                  </span>
-                  <span>
-                    待处理{" "}
-                    <b className={styles.red}>{list.length - contactedCount}</b>{" "}
-                    人
-                  </span>
-                </>
-              )}
+              <span>
+                目标客户 <b>{list.length}</b> 人
+              </span>
+              <span>
+                今日已触达 <b>{contactedCount}</b> 人
+              </span>
+              <span>
+                待处理{" "}
+                <b className={styles.red}>{list.length - contactedCount}</b>{" "}
+                人
+              </span>
             </div>
           </div>
         </div>
