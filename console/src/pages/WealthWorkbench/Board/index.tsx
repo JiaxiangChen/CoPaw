@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import cx from "classnames";
-import { DatePicker } from "antd";
+import { DatePicker, Tooltip } from "antd";
+import { RotateCw } from "lucide-react";
 import dayjs from "dayjs";
 import styles from "../index.module.less";
 import { Icon } from "../components/Icon";
@@ -123,6 +124,8 @@ export default function Board() {
     account.id,
     statsRefreshVersion,
   );
+
+  const boardRefreshing = refreshing || statsLoading || statsUpdating;
 
   /** 单个规划的统计汇总：各场景目标客户/已生成任务求和 */
   const planStat = (p: Plan): { customers: number; tasks: number } | null => {
@@ -430,27 +433,34 @@ export default function Board() {
       <section className={`${styles.panel} ${styles.overview}`}>
         <div className={styles.sectionHead}>
           <h2>本期规划概览</h2>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.sm}`}
-            disabled={
-              !plansLoaded || refreshing || statsLoading || statsUpdating
-            }
-            aria-busy={refreshing || statsLoading || statsUpdating}
-            onClick={() => void manualRefresh()}
+          <Tooltip
+            placement="topRight"
+            trigger={["hover", "focus"]}
+            title={boardRefreshing ? "正在刷新看板" : "刷新看板"}
           >
-            {refreshing || statsLoading || statsUpdating
-              ? "刷新中…"
-              : "刷新看板"}
-          </button>
+            <span>
+              <button
+                type="button"
+                className={styles.taskRefresh}
+                aria-label="刷新看板"
+                disabled={!plansLoaded || boardRefreshing}
+                aria-busy={boardRefreshing}
+                onClick={() => void manualRefresh()}
+              >
+                <RotateCw
+                  size={16}
+                  aria-hidden="true"
+                  className={
+                    boardRefreshing ? styles.taskRefreshBusy : undefined
+                  }
+                />
+              </button>
+            </span>
+          </Tooltip>
         </div>
-        {(statsLoading || statsUpdating || statsFailed) && (
+        {statsFailed && (
           <p className={styles.readonlyHint} role="status">
-            {statsLoading
-              ? "正在加载客户与任务统计…"
-              : statsUpdating
-              ? "客户与任务统计更新中…"
-              : sceneStats === null
+            {sceneStats === null
               ? "客户与任务统计加载失败"
               : "统计更新失败，暂显示上次数据"}
           </p>
