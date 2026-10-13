@@ -695,7 +695,7 @@ describe("WealthWorkbench store", () => {
     expect(mockRequest).not.toHaveBeenCalled();
   });
 
-  it("loadPendingCustomers / loadDoneCustomers 按 touched 拉取各自名单", async () => {
+  it("loadPendingCustomers / loadDoneCustomers 查询全部后筛选各自名单", async () => {
     useIframeStore.setState({ userId: "10086" });
     useWealthStore.setState({ plans: [makeTodayPlan()] });
     const nameListCalls = () =>
@@ -703,6 +703,12 @@ describe("WealthWorkbench store", () => {
         .filter(([p]) => String(p).startsWith("/wealth/name-list"))
         .map(([p]) => String(p));
 
+    mockRequest.mockResolvedValueOnce({
+      items: NAME_LIST_FIXTURE.map((item, index) => ({
+        ...item,
+        touched: index,
+      })),
+    });
     await useWealthStore.getState().loadPendingCustomers();
     mockRequest.mockResolvedValueOnce({
       items: NAME_LIST_FIXTURE.map((item, index) => ({
@@ -713,9 +719,10 @@ describe("WealthWorkbench store", () => {
     await useWealthStore.getState().loadDoneCustomers();
 
     const calls = nameListCalls();
-    expect(calls.some((c) => c.includes("touched=0"))).toBe(true);
-    expect(calls.some((c) => c.includes("touched=2"))).toBe(true);
-    expect(useWealthStore.getState().pendingCustomers).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((c) => c.includes("touched=2"))).toBe(true);
+    expect(useWealthStore.getState().pendingCustomers).toHaveLength(1);
+    expect(useWealthStore.getState().pendingCustomers[0].touched).toBe(0);
     const done = useWealthStore.getState().doneCustomers;
     expect(done).toHaveLength(1);
     expect(done[0].touched).toBe(1);
@@ -733,7 +740,7 @@ describe("WealthWorkbench store", () => {
     expect(lists).toHaveLength(3);
     expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
       "2",
-      "0",
+      "2",
       "2",
     ]);
     expect(

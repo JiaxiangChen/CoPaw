@@ -287,7 +287,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
 - 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 待处理”，按各自当前筛选名单计算；已完成页不再展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。待触达和已完成沿用名单映射的 `done` 判断，正常已完成名单待处理为 0。“今日已触达”文案沿用三页统一表达，不新增完成日期过滤。
 - 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `GET /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。
-- 已完成名单临时通过 `fetchDoneCustomers` 查询 `sap_id + touched=2`（不传 `skill_id`），前端仅保留原始 `touched === 1` 的客户，列表与侧栏角标共用筛选结果；缺失或其他触达状态不计入。待触达仍请求 `touched=0`。回归入口为 `api.test.ts` 和 `store.test.ts`。
+- 已完成和待触达名单临时通过 `fetchDoneCustomers` / `fetchPendingCustomers` 查询 `sap_id + touched=2`（不传 `skill_id`），前端分别仅保留原始 `touched === 1` / `touched === 0` 的客户，列表与侧栏角标共用各自筛选结果；缺失或其他触达状态不计入。回归入口为 `api.test.ts` 和 `store.test.ts`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。
@@ -298,7 +298,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
 - 视角切换时统计数量先增后减，先查 `Tasks/index.tsx` 是否把旧经营名单直接用于客户视角：经营名单按技能与客户组合去重，客户名单由接口聚合，计数口径不同。名单查询在绘制前进入加载状态；加载时保留缓存，但不渲染旧名单，三个汇总及总记录数显示 `--`。使用延迟接口响应验证首个客户视角绘制帧，不能只检查请求完成后的数量。
-- 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：经营场景 180px、触达方式 120px、完成时间 190px、经营结果 100px，固定列合计 825px，表格最小宽度 1345px（视口不超过 1600px 时为 1181px），为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
+- 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：客户姓名 150px、重点标签 135px、经营场景 180px、触达方式 150px、完成时间 190px、经营结果 160px，固定列合计 965px，表格最小宽度 1485px（视口不超过 1600px 时为 1321px），为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
 - 客户视角、待触达和已完成表格的重点标签溢出时，检查 `index.module.less` 的 `.customerTable.metricsTable.sceneTable`：标签列固定 135px，多标签内容限定在单元格内换行。经营场景列 160px，由 `components/CustomerScenes.tsx` 每行展示一个背景项，超宽省略并支持悬停或键盘聚焦查看全名；默认两项，更多通过“展开剩余 X 项”查看。经营机会列 240px，预览最多三行并通过悬停或键盘聚焦查看完整内容。今日任务客户视角的经营方案列固定 135px。新增或加宽列时同步调整表格最小宽度，保留其他列空间并使用表格内部滚动。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
 - 浏览器标签页从隐藏切回可见时，工作台入口的 `useVisibilityRefresh` 调用 `refreshTaskLists`，更新今日任务（保持最近查询视角）、待触达和已完成名单及侧栏数量；仅客户经理且初始化/规划加载完成后生效，刷新期间忽略重复切回请求，已有名单请求进行中时不重复发起。iframe 内同样适用；宿主内部业务页签仅通过 CSS 隐藏 iframe 时不会触发该事件。回归入口：`useVisibilityRefresh.test.tsx` 和 `store.test.ts`。

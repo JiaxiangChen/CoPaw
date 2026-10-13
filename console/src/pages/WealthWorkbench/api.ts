@@ -455,12 +455,15 @@ const TOUCHED_PENDING = 0;
 const TOUCHED_DONE = 1;
 const TOUCHED_ALL = 2;
 
-/** 待触达客户名单：客户视角口径（仅 sapId + touched=0） */
+/** 待触达名单：临时查询 sapId + touched=2，再仅保留 touched=0 的客户。 */
 export async function fetchPendingCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
 ): Promise<Customer[]> {
-  return fetchCustomerViewCustomers(tasks, sapId, { touched: TOUCHED_PENDING });
+  const customers = await fetchCustomerViewCustomers(tasks, sapId, {
+    touched: TOUCHED_ALL,
+  });
+  return customers.filter((customer) => customer.touched === TOUCHED_PENDING);
 }
 
 /** 已完成名单：临时查询 sapId + touched=2，再仅保留 touched=1 的客户。 */

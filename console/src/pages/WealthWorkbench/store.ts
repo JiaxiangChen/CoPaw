@@ -86,7 +86,7 @@ interface WealthState {
   /** 最近查询的今日任务视角，用于标签页切回时保持名单口径。 */
   todayCustomerView: "business" | "customer";
   taskListsRefreshing: boolean;
-  /** 待触达客户名单（/wealth/name-list，touched=0） */
+  /** 待触达客户名单（/wealth/name-list 查询 touched=2，前端筛选 touched=0） */
   pendingCustomers: Customer[];
   pendingLoading: boolean;
   /** 已完成客户名单（/wealth/name-list 查询 touched=2，前端筛选 touched=1） */
@@ -121,7 +121,7 @@ interface WealthState {
   loadTodayCustomerCount: () => Promise<void>;
   refreshTodayCustomers: (view: "business" | "customer") => Promise<void>;
   refreshTaskLists: () => Promise<void>;
-  /** 加载待触达客户名单（仅客户经理；touched=0） */
+  /** 加载待触达客户名单（仅客户经理；查询全部后筛选 touched=0） */
   loadPendingCustomers: () => Promise<void>;
   /** 加载已完成客户名单（仅客户经理；touched=1） */
   loadDoneCustomers: () => Promise<void>;
