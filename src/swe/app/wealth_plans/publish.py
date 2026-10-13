@@ -99,6 +99,17 @@ async def _run_publish(
     if plan is None:
         logger.warning("wealth plan %s vanished before publish", plan_id)
         return
+    logger.info(
+        "wealth plan publish loaded: plan=%s creator=%s position=%s "
+        "source=%s agent=%s scene_count=%d target_count=%d",
+        plan.id,
+        plan.sap_id,
+        request.headers.get("X-Position-Id"),
+        plan.source_id,
+        plan.agent_id,
+        len(plan.scenes),
+        len(plan.targets),
+    )
     try:
         await _publish_all_scenes(request, store, plan)
     except Exception as exc:  # pylint: disable=broad-except
@@ -239,6 +250,13 @@ async def _broadcast_scene_job(
 ) -> str | None:
     """按原排程分发场景任务并启用批调度；目标仅创建人本人时跳过。"""
     target_ids = [t.sap_id for t in plan.targets if t.sap_id != plan.sap_id]
+    logger.info(
+        "wealth plan cron broadcast requested: plan=%s source_job=%s "
+        "target_count=%d",
+        plan.id,
+        job.id,
+        len(target_ids),
+    )
     if not target_ids:
         return None
     body = CronBroadcastRequest(
@@ -252,6 +270,15 @@ async def _broadcast_scene_job(
         job.id,
         body,
         mgr=await get_cron_manager(request),
+    )
+    logger.info(
+        "wealth plan cron broadcast scheduled: plan=%s source_job=%s "
+        "task=%s tenant_count=%d reused=%s",
+        plan.id,
+        job.id,
+        response.task_id,
+        response.tenant_count,
+        response.reused,
     )
     return response.task_id
 

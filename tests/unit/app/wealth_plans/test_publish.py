@@ -45,6 +45,7 @@ def make_plan(targets: list[str]) -> WealthPlanRecord:
 
 def fake_request() -> SimpleNamespace:
     return SimpleNamespace(
+        headers={},
         app=SimpleNamespace(
             state=SimpleNamespace(
                 workflow_config_store=SimpleNamespace(

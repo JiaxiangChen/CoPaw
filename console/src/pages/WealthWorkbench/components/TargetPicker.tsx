@@ -149,73 +149,49 @@ export function TargetPicker() {
 
   return (
     <div className={styles.targetPicker}>
-      {isMiddle && (
-        <div className={styles.field}>
-          <label htmlFor="distribute-branch">选择支行</label>
-          <Cascader<BranchOption>
-            id="distribute-branch"
-            className={styles.branchSelect}
-            dropdownStyle={{
-              maxWidth: "calc(100vw - 32px)",
-              overflowX: "auto",
-            }}
-            aria-label="选择支行"
-            open={branchOpen}
-            onDropdownVisibleChange={setBranchOpen}
-            changeOnSelect
-            allowClear={false}
-            value={branchPath.map((branch) => branch.value)}
-            disabled={!branchesLoaded || branches.length === 0}
-            placeholder={
-              !branchesLoaded
-                ? "正在加载支行…"
-                : branches.length
-                ? "搜索或逐级选择支行"
-                : branchError
-                ? "支行加载失败"
-                : "当前分行暂无可选支行"
-            }
-            notFoundContent="未找到匹配的支行"
-            options={branches}
-            showSearch={{
-              filter: (input, path) =>
-                path.some((option) =>
-                  option.label
-                    .toLowerCase()
-                    .includes(input.trim().toLowerCase()),
-                ),
-            }}
-            onChange={(values, path) => {
-              void selectBranchPath(values as string[], path);
-            }}
-          />
-        </div>
-      )}
-      {branchPending && (
-        <p role="status" className={styles.pageNote}>
-          正在查询子支行…
-        </p>
-      )}
-      {branchError && (
-        <div role="alert" className={styles.field}>
-          <span>支行查询失败，请重试</span>
-          <button
-            type="button"
-            className={styles.btn}
-            onClick={() => {
-              if (branchPath.length)
-                void selectBranchPath(
-                  branchPath.map((branch) => branch.value),
-                  branchPath,
-                );
-              else setBranchReload((value) => value + 1);
-            }}
-          >
-            重试
-          </button>
-        </div>
-      )}
       <div className={styles.targetToolbar}>
+        {isMiddle && (
+          <div className={styles.field}>
+            <label htmlFor="distribute-branch">选择支行</label>
+            <Cascader<BranchOption>
+              id="distribute-branch"
+              className={styles.branchSelect}
+              dropdownStyle={{
+                maxWidth: "calc(100vw - 32px)",
+                overflowX: "auto",
+              }}
+              aria-label="选择支行"
+              open={branchOpen}
+              onDropdownVisibleChange={setBranchOpen}
+              changeOnSelect
+              allowClear={false}
+              value={branchPath.map((branch) => branch.value)}
+              disabled={!branchesLoaded || branches.length === 0}
+              placeholder={
+                !branchesLoaded
+                  ? "正在加载支行…"
+                  : branches.length
+                  ? "搜索或逐级选择支行"
+                  : branchError
+                  ? "支行加载失败"
+                  : "当前分行暂无可选支行"
+              }
+              notFoundContent="未找到匹配的支行"
+              options={branches}
+              showSearch={{
+                filter: (input, path) =>
+                  path.some((option) =>
+                    option.label
+                      .toLowerCase()
+                      .includes(input.trim().toLowerCase()),
+                  ),
+              }}
+              onChange={(values, path) => {
+                void selectBranchPath(values as string[], path);
+              }}
+            />
+          </div>
+        )}
         <input
           className={styles.input}
           placeholder="搜索姓名 / 用户ID / 机构"
@@ -243,6 +219,31 @@ export function TargetPicker() {
           已选 <strong>{targetSapIds.length}</strong> 人
         </span>
       </div>
+
+      {branchPending && (
+        <p role="status" className={styles.pageNote}>
+          正在查询子支行…
+        </p>
+      )}
+      {branchError && (
+        <div role="alert" className={styles.field}>
+          <span>支行查询失败，请重试</span>
+          <button
+            type="button"
+            className={styles.btn}
+            onClick={() => {
+              if (branchPath.length)
+                void selectBranchPath(
+                  branchPath.map((branch) => branch.value),
+                  branchPath,
+                );
+              else setBranchReload((value) => value + 1);
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
 
       <div className={styles.targetList} role="group" aria-label="分发目标列表">
         {isMiddle && !targetBranch ? (

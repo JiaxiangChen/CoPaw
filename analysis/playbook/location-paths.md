@@ -263,6 +263,9 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
 - 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`、`enable_offset=False`、`offset_window_hours=0`；首次分发完成后启用父任务批调度并同步子任务。父批调度在外部平台的注册时间与目标子任务均使用规划原排程，不按默认 4 小时窗口提前或错峰。窗口变化时，即使父任务已启用批调度，重新分发也会更新窗口和外部平台任务。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
 - 已发布的存量财富规划不会仅因代码更新自动改写外部平台；部署后需修改/重新发布相应规划，确认父任务的 `batch_dispatch_offset_window_hours`、`batch_dispatch_offset_minutes` 均为 `0`，外部批任务 cron 为原排程。其他入口默认仍使用 4 小时窗口。
+- 中台选多人后，定时任务主列表仍只查询当前请求租户的 `CronManager`，显示创建人的源/父任务，不能据此判定其他人的子任务未生成。通过父任务“更多 → 查看分发用户”并刷新核对目标子任务；缺失时继续查场景的 `broadcast_task_id`、广播结果的 `failed_count/results/error`，以及目标租户初始化和任务创建错误。批调度子任务的独立外部调度会被跳过或暂停，由父批任务统一触发。
+- 若中台失败而行长正常，不能仅归因于主列表隔离。后台多人广播没有按这两个岗位分支；按 `wealth plan publish loaded` 检查落库重读后的 `position/source/agent/target_count`，按 `wealth plan cron broadcast requested/scheduled` 检查过滤后目标数、归一化人数和广播任务 ID；错误日志 `cron broadcast target failed` 定位目标租户创建异常，`cron broadcast task failed` 定位身份补齐、进度落库或分发后批调度同步异常。接口收到 10 人及规划状态 `published` 均不代表 10 人实际创建成功。
+- `cron broadcast task started` 打印归一化后的实际分发用户 ID 列表 `target_tenant_ids`；`cron broadcast target result` 逐人打印 `tenant/success/child_job/error`。用同一 `task` 串联名单与结果；逐人成功表示子任务创建/更新完成，后续批调度同步仍需结合广播任务最终状态判断。
 - 批调度切换失败查看广播任务的 `failure_summary`；检查 `SWE_CRON_DISPATCH_INTENTS_ENABLED` 与调度服务配置。不要仅给广播上下文设批调度标志，否则会漏掉父任务的调度注册与子任务同步。
 - 创建/广播定时任务的顺序不变；`workflow` 保留 `scene_id` 作为 `skill_ids`，其 `text` 和 `request` 由 `CronJobSpec` 校验器清空。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/ -q`。
