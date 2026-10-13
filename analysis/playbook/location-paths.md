@@ -270,6 +270,12 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 创建/广播定时任务的顺序不变；`workflow` 保留 `scene_id` 作为 `skill_ids`，其 `text` 和 `request` 由 `CronJobSpec` 校验器清空。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/ -q`。
 
+## 财富工作台看板与列表标题
+
+- 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，日历入口为同目录的 `Calendar.tsx`。两种模式的标题统一使用 `Plan.name`，对应规划接口的 `name`；日历悬浮提示也使用同一名称。
+- `PlanItem.sceneName` 用于场景详情与排程说明，不用于替换日历卡片标题。日历日期仍按各场景排程命中，点击卡片传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
+- 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样按技能及完整执行周期查询 `/wealth/skill-stats` 并汇总；未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
+
 ## 财富任务名单动态字段
 
 - 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `GET /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。

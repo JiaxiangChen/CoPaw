@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Plan, PlanItem } from "../types";
 import { Calendar } from "./Calendar";
 
@@ -37,22 +37,37 @@ const PLAN: Plan = {
 };
 
 describe("Calendar", () => {
-  it("日历事项显示当天命中的场景名而不是计划名", () => {
-    render(
-      <Calendar
-        sources={["分行关注", "行长关注", "我的关注"]}
-        visible={[PLAN]}
-        dimension="week"
-        anchor="2026-09-14"
-        onShift={vi.fn()}
-        onToday={vi.fn()}
-        onDimension={vi.fn()}
-        onShowDetails={vi.fn()}
-      />,
-    );
+  afterEach(cleanup);
 
-    expect(screen.getByText("高净值客户经营")).toBeTruthy();
-    expect(screen.getByText("理财到期提醒")).toBeTruthy();
-    expect(screen.queryAllByText("九月重点规划")).toHaveLength(0);
-  });
+  it.each(["week", "month"] as const)(
+    "%s 日历标题与列表使用相同名称",
+    (dimension) => {
+      const onShowDetails = vi.fn();
+      render(
+        <Calendar
+          sources={["分行关注", "行长关注", "我的关注"]}
+          visible={[PLAN]}
+          planStat={() => null}
+          dimension={dimension}
+          anchor="2026-09-14"
+          onShift={vi.fn()}
+          onToday={vi.fn()}
+          onDimension={vi.fn()}
+          onShowDetails={onShowDetails}
+        />,
+      );
+
+      const events = screen.getAllByTitle(
+        "九月重点规划 · 已自动下发 · 点击查看详情",
+      );
+      expect(events).toHaveLength(2);
+      expect(screen.getAllByText(PLAN.name)).toHaveLength(2);
+      expect(screen.queryByText("高净值客户经营")).toBeNull();
+      expect(screen.queryByText("理财到期提醒")).toBeNull();
+      fireEvent.click(events[0]);
+      expect(onShowDetails).toHaveBeenCalledWith("2026-09-14", PLAN.id);
+      fireEvent.click(events[1]);
+      expect(onShowDetails).toHaveBeenCalledWith("2026-09-15", PLAN.id);
+    },
+  );
 });
