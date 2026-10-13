@@ -3443,14 +3443,17 @@
       width: 135px;
     }
     &.completedTable {
-      // 固定操作列合计 755px，指标区至少保留 520px（窄屏 356px）。
-      min-width: 1275px;
+      // 固定操作列合计 825px，指标区至少保留 520px（窄屏 356px）。
+      min-width: 1345px;
+      .sceneCol {
+        width: 180px;
+      }
       .channelCol {
-        width: 100px;
+        width: 120px;
         white-space: normal;
       }
       .executionCol {
-        width: 160px;
+        width: 190px;
         white-space: normal;
         overflow-wrap: anywhere;
       }
@@ -3600,7 +3603,7 @@
       min-width: 1346px;
     }
     .customerTable.metricsTable.sceneTable.completedTable {
-      min-width: 1111px;
+      min-width: 1181px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
