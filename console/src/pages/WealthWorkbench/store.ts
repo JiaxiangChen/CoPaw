@@ -109,7 +109,7 @@ interface WealthState {
 
   init: () => Promise<void>;
   /** 看板轮询：有规划处于发布中时刷新列表 */
-  refreshPlans: () => Promise<void>;
+  refreshPlans: (throwOnError?: boolean, signal?: AbortSignal) => Promise<void>;
   /**
    * 拉取今日任务的客户经营清单（/wealth/name-list）。
    * 两个视角都传当前登录人 sapId；经营视角（business）另带 skillId 按技能过滤，
@@ -303,8 +303,9 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     set({ ...data, plansLoaded: true });
   },
 
-  refreshPlans: async () => {
-    const plans = await api.fetchPlanList();
+  refreshPlans: async (throwOnError = false, signal) => {
+    const plans = await api.fetchPlanList(throwOnError, signal);
+    signal?.throwIfAborted();
     set({ plans });
   },
 

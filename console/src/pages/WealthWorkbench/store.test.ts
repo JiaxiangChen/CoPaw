@@ -797,4 +797,34 @@ describe("WealthWorkbench store", () => {
     expect(planScheduledOn(plan, "2026-09-08")).toBe(true);
     expect(planScheduledOn(plan, "2026-08-31")).toBe(false);
   });
+  it("看板严格刷新失败时保留已有规划", async () => {
+    const previous = useWealthStore.getState().plans;
+    mockRequest.mockRejectedValue(new Error("offline"));
+    await expect(useWealthStore.getState().refreshPlans(true)).rejects.toThrow(
+      "offline",
+    );
+    expect(useWealthStore.getState().plans).toBe(previous);
+  });
+  it("被取消的规划请求即使晚返回也不覆盖新规划", async () => {
+    let resolve!: (value: unknown) => void;
+    mockRequest.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const controller = new AbortController();
+    const refresh = useWealthStore
+      .getState()
+      .refreshPlans(true, controller.signal);
+    const rejection = expect(refresh).rejects.toThrow();
+    controller.abort();
+    const latest = [...useWealthStore.getState().plans];
+    useWealthStore.setState({ plans: latest });
+    resolve({ items: [] });
+    await rejection;
+    expect(useWealthStore.getState().plans).toBe(latest);
+    expect(mockRequest).toHaveBeenCalledWith("/wealth/plans", {
+      signal: controller.signal,
+    });
+  });
 });
