@@ -3392,14 +3392,23 @@
     white-space: normal;
   }
   .customerTable.metricsTable.sceneTable {
-    min-width: 1460px;
+    min-width: 1520px;
     th:nth-child(1),
     td:nth-child(1),
-    th:nth-child(2),
-    td:nth-child(2),
     th:nth-child(6),
     td:nth-child(6) {
       width: 100px;
+    }
+    th:nth-child(2),
+    td:nth-child(2) {
+      width: 160px;
+      white-space: normal;
+    }
+    td:nth-child(2) .tag {
+      box-sizing: border-box;
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .sceneCol {
       width: 160px;
@@ -3523,7 +3532,7 @@
       min-width: 960px;
     }
     .customerTable.metricsTable.sceneTable {
-      min-width: 1296px;
+      min-width: 1356px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
