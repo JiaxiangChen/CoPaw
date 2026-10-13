@@ -53,7 +53,7 @@ beforeEach(() => {
 
 describe("WealthWorkbench api", () => {
   it("动态字段按技能配置排序，只展示客户自己的值，保留组合分组及触达状态", async () => {
-    mockRequest.mockResolvedValue({
+    const response = {
       items: [
         {
           ...NAME_LIST_FIXTURE[0],
@@ -86,7 +86,8 @@ describe("WealthWorkbench api", () => {
         { filedName: "missing", filedNameCn: "缺失字段" },
         { filedName: "other", filedNameCn: "其他技能字段" },
       ],
-    });
+    };
+    mockRequest.mockResolvedValue(response);
     const [business] = await api.fetchTodayCustomers(
       [TASK],
       "10086",
@@ -115,6 +116,10 @@ describe("WealthWorkbench api", () => {
     expect(customer.done).toBe(true);
     const [done] = await api.fetchDoneCustomers([TASK], "10086");
     expect(done.dynamicFields).toEqual(customer.dynamicFields);
+    mockRequest.mockResolvedValueOnce({
+      ...response,
+      items: response.items.map((item) => ({ ...item, touched: 0 })),
+    });
     const [pending] = await api.fetchPendingCustomers([TASK], "10086");
     expect(pending.dynamicFields).toEqual(customer.dynamicFields);
   });
@@ -334,12 +339,12 @@ describe("WealthWorkbench api", () => {
     expect(customers[0]?.label).toBe("行长指派、分行重点、我的关注");
   });
 
-  it("fetchPendingCustomers / fetchDoneCustomers 以 touched 区分名单口径", async () => {
+  it("fetchPendingCustomers / fetchDoneCustomers 均查询全部客户名单", async () => {
     await api.fetchPendingCustomers([TASK], "10086");
     await api.fetchDoneCustomers([TASK], "10086");
     const calls = mockRequest.mock.calls.map(([p]) => String(p));
-    expect(calls[0]).toContain("touched=0");
-    expect(calls[1]).toContain("touched=1");
+    expect(calls[0]).toContain("touched=2");
+    expect(calls[1]).toContain("touched=2");
     // 两个口径都不带 skillId（客户视角粒度），都带 sapId
     for (const c of calls) {
       expect(c).not.toContain("skill_id=");
@@ -347,11 +352,46 @@ describe("WealthWorkbench api", () => {
     }
   });
 
+  it("fetchPendingCustomers 查询全部名单后仅保留 touched 为 0 的客户", async () => {
+    mockRequest.mockResolvedValueOnce({
+      items: [0, 1, 2, undefined, null, "0"].map((touched, index) => ({
+        ...NAME_LIST_FIXTURE[0],
+        custUid: `CUST${index}`,
+        touched,
+      })),
+    });
+
+    const pending = await api.fetchPendingCustomers([TASK], "10086");
+
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      custUid: "CUST0",
+      touched: 0,
+      done: false,
+    });
+  });
+
+  it("fetchDoneCustomers 查询全部名单后仅保留 touched 为 1 的客户", async () => {
+    mockRequest.mockResolvedValueOnce({
+      items: [0, 1, 2, undefined, null, "1"].map((touched, index) => ({
+        ...NAME_LIST_FIXTURE[0],
+        custUid: `CUST${index}`,
+        touched,
+      })),
+    });
+
+    const done = await api.fetchDoneCustomers([TASK], "10086");
+
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({ custUid: "CUST1", touched: 1, done: true });
+  });
+
   it("fetchDoneCustomers 使用 skillName 作为经营任务", async () => {
     mockRequest.mockResolvedValueOnce({
       items: [
         {
           ...NAME_LIST_FIXTURE[0],
+          touched: 1,
           skillList: [
             { skillId: "skill-loan-1", skillName: "外部经营任务名称" },
           ],
