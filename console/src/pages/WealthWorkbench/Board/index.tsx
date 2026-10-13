@@ -475,6 +475,7 @@ export default function Board() {
           <Calendar
             sources={boardSources}
             visible={visible}
+            planStat={planStat}
             dimension={dimension}
             anchor={anchor}
             onShift={(delta) => {
