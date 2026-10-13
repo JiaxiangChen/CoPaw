@@ -180,9 +180,23 @@ describe("经营分类独立表格", () => {
         "客户姓名",
         "重点标签",
         "经营场景",
-        page === "done" ? "经营任务" : "经营机会",
+        page === "done" ? "客户指标" : "经营机会",
       ]);
-      expect(headers).toHaveLength(page === "done" ? 8 : 7);
+      expect(headers).toHaveLength(7);
+      if (page === "done") {
+        expect(headers.map((th) => th.textContent)).toEqual([
+          "客户姓名",
+          "重点标签",
+          "经营场景",
+          "客户指标",
+          "触达方式",
+          "完成时间",
+          "经营结果",
+        ]);
+        expect(
+          within(table).queryByRole("columnheader", { name: "经营任务" }),
+        ).not.toBeInTheDocument();
+      }
       const rows = within(table).getAllByRole("row");
       expect(within(rows[1]).getAllByRole("cell")[2]).toHaveTextContent(
         /接口技能一.*接口技能二/,
@@ -195,10 +209,7 @@ describe("经营分类独立表格", () => {
           <Tasks page={page} />
         </MemoryRouter>,
       );
-      expect(screen.getByRole("cell")).toHaveAttribute(
-        "colspan",
-        page === "done" ? "8" : "7",
-      );
+      expect(screen.getByRole("cell")).toHaveAttribute("colspan", "7");
     },
   );
 

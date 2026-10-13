@@ -273,6 +273,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 ## 财富工作台看板与列表标题
 
 - 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，卡片标题及悬浮提示展示当天执行的技能名称 `PlanItem.sceneName`，多项技能用 ` / ` 连接，不显示规划名称。
+- 列表的“规划周期”按所选日期范围与规划 `start/end` 的闭区间交集筛选，不按 `Plan.period` 类型筛选。“自定义”显示日期范围选择器，默认本月，切换快捷周期后保留此前选定的范围；来源分类和概览统计使用同一筛选结果，日历仍使用自身的周/月区间。
 - 日历按各场景排程筛选当天执行的技能，点击卡片仍传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
 - 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样按技能及完整执行周期查询 `/wealth/skill-stats` 并汇总；未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
 
@@ -286,6 +287,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - `touched=1` 标记客户已触达；客户字段缺失不展示、返回空值显示“未提供”、数值 `0` 正常展示。
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
+- 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：触达方式 100px、完成时间 160px、经营结果 100px，其余固定列合计后必须为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
 - 客户视角、待触达和已完成表格的重点标签溢出时，检查 `index.module.less` 的 `.customerTable.metricsTable.sceneTable`：标签列固定 135px，多标签内容限定在单元格内换行。经营场景列 160px，由 `components/CustomerScenes.tsx` 每行展示一个背景项，超宽省略并支持悬停或键盘聚焦查看全名；默认两项，更多通过“展开剩余 X 项”查看。经营机会列 240px，预览最多三行并通过悬停或键盘聚焦查看完整内容。今日任务客户视角的经营方案列固定 135px。新增或加宽列时同步调整表格最小宽度，保留其他列空间并使用表格内部滚动。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
 

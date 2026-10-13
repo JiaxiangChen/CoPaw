@@ -5,6 +5,7 @@ import {
   render,
   screen,
   within,
+  waitFor,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +30,60 @@ describe("Board", () => {
   beforeEach(() => {
     vi.mocked(fetchSkillStats).mockResolvedValue({});
     useWealthStore.setState({ accountId: "rm", plans: [], plansLoaded: false });
+  });
+
+  it("自定义日期按闭区间交集筛选，与来源筛选组合并保留上次选择", async () => {
+    const month = todayKey().slice(0, 7);
+    useWealthStore.setState({
+      plansLoaded: true,
+      plans: [
+        ["边界重叠规划", "行长关注", "10", "11"],
+        ["范围内规划", "我的关注", "12", "15"],
+        ["范围前规划", "我的关注", "01", "03"],
+        ["范围后规划", "我的关注", "21", "25"],
+      ].map(([name, source, start, end], index) => ({
+        id: `custom-${index}`,
+        name,
+        source,
+        desc: "测试规划",
+        customers: 0,
+        tasks: 0,
+        rate: 0,
+        status: "已自动下发",
+        period: index === 1 ? "本季" : "自定义",
+        start: `${month}-${start}`,
+        end: `${month}-${end}`,
+        items: [],
+      })),
+    });
+    render(
+      <MemoryRouter>
+        <Board />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
+    fireEvent.click(screen.getByRole("button", { name: "自定义" }));
+    fireEvent.click(screen.getByPlaceholderText("开始日期"));
+    fireEvent.click(
+      document.querySelector(`[title="${month}-11"] .ant-picker-cell-inner`)!,
+    );
+    fireEvent.click(
+      document.querySelector(`[title="${month}-20"] .ant-picker-cell-inner`)!,
+    );
+    await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(2));
+    expect(screen.getByText("边界重叠规划")).toBeInTheDocument();
+    expect(screen.getByText("范围内规划")).toBeInTheDocument();
+    expect(screen.queryByText("范围前规划")).not.toBeInTheDocument();
+    expect(screen.queryByText("范围后规划")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "我的关注（1）" }));
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "全部（2）" }));
+    fireEvent.click(screen.getByRole("button", { name: "本月" }));
+    expect(screen.getAllByRole("article")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("button", { name: "自定义" }));
+    expect(screen.getByPlaceholderText("开始日期")).toHaveValue(`${month}-11`);
+    expect(screen.getByPlaceholderText("结束日期")).toHaveValue(`${month}-20`);
+    expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 
   it.each(["success", "zero", "unavailable"] as const)(

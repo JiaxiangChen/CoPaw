@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import cx from "classnames";
+import { DatePicker } from "antd";
+import dayjs from "dayjs";
 import styles from "../index.module.less";
 import { Icon } from "../components/Icon";
 import {
@@ -26,7 +28,7 @@ import type { Plan, SkillStat } from "../types";
 import { BOARD_SOURCES_BY_ROLE } from "../permissions";
 import { Calendar } from "./Calendar";
 
-const PERIODS = ["本季", "本月", "本周", "今日", "T+1日"];
+const PERIODS = ["本季", "本月", "本周", "今日", "T+1日", "自定义"];
 
 /** 发布中轮询间隔（毫秒） */
 const PUBLISH_POLL_INTERVAL = 3000;
@@ -57,6 +59,9 @@ export default function Board() {
 
   const [boardTab, setBoardTab] = useState("全部");
   const [period, setPeriod] = useState("本月");
+  const [customRange, setCustomRange] = useState<[string, string]>(
+    () => cycleRange("本月")!,
+  );
   const [boardMode, setBoardMode] = useState<"calendar" | "list">("calendar");
   const [dimension, setDimension] = useState<"week" | "month">("week");
   const [anchor, setAnchor] = useState(todayKey);
@@ -76,7 +81,9 @@ export default function Board() {
   const range: [string, string] =
     boardMode === "calendar"
       ? calendarRange(anchor, dimension)
-      : cycleRange(period) ?? [todayKey(), todayKey()];
+      : period === "自定义"
+        ? customRange
+        : cycleRange(period) ?? [todayKey(), todayKey()];
   const [rangeStart, rangeEnd] = range;
 
   const all = useMemo(
@@ -394,9 +401,37 @@ export default function Board() {
         ) : (
           <span className={styles.label}>看板周期</span>
         )}
-        <div className={styles.datebox}>
-          <Icon name="calendar" />
-          {range.map((x) => x.replace(/-/g, ".")).join(" — ")}
+        <div
+          className={cx(
+            styles.datebox,
+            boardMode === "list" && period === "自定义" && styles.customDatebox,
+          )}
+        >
+          {boardMode === "list" && period === "自定义" ? (
+            <DatePicker.RangePicker
+              className={cx(styles.taskDatePicker, styles.boardDateRange)}
+              classNames={{ popup: { root: styles.taskDatePopup } }}
+              aria-label="自定义规划周期"
+              inputReadOnly
+              allowClear={false}
+              format="YYYY-MM-DD"
+              placeholder={["开始日期", "结束日期"]}
+              value={[dayjs(customRange[0]), dayjs(customRange[1])]}
+              onChange={(values) => {
+                if (values?.[0] && values[1]) {
+                  setCustomRange([
+                    values[0].format("YYYY-MM-DD"),
+                    values[1].format("YYYY-MM-DD"),
+                  ]);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <Icon name="calendar" />
+              {range.map((x) => x.replace(/-/g, ".")).join(" — ")}
+            </>
+          )}
         </div>
         {/* 暂不需要展示岗位 */}
         {/* <div className={styles.role}>

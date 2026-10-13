@@ -2876,6 +2876,15 @@
     font-size: 12px;
     cursor: pointer;
   }
+  .customDatebox {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .boardDateRange:global(.ant-picker) {
+    width: 270px;
+    height: 34px;
+  }
   .taskDatePicker:global(.ant-picker) :global(.ant-picker-suffix) {
     color: var(--muted);
     font-size: 13px;
@@ -3433,6 +3442,23 @@
     &.todayCustomerTable td:nth-child(6) {
       width: 135px;
     }
+    &.completedTable {
+      // 固定操作列合计 755px，指标区至少保留 520px（窄屏 356px）。
+      min-width: 1275px;
+      .channelCol {
+        width: 100px;
+        white-space: normal;
+      }
+      .executionCol {
+        width: 160px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      th:last-child,
+      td:last-child {
+        width: 100px;
+      }
+    }
   }
   .customerTable.metricsTable.opportunityTable .executionCol {
     position: sticky;
@@ -3572,6 +3598,9 @@
     }
     .customerTable.metricsTable.sceneTable {
       min-width: 1346px;
+    }
+    .customerTable.metricsTable.sceneTable.completedTable {
+      min-width: 1111px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
