@@ -3391,6 +3391,22 @@
     width: 520px;
     white-space: normal;
   }
+  .customerTable.metricsTable.sceneTable {
+    min-width: 1460px;
+    th:nth-child(1),
+    td:nth-child(1),
+    th:nth-child(2),
+    td:nth-child(2),
+    th:nth-child(6),
+    td:nth-child(6) {
+      width: 100px;
+    }
+    .sceneCol {
+      width: 160px;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
   .customerTable.metricsTable.opportunityTable .executionCol {
     position: sticky;
     right: 0;
@@ -3505,6 +3521,9 @@
   @media (max-width: 1600px) {
     .customerTable.metricsTable {
       min-width: 960px;
+    }
+    .customerTable.metricsTable.sceneTable {
+      min-width: 1296px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;

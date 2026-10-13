@@ -13,9 +13,9 @@ import Tasks from "./index";
 const state = vi.hoisted(() => ({
   customers: [] as Customer[],
   customersLoading: false,
-  pendingCustomers: [],
+  pendingCustomers: [] as Customer[],
   pendingLoading: false,
-  doneCustomers: [],
+  doneCustomers: [] as Customer[],
   doneLoading: false,
   plans: [
     {
@@ -53,6 +53,8 @@ vi.mock("../store", () => ({
 
 afterEach(cleanup);
 beforeEach(() => {
+  state.pendingCustomers = [];
+  state.doneCustomers = [];
   state.customers = ["48", "48", "50"].map((age, index) => ({
     id: `c${index}`,
     custUid: `c${index}`,
@@ -74,6 +76,90 @@ beforeEach(() => {
 });
 
 describe("经营分类独立表格", () => {
+  it("今日任务客户视角在标签之后展示接口技能名称，缺失时保留占位", () => {
+    state.customers[0].skillNames = ["接口技能一", "接口技能二"];
+    const { rerender } = render(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.queryByRole("columnheader", { name: "经营场景" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+    const table = screen.getByRole("table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual([
+      "客户姓名",
+      "重点标签",
+      "经营场景",
+      "经营机会",
+      "客户指标",
+      "经营方案",
+      "执行",
+    ]);
+    const rows = within(table).getAllByRole("row");
+    expect(within(rows[1]).getAllByRole("cell")[2]).toHaveTextContent(
+      "接口技能一、接口技能二",
+    );
+    expect(within(rows[2]).getAllByRole("cell")[2]).toHaveTextContent("--");
+    state.customers = [];
+    rerender(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByText("暂无符合条件的客户").closest("td"),
+    ).toHaveAttribute("colspan", "7");
+  });
+
+  it.each(["pending", "done"] as const)(
+    "%s 在标签之后展示接口技能名称，并保持空态列数一致",
+    (page) => {
+      const customers = state.customers.map((customer, index) => ({
+        ...customer,
+        skillNames: index === 0 ? ["接口技能一", "接口技能二"] : [],
+        done: page === "done",
+      }));
+      state.pendingCustomers = customers;
+      state.doneCustomers = customers;
+      const { rerender } = render(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      const table = screen.getByRole("table");
+      const headers = within(table).getAllByRole("columnheader");
+      expect(headers.slice(0, 4).map((th) => th.textContent)).toEqual([
+        "客户姓名",
+        "重点标签",
+        "经营场景",
+        page === "done" ? "经营任务" : "经营机会",
+      ]);
+      expect(headers).toHaveLength(page === "done" ? 8 : 7);
+      const rows = within(table).getAllByRole("row");
+      expect(within(rows[1]).getAllByRole("cell")[2]).toHaveTextContent(
+        "接口技能一、接口技能二",
+      );
+      expect(within(rows[2]).getAllByRole("cell")[2]).toHaveTextContent("--");
+      state.pendingCustomers = [];
+      state.doneCustomers = [];
+      rerender(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByRole("cell")).toHaveAttribute(
+        "colspan",
+        page === "done" ? "8" : "7",
+      );
+    },
+  );
+
   it("长技能名称的提示同时保留完整名称和来源规划，兼容键盘聚焦", async () => {
     const scene = state.plans[0].items[0];
     const originalName = scene.sceneName;

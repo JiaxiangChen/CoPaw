@@ -77,7 +77,7 @@ describe("Board", () => {
         </MemoryRouter>,
       );
       const event = screen.getByTitle(
-        "统计一致性规划 · 已自动下发 · 点击查看详情",
+        "skill-1 / skill-2 · 已自动下发 · 点击查看详情",
       );
       expect(event).toHaveTextContent("-- 位目标客户");
       expect(event).toHaveTextContent("已生成 -- 项任务");

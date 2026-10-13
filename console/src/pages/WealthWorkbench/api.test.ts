@@ -229,6 +229,8 @@ describe("WealthWorkbench api", () => {
               ...NAME_LIST_FIXTURE[0],
               skillList: [
                 { skillId: "skill-loan-1", skillName: "信贷需求挖掘" },
+                { skillId: "skill-unknown", skillName: "接口额外技能" },
+                { skillId: "skill-loan-1", skillName: "信贷需求挖掘" },
               ],
               strongContactTime: "2026-09-16 10:30:00",
               touchMethod: "电话",
@@ -261,6 +263,7 @@ describe("WealthWorkbench api", () => {
       name: "张三",
       label: "行长指派",
       task: "信贷需求挖掘",
+      skillNames: ["信贷需求挖掘", "接口额外技能"],
       category: "贷款",
       reason: "命中贷款核验规则",
       opportunities: ["命中贷款核验规则"],
@@ -271,6 +274,7 @@ describe("WealthWorkbench api", () => {
       id: "CUST002",
       label: "",
       task: "",
+      skillNames: ["未知技能"],
       reason: "",
       opportunities: [],
     });
