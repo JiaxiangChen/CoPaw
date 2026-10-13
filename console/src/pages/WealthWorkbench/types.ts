@@ -134,6 +134,8 @@ export interface Customer {
   reason: string;
   category: string;
   task: string;
+  /** 客户名单接口 skillList 返回的去重技能名称 */
+  skillNames?: string[];
   done: boolean;
   channel: string;
   time: string;

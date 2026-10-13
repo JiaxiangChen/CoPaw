@@ -275,6 +275,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
 
   const isBiz = view === "business" && page === "today";
   const doneView = page === "done";
+  const showScenes = !isBiz;
 
   /** 工作任务树：从「已发布且今日有排程」的规划场景实时推导 */
   const today = dateKey(new Date());
@@ -331,7 +332,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     [page, pool, isBiz, selectedTask, selectedCategory, search, taskLabel],
   );
   const groups = useMemo(() => buildCustomerGroups(list, isBiz), [list, isBiz]);
-  const columnCount = (doneView ? 6 : isBiz ? 4 : 5) + 1;
+  const columnCount = (doneView ? 6 : isBiz ? 4 : 5) + 1 + Number(showScenes);
   const tableGroups = groups.length
     ? groups
     : [{ key: "empty", fields: [], customers: [] }];
@@ -789,6 +790,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                         ? styles.completedTable
                         : styles.opportunityTable,
                       styles.metricsTable,
+                      showScenes && styles.sceneTable,
                     )}
                   >
                     <thead>
@@ -835,6 +837,11 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             )}
                           </th>
                         )}
+                        {showScenes && (
+                          <th scope="col" className={styles.sceneCol}>
+                            经营场景
+                          </th>
+                        )}
                         <th className={styles.opportunityCol}>
                           {doneView ? "经营任务" : "经营机会"}
                         </th>
@@ -856,6 +863,11 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             {!isBiz && (
                               <td>
                                 <CustomerLabel label={c.label} />
+                              </td>
+                            )}
+                            {showScenes && (
+                              <td className={styles.sceneCol}>
+                                {c.skillNames?.join("、") || "--"}
                               </td>
                             )}
                             <td className={styles.reason}>

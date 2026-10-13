@@ -272,8 +272,8 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台看板与列表标题
 
-- 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，日历入口为同目录的 `Calendar.tsx`。两种模式的标题统一使用 `Plan.name`，对应规划接口的 `name`；日历悬浮提示也使用同一名称。
-- `PlanItem.sceneName` 用于场景详情与排程说明，不用于替换日历卡片标题。日历日期仍按各场景排程命中，点击卡片传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
+- 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，卡片标题及悬浮提示展示当天执行的技能名称 `PlanItem.sceneName`，多项技能用 ` / ` 连接，不显示规划名称。
+- 日历按各场景排程筛选当天执行的技能，点击卡片仍传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
 - 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样按技能及完整执行周期查询 `/wealth/skill-stats` 并汇总；未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
 
 ## 财富任务名单动态字段

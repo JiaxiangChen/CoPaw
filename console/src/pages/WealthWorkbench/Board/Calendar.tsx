@@ -10,6 +10,7 @@ import {
   addCalendarDays,
   calendarDate,
   calendarRange,
+  planItemScheduledOn,
   planFrequency,
   planScheduledOn,
   todayKey,
@@ -17,6 +18,14 @@ import {
 import { Icon } from "../components/Icon";
 
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
+function scheduledSceneName(plan: Plan, day: string): string {
+  const sceneNames = (plan.items ?? [])
+    .filter((item) => planItemScheduledOn(plan, item, day))
+    .map((item) => item.sceneName)
+    .filter(Boolean);
+  return sceneNames.join(" / ") || "未命名技能";
+}
 
 export function Calendar({
   sources,
@@ -192,6 +201,7 @@ export function Calendar({
                 </div>
                 {shown.map((p) => {
                   const stat = planStat(p);
+                  const sceneName = scheduledSceneName(p, day);
                   return (
                     <button
                       key={p.id}
@@ -199,11 +209,11 @@ export function Calendar({
                         styles.calendarEvent,
                         p.source !== "分行关注" && styles.purple,
                       )}
-                      title={`${p.name} · ${p.status} · 点击查看详情`}
+                      title={`${sceneName} · ${p.status} · 点击查看详情`}
                       onClick={() => onShowDetails(day, p.id)}
                     >
                       <span className={styles.calendarEventTitle}>
-                        <strong>{p.name}</strong>
+                        <strong>{sceneName}</strong>
                         <span className={styles.calendarFrequency}>
                           {planFrequency(p)}
                         </span>

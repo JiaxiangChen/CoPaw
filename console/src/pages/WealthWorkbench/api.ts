@@ -506,6 +506,7 @@ async function fetchCustomerViewCustomers(
       skillId: scenes[0]?.skillId ?? skillIds[0] ?? "",
       name: item.custNm,
       label: labels.join("、"),
+      skillNames,
       reason,
       category: scenes[0]?.category ?? "",
       task: opts.done

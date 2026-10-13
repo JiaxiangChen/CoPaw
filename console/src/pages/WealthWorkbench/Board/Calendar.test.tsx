@@ -40,7 +40,7 @@ describe("Calendar", () => {
   afterEach(cleanup);
 
   it.each(["week", "month"] as const)(
-    "%s 日历标题与列表使用相同名称",
+    "%s 日历标题显示当天执行的技能名称，保留详情入口",
     (dimension) => {
       const onShowDetails = vi.fn();
       render(
@@ -57,13 +57,13 @@ describe("Calendar", () => {
         />,
       );
 
-      const events = screen.getAllByTitle(
-        "九月重点规划 · 已自动下发 · 点击查看详情",
-      );
-      expect(events).toHaveLength(2);
-      expect(screen.getAllByText(PLAN.name)).toHaveLength(2);
-      expect(screen.queryByText("高净值客户经营")).toBeNull();
-      expect(screen.queryByText("理财到期提醒")).toBeNull();
+      const events = [
+        screen.getByTitle("高净值客户经营 · 已自动下发 · 点击查看详情"),
+        screen.getByTitle("理财到期提醒 · 已自动下发 · 点击查看详情"),
+      ];
+      expect(screen.queryByText(PLAN.name)).toBeNull();
+      expect(screen.getByText("高净值客户经营")).toBeInTheDocument();
+      expect(screen.getByText("理财到期提醒")).toBeInTheDocument();
       fireEvent.click(events[0]);
       expect(onShowDetails).toHaveBeenCalledWith("2026-09-14", PLAN.id);
       fireEvent.click(events[1]);
