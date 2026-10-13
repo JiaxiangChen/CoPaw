@@ -3,7 +3,7 @@
  * 对应原型 tasksHTML：经营/客户双视角、任务树、重点标签表头筛选、
  * 经营方案/触达记录两类弹窗，执行列外链跳转电访与客户洞察。
  */
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Tooltip } from "antd";
 import { ChevronDown, RotateCw } from "lucide-react";
@@ -313,12 +313,21 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   }, [isBiz, taskTree, selectedTask, selectedCategory]);
 
   /** 当前页的名单数据源：今日=customers；待触达/已完成=各自接口名单 */
-  const pool =
-    page === "done"
-      ? doneCustomers
+  const loading =
+    !plansLoaded ||
+    (page === "done"
+      ? doneLoading
       : page === "pending"
-        ? pendingCustomers
-        : customers;
+        ? pendingLoading
+        : customersLoading);
+  const pool =
+    loading
+      ? []
+      : page === "done"
+        ? doneCustomers
+        : page === "pending"
+          ? pendingCustomers
+          : customers;
 
   /** 原型 customerList：ignoreLabel 用于标签浮层计数 */
   const buildList = (ignoreLabel: boolean, ignoreContactStatus = false) => {
@@ -380,7 +389,8 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     : [{ key: "empty", fields: [], customers: [] }];
 
   // 进入今日任务或切回经营视角更新规划；页内切到客户视角仅查询聚合名单。
-  useEffect(() => {
+  // 绘制前启动查询，避免新视角短暂显示旧名单和统计。
+  useLayoutEffect(() => {
     if (!plansLoaded) {
       return;
     }
@@ -722,14 +732,16 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
             </h3>
             <div className={styles.summaryMetrics}>
               <span>
-                目标客户 <b>{list.length}</b> 人
+                目标客户 <b>{loading ? "--" : list.length}</b> 人
               </span>
               <span>
-                今日已触达 <b>{contactedCount}</b> 人
+                今日已触达 <b>{loading ? "--" : contactedCount}</b> 人
               </span>
               <span>
                 待处理{" "}
-                <b className={styles.red}>{list.length - contactedCount}</b>{" "}
+                <b className={styles.red}>
+                  {loading ? "--" : list.length - contactedCount}
+                </b>{" "}
                 人
               </span>
             </div>
@@ -1002,14 +1014,11 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                       ) : (
                         <tr>
                           <td colSpan={columnCount}>
-                            <div className={styles.empty}>
-                              {(
-                                page === "pending"
-                                  ? pendingLoading
-                                  : page === "done"
-                                  ? doneLoading
-                                  : customersLoading
-                              )
+                            <div
+                              className={styles.empty}
+                              role={loading ? "status" : undefined}
+                            >
+                              {loading
                                 ? "客户清单加载中…"
                                 : isBiz && selectedTask && !search.trim() && contactStatus === "全部"
                                 ? `「${selectedTask}」暂无客户名单，待定时任务执行后生成`
@@ -1027,7 +1036,9 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
         </div>
 
         <div className={styles.pagination}>
-          <span className={styles.total}>共 {list.length} 条记录</span>
+          <span className={styles.total}>
+            共 {loading ? "--" : list.length} 条记录
+          </span>
         </div>
       </section>
 

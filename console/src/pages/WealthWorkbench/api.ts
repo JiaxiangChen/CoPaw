@@ -230,12 +230,14 @@ interface SkillStatsResponse {
  */
 export async function fetchSkillStats(
   queries: SkillStatQuery[],
+  signal?: AbortSignal,
 ): Promise<Record<string, SkillStat> | null> {
   if (!queries.length) return {};
   try {
     const resp = await request<SkillStatsResponse>("/wealth/skill-stats", {
       method: "POST",
       body: JSON.stringify({ skills: queries }),
+      signal,
     });
     // 外部按请求顺序返回且我们入参字段齐全（不会跳项），按下标对齐；
     // skillId 不一致时退化为按 skillId 查找兜底
@@ -673,25 +675,32 @@ function buildScenePayload(item: PlanItem): PlanScenePayload {
   };
 }
 
-async function fetchPlans(): Promise<Plan[]> {
-  const resp = await request<PlanListResponse>("/wealth/plans");
+async function fetchPlans(signal?: AbortSignal): Promise<Plan[]> {
+  const resp = await request<PlanListResponse>(
+    "/wealth/plans",
+    signal ? { signal } : undefined,
+  );
   return resp.items.map(mapPlan);
 }
 
 /** 轮询场景的接口告警只打一次，恢复后重置 */
 let planListErrorWarned = false;
 
-/** 看板轮询用：拉取最新规划列表，接口不可达时返回空（read 路径容忍，绝不回退假数据） */
-export async function fetchPlanList(): Promise<Plan[]> {
+/** 默认容错读取返回空；严格刷新上抛错误，由调用方保留已有规划并提示。 */
+export async function fetchPlanList(
+  throwOnError = false,
+  signal?: AbortSignal,
+): Promise<Plan[]> {
   try {
-    const plans = await fetchPlans();
+    const plans = await fetchPlans(signal);
     planListErrorWarned = false;
     return plans;
   } catch (error) {
     if (!planListErrorWarned) {
-      console.warn("[Wealth] 规划接口不可用，返回空列表", error);
+      console.warn("[Wealth] 规划接口不可用", error);
       planListErrorWarned = true;
     }
+    if (throwOnError) throw error;
     return [];
   }
 }
