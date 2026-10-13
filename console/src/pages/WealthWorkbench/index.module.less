@@ -3401,6 +3401,12 @@
     width: 520px;
     white-space: normal;
   }
+  .customerTable.metricsTable.todayTaskTable {
+    min-width: 1275px;
+    .contactStatusCol {
+      width: 135px;
+    }
+  }
   .customerTable.metricsTable.sceneTable {
     min-width: 1510px;
     th:nth-child(1),
@@ -3470,6 +3476,9 @@
     background: var(--console-management-surface, #fff);
     border-left: 1px solid var(--console-management-border, #e5e7eb);
     z-index: 1;
+  }
+  .customerTable.metricsTable.sceneTable.todayTaskTable {
+    min-width: 1645px;
   }
   .customerTable.metricsTable.opportunityTable th.executionCol {
     background: linear-gradient(100deg, #f0f8ff, #edf6ff);
@@ -3607,6 +3616,12 @@
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
+    }
+    .customerTable.metricsTable.sceneTable.todayTaskTable {
+      min-width: 1481px;
+    }
+    .tasksLayout.business .customerTable.metricsTable.todayTaskTable {
+      min-width: 1095px;
     }
     .customerTable.metricsTable .metricsCol {
       width: 356px;

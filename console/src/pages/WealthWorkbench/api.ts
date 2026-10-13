@@ -433,6 +433,7 @@ export async function fetchTodayCustomers(
         reason,
         category: task.category,
         task: task.sceneName,
+        touched: item.touched,
         done: item.touched === 1,
         channel: item.touchMethod ?? "",
         time: item.strongContactTime ?? "",
@@ -512,6 +513,7 @@ async function fetchCustomerViewCustomers(
       task: opts.done
         ? skillNames.join("、")
         : scenes.map((t) => t.sceneName).join("、"),
+      touched: item.touched,
       done: item.touched == null ? opts.done ?? false : item.touched === 1,
       channel: item.touchMethod ?? "",
       time: item.strongContactTime ?? "",
