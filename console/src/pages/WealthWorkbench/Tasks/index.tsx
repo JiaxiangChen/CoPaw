@@ -13,6 +13,7 @@ import styles from "../index.module.less";
 import { Icon } from "../components/Icon";
 import { CustomerSchemePreview } from "../components/CustomerSchemePreview";
 import { CustomerMetrics } from "../components/CustomerMetrics";
+import { CustomerScenes } from "../components/CustomerScenes";
 import { buildCustomerGroups } from "./customerGroups";
 import { buildInsightUrl, buildTelUrl, fetchSchemeSignature } from "../api";
 import { useCanAccess, useWealthStore } from "../store";
@@ -222,15 +223,21 @@ function labelTagClass(label: string) {
 
 /** 重点标签单元格：空值使用低强调度占位标签，避免表格出现空洞。 */
 export function CustomerLabel({ label }: { label: string }) {
-  const value = label.trim();
+  const labels = label
+    .split("、")
+    .map((value) => value.trim())
+    .filter(Boolean);
   return (
-    <span
-      className={cx(
-        styles.tag,
-        value ? labelTagClass(value) : styles.emptyTag,
+    <span className={styles.customerLabels}>
+      {labels.length ? (
+        labels.map((value) => (
+          <span key={value} className={cx(styles.tag, labelTagClass(value))}>
+            {value}
+          </span>
+        ))
+      ) : (
+        <span className={cx(styles.tag, styles.emptyTag)}>暂无标签</span>
       )}
-    >
-      {value || "暂无标签"}
     </span>
   );
 }
@@ -868,28 +875,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             )}
                             {showScenes && (
                               <td className={styles.sceneCol}>
-                                {c.skillNames?.length ? (
-                                  <Tooltip
-                                    placement="topLeft"
-                                    trigger={["hover", "focus"]}
-                                    title={
-                                      <div
-                                        className={styles.opportunityTooltipContent}
-                                      >
-                                        {c.skillNames.join("、")}
-                                      </div>
-                                    }
-                                  >
-                                    <div
-                                      className={styles.opportunityPreview}
-                                      tabIndex={0}
-                                    >
-                                      {c.skillNames.join("、")}
-                                    </div>
-                                  </Tooltip>
-                                ) : (
-                                  "--"
-                                )}
+                                <CustomerScenes key={c.id} names={c.skillNames} />
                               </td>
                             )}
                             <td className={styles.reason}>

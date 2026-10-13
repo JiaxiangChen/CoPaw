@@ -3393,7 +3393,7 @@
     white-space: normal;
   }
   .customerTable.metricsTable.sceneTable {
-    min-width: 1550px;
+    min-width: 1510px;
     th:nth-child(1),
     td:nth-child(1),
     th:nth-child(6),
@@ -3412,7 +3412,7 @@
       overflow-wrap: anywhere;
     }
     .sceneCol {
-      width: 200px;
+      width: 160px;
       white-space: normal;
       overflow-wrap: anywhere;
     }
@@ -3451,6 +3451,27 @@
   }
   .customerMetrics {
     width: 100%;
+  }
+  .customerLabels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .customerScenes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    li {
+      min-width: 0;
+    }
+    .metricItem:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
   }
   .metricGrid {
     display: grid;
@@ -3550,7 +3571,7 @@
       min-width: 960px;
     }
     .customerTable.metricsTable.sceneTable {
-      min-width: 1386px;
+      min-width: 1346px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;

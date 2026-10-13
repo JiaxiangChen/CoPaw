@@ -72,6 +72,20 @@ describe("Opportunities", () => {
 });
 
 describe("CustomerLabel", () => {
+  it("多个标签拆成独立背景项，忽略分隔符之间的空值", () => {
+    const { unmount } = render(
+      <CustomerLabel label=" 行长指派 、分行重点、、我的关注 " />,
+    );
+    const first = screen.getByText("行长指派");
+    const second = screen.getByText("分行重点");
+    const third = screen.getByText("我的关注");
+    expect(first.parentElement).toBe(second.parentElement);
+    expect(first.parentElement).toBe(third.parentElement);
+    expect(first.parentElement?.children).toHaveLength(3);
+    expect(first.className).not.toBe(second.className);
+    unmount();
+  });
+
   it("空标签展示暂无标签占位", () => {
     render(<CustomerLabel label="" />);
 

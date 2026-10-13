@@ -77,10 +77,15 @@ beforeEach(() => {
 
 describe("经营分类独立表格", () => {
   it.each(["today", "pending", "done"] as const)(
-    "%s 的经营场景支持悬停和键盘聚焦查看完整名称",
+    "%s 的经营场景默认两项，支持展开收起与查看完整名称",
     async (page) => {
       const fullName = "高净值客户理财到期资金承接与长期资产配置".repeat(4);
-      state.customers[0].skillNames = [fullName, "信贷需求挖掘"];
+      state.customers[0].skillNames = [
+        fullName,
+        "信贷需求挖掘",
+        "家庭保险保障",
+        "存款资金承接",
+      ];
       state.pendingCustomers = state.customers;
       state.doneCustomers = state.customers;
       render(
@@ -90,12 +95,23 @@ describe("经营分类独立表格", () => {
       );
       if (page === "today")
         fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
-      const preview = screen.getByText(`${fullName}、信贷需求挖掘`);
+      const preview = screen.getByText(fullName);
+      const cell = preview.closest("td")!;
+      expect(within(cell).getAllByRole("listitem")).toHaveLength(2);
+      expect(within(cell).queryByText("家庭保险保障")).not.toBeInTheDocument();
+      const toggle = within(cell).getByRole("button", {
+        name: "展开剩余 2 项",
+      });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(toggle);
+      expect(within(cell).getAllByRole("listitem")).toHaveLength(4);
+      expect(within(cell).getByText("家庭保险保障")).toBeInTheDocument();
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(within(cell).getByRole("button", { name: "收起" }));
+      expect(within(cell).getAllByRole("listitem")).toHaveLength(2);
       expect(preview).toHaveAttribute("tabindex", "0");
       fireEvent.mouseEnter(preview);
-      expect(await screen.findByRole("tooltip")).toHaveTextContent(
-        `${fullName}、信贷需求挖掘`,
-      );
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(fullName);
       fireEvent.mouseLeave(preview);
       fireEvent.focus(preview);
       expect(await screen.findByRole("tooltip")).toHaveTextContent(fullName);
@@ -129,7 +145,7 @@ describe("经营分类独立表格", () => {
     ]);
     const rows = within(table).getAllByRole("row");
     expect(within(rows[1]).getAllByRole("cell")[2]).toHaveTextContent(
-      "接口技能一、接口技能二",
+      /接口技能一.*接口技能二/,
     );
     expect(within(rows[2]).getAllByRole("cell")[2]).toHaveTextContent("--");
     state.customers = [];
@@ -169,7 +185,7 @@ describe("经营分类独立表格", () => {
       expect(headers).toHaveLength(page === "done" ? 8 : 7);
       const rows = within(table).getAllByRole("row");
       expect(within(rows[1]).getAllByRole("cell")[2]).toHaveTextContent(
-        "接口技能一、接口技能二",
+        /接口技能一.*接口技能二/,
       );
       expect(within(rows[2]).getAllByRole("cell")[2]).toHaveTextContent("--");
       state.pendingCustomers = [];
