@@ -791,6 +791,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                         : styles.opportunityTable,
                       styles.metricsTable,
                       showScenes && styles.sceneTable,
+                      page === "today" && !isBiz && styles.todayCustomerTable,
                     )}
                   >
                     <thead>
@@ -867,7 +868,28 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                             )}
                             {showScenes && (
                               <td className={styles.sceneCol}>
-                                {c.skillNames?.join("、") || "--"}
+                                {c.skillNames?.length ? (
+                                  <Tooltip
+                                    placement="topLeft"
+                                    trigger={["hover", "focus"]}
+                                    title={
+                                      <div
+                                        className={styles.opportunityTooltipContent}
+                                      >
+                                        {c.skillNames.join("、")}
+                                      </div>
+                                    }
+                                  >
+                                    <div
+                                      className={styles.opportunityPreview}
+                                      tabIndex={0}
+                                    >
+                                      {c.skillNames.join("、")}
+                                    </div>
+                                  </Tooltip>
+                                ) : (
+                                  "--"
+                                )}
                               </td>
                             )}
                             <td className={styles.reason}>

@@ -76,6 +76,32 @@ beforeEach(() => {
 });
 
 describe("经营分类独立表格", () => {
+  it.each(["today", "pending", "done"] as const)(
+    "%s 的经营场景支持悬停和键盘聚焦查看完整名称",
+    async (page) => {
+      const fullName = "高净值客户理财到期资金承接与长期资产配置".repeat(4);
+      state.customers[0].skillNames = [fullName, "信贷需求挖掘"];
+      state.pendingCustomers = state.customers;
+      state.doneCustomers = state.customers;
+      render(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      if (page === "today")
+        fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+      const preview = screen.getByText(`${fullName}、信贷需求挖掘`);
+      expect(preview).toHaveAttribute("tabindex", "0");
+      fireEvent.mouseEnter(preview);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        `${fullName}、信贷需求挖掘`,
+      );
+      fireEvent.mouseLeave(preview);
+      fireEvent.focus(preview);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(fullName);
+    },
+  );
+
   it("今日任务客户视角在标签之后展示接口技能名称，缺失时保留占位", () => {
     state.customers[0].skillNames = ["接口技能一", "接口技能二"];
     const { rerender } = render(

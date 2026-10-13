@@ -3203,6 +3203,7 @@
   max-height: 320px;
   overflow: auto;
   white-space: normal;
+  overflow-wrap: anywhere;
   line-height: 1.65;
 }
 
@@ -3392,7 +3393,7 @@
     white-space: normal;
   }
   .customerTable.metricsTable.sceneTable {
-    min-width: 1520px;
+    min-width: 1550px;
     th:nth-child(1),
     td:nth-child(1),
     th:nth-child(6),
@@ -3401,7 +3402,7 @@
     }
     th:nth-child(2),
     td:nth-child(2) {
-      width: 160px;
+      width: 135px;
       white-space: normal;
     }
     td:nth-child(2) .tag {
@@ -3411,9 +3412,26 @@
       overflow-wrap: anywhere;
     }
     .sceneCol {
-      width: 160px;
+      width: 200px;
       white-space: normal;
       overflow-wrap: anywhere;
+    }
+    .opportunityPreview {
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      max-height: 4.95em;
+    }
+    .metricsCol {
+      width: auto;
+    }
+    &.opportunityTable .opportunityCol,
+    &.opportunityTable .reason {
+      width: 240px;
+      min-width: 0;
+    }
+    &.todayCustomerTable th:nth-child(6),
+    &.todayCustomerTable td:nth-child(6) {
+      width: 135px;
     }
   }
   .customerTable.metricsTable.opportunityTable .executionCol {
@@ -3532,7 +3550,7 @@
       min-width: 960px;
     }
     .customerTable.metricsTable.sceneTable {
-      min-width: 1356px;
+      min-width: 1386px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
