@@ -215,6 +215,10 @@ async function openOutboundLink(kind: "dial" | "insight", c: Customer) {
 //   });
 // }
 
+function contactMethodLabel(method: string) {
+  return method === "强接触" ? "已接触" : method;
+}
+
 function labelTagClass(label: string) {
   return label === "总行重点"
     ? styles.red
@@ -354,7 +358,17 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
       contactStatus,
     ],
   );
-  const groups = useMemo(() => buildCustomerGroups(list, isBiz), [list, isBiz]);
+  const groups = useMemo(() => {
+    const grouped = buildCustomerGroups(list, isBiz);
+    if (page === "today") {
+      for (const group of grouped) {
+        group.customers.sort(
+          (a, b) => Number(a.touched === 1) - Number(b.touched === 1),
+        );
+      }
+    }
+    return grouped;
+  }, [list, isBiz, page]);
   const showContactStatus = page === "today";
   const contactStatusCustomers = buildList(false, true);
   const columnCount = (isBiz ? 5 : 7) + Number(showContactStatus);
@@ -541,7 +555,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
             </div>
             <div>
               <small>触达方式</small>
-              {c.channel}
+              {contactMethodLabel(c.channel)}
             </div>
             <div>
               <small>完成时间</small>
@@ -924,7 +938,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                                     }
                                   />
                                   {"　"}
-                                  {c.channel}
+                                  {contactMethodLabel(c.channel)}
                                 </>
                               ) : (
                                 <button
