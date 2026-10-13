@@ -14,7 +14,7 @@ import {
   planScheduledOn,
 } from "./store";
 import { cycleRange, DEFAULT_SCHEDULE, todayKey } from "./utils";
-import type { Plan, PlanItem } from "./types";
+import type { Customer, Plan, PlanItem } from "./types";
 
 vi.mock("../../api/request", () => ({ request: vi.fn() }));
 
@@ -568,11 +568,13 @@ describe("WealthWorkbench store", () => {
         .map(([p]) => String(p));
 
     await useWealthStore.getState().loadTodayCustomers("business");
-    const bizCall = nameListCalls().slice(-1)[0] ?? "";
+    const bizCall =
+      nameListCalls().find((path) => path.includes("skill_id=")) ?? "";
     expect(bizCall).toContain("sap_id=10086");
     expect(bizCall).toContain(`skill_id=${LOAN}`);
     const bizCustomers = useWealthStore.getState().customers;
     expect(bizCustomers).toHaveLength(2);
+    expect(useWealthStore.getState().todayCustomerCount).toBe(2);
     expect(bizCustomers[0]).toMatchObject({
       id: `${LOAN}|CUST001`,
       task: "信贷需求挖掘",
@@ -587,11 +589,44 @@ describe("WealthWorkbench store", () => {
     expect(custCall).not.toContain("skill_id=");
     const custCustomers = useWealthStore.getState().customers;
     expect(custCustomers).toHaveLength(2);
+    expect(useWealthStore.getState().todayCustomerCount).toBe(
+      custCustomers.length,
+    );
     expect(custCustomers[0]).toMatchObject({
       id: "CUST001",
       label: "我的关注",
       task: "信贷需求挖掘",
     });
+  });
+
+  it("侧栏总人数使用客户聚合查询，保留页面经营名单及视角", async () => {
+    useIframeStore.setState({ userId: "10086" });
+    const customers = [{ id: "business-1" }] as Customer[];
+    useWealthStore.setState({
+      plans: [],
+      customers,
+      todayCustomerView: "business",
+      todayCustomerCount: 0,
+    });
+    mockRequest.mockClear();
+    await useWealthStore.getState().loadTodayCustomerCount();
+    expect(mockRequest).toHaveBeenCalledWith(
+      expect.stringMatching(/\/wealth\/name-list\?.*sap_id=10086/),
+    );
+    const paths = mockRequest.mock.calls.map(([path]) => String(path));
+    expect(paths.some((path) => path.includes("skill_id="))).toBe(false);
+    expect(paths.some((path) => path.includes("touched=2"))).toBe(true);
+    expect(useWealthStore.getState().todayCustomerCount).toBe(2);
+    expect(useWealthStore.getState().customers).toBe(customers);
+    expect(useWealthStore.getState().todayCustomerView).toBe("business");
+  });
+
+  it("经营视角名单为空时，角标仍使用客户视角查询人数", async () => {
+    useIframeStore.setState({ userId: "10086" });
+    useWealthStore.setState({ plans: [], todayCustomerCount: 0 });
+    await useWealthStore.getState().loadTodayCustomers("business");
+    expect(useWealthStore.getState().customers).toHaveLength(0);
+    expect(useWealthStore.getState().todayCustomerCount).toBe(2);
   });
 
   it("刷新先等待最新规划，再用新技能查询名单，期间拦截重复刷新", async () => {
@@ -669,14 +704,21 @@ describe("WealthWorkbench store", () => {
         .map(([p]) => String(p));
 
     await useWealthStore.getState().loadPendingCustomers();
+    mockRequest.mockResolvedValueOnce({
+      items: NAME_LIST_FIXTURE.map((item, index) => ({
+        ...item,
+        touched: index,
+      })),
+    });
     await useWealthStore.getState().loadDoneCustomers();
 
     const calls = nameListCalls();
     expect(calls.some((c) => c.includes("touched=0"))).toBe(true);
-    expect(calls.some((c) => c.includes("touched=1"))).toBe(true);
+    expect(calls.some((c) => c.includes("touched=2"))).toBe(true);
     expect(useWealthStore.getState().pendingCustomers).toHaveLength(2);
     const done = useWealthStore.getState().doneCustomers;
-    expect(done).toHaveLength(2);
+    expect(done).toHaveLength(1);
+    expect(done[0].touched).toBe(1);
     expect(done.every((c) => c.done)).toBe(true);
   });
 
@@ -692,7 +734,7 @@ describe("WealthWorkbench store", () => {
     expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
       "2",
       "0",
-      "1",
+      "2",
     ]);
     expect(
       lists.every((url) => url.searchParams.get("sap_id") === "10086"),

@@ -282,9 +282,12 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富任务名单动态字段
 
+- 侧栏“今日任务”红色数字角标与客户视角口径一致：`fetchTodayCustomers(..., "customer")` 查询 `/wealth/name-list`，传当前用户 sapId 与 touched=2、不带 skillId，统计聚合名单总人数（包含已接触客户），为 0 时隐藏。store 独立保存 `todayCustomerCount`，避免经营视角按技能查询的重复客户影响总数；侧栏首次加载及今日名单刷新时更新。待触达和已完成角标分别来自对应客户名单长度。入口为 `components/Sidebar.tsx` 和 `store.ts`，回归入口为 `components/Sidebar.test.tsx` 和 `store.test.ts`。
+
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
 - 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 待处理”，按各自当前筛选名单计算；已完成页不再展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。待触达和已完成沿用名单映射的 `done` 判断，正常已完成名单待处理为 0。“今日已触达”文案沿用三页统一表达，不新增完成日期过滤。
 - 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `GET /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。
+- 已完成名单临时通过 `fetchDoneCustomers` 查询 `sap_id + touched=2`（不传 `skill_id`），前端仅保留原始 `touched === 1` 的客户，列表与侧栏角标共用筛选结果；缺失或其他触达状态不计入。待触达仍请求 `touched=0`。回归入口为 `api.test.ts` 和 `store.test.ts`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。

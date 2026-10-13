@@ -463,15 +463,16 @@ export async function fetchPendingCustomers(
   return fetchCustomerViewCustomers(tasks, sapId, { touched: TOUCHED_PENDING });
 }
 
-/** 已完成名单：客户视角口径（仅 sapId + touched=1），名单内客户均为已触达。 */
+/** 已完成名单：临时查询 sapId + touched=2，再仅保留 touched=1 的客户。 */
 export async function fetchDoneCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
 ): Promise<Customer[]> {
-  return fetchCustomerViewCustomers(tasks, sapId, {
-    touched: TOUCHED_DONE,
+  const customers = await fetchCustomerViewCustomers(tasks, sapId, {
+    touched: TOUCHED_ALL,
     done: true,
   });
+  return customers.filter((customer) => customer.touched === TOUCHED_DONE);
 }
 
 /**
