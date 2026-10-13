@@ -469,3 +469,34 @@ async def test_middle_database_query_filters_branch_focus_only() -> None:
     sql, params = db.fetch_all.await_args.args
     assert "p.source_label IN (%s)" in " ".join(sql.split())
     assert params == ("100", "分行关注")
+
+
+@pytest.mark.asyncio
+async def test_scene_conflicts_filter_recipient_intersection_in_memory() -> (
+    None
+):
+    store = WealthPlanStore()
+    await store.create(make_plan(source_label="分行关注", targets=["a", "b"]))
+    args = ("president", "c-president", "100", {"skill-wealth-insurance-1"})
+    assert await store.find_scene_conflicts(*args, target_sap_ids={"c"}) == {}
+    assert await store.find_scene_conflicts(*args, target_sap_ids=set()) == {}
+    assert await store.find_scene_conflicts(*args, target_sap_ids={"a", "c"})
+
+
+@pytest.mark.asyncio
+async def test_scene_conflicts_database_filters_targets_with_exists() -> None:
+    db = AsyncMock()
+    db.fetch_all.return_value = []
+    store = WealthPlanStore(db)
+    await store.find_scene_conflicts(
+        "president",
+        "c-president",
+        "100",
+        {"scene"},
+        target_sap_ids={"c-rm"},
+        exclude_plan_id="editing",
+    )
+    sql, params = db.fetch_all.await_args.args
+    assert "AND EXISTS" in sql
+    assert "t.plan_id = p.id AND t.sap_id IN (%s)" in sql
+    assert params[-2:] == ("c-rm", "editing")

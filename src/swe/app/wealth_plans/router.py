@@ -390,6 +390,7 @@ async def _validate_scene_conflicts(
         getattr(request.state, "bbk_id", None),
         checked_scene_ids,
         exclude_plan_id=exclude_plan_id,
+        target_sap_ids={target.sap_id for target in body.targets},
         scene_ranges={
             scene.scene_id: (scene.start_date, scene.end_date)
             for scene in body.scenes

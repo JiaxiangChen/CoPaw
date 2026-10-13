@@ -315,3 +315,12 @@ describe("collectSkillStatQueries", () => {
     ]);
   });
 });
+
+it("中台给 A、B 发布后，C 的接收人员不冲突；人员重叠仍拦截", () => {
+  const plan = makePlan({ source: "分行关注", targetSapIds: ["a", "b"] });
+  const draft = { name: "C 支行规划", items: [makeItem()] };
+  const plans = filterSceneConflictPlans([plan], "president");
+  expect(findSceneConflicts(plans, draft, null, ["c"])).toEqual([]);
+  expect(findSceneConflicts(plans, draft, null, [])).toEqual([]);
+  expect(findSceneConflicts(plans, draft, null, ["a", "c"])).toHaveLength(1);
+});
