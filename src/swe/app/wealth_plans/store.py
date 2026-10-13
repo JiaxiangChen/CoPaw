@@ -286,9 +286,10 @@ class WealthPlanStore:
         *,
         exclude_plan_id: str | None = None,
         scene_ranges: dict[str, tuple[str | None, str | None]] | None = None,
+        target_sap_ids: set[str] | None = None,
     ) -> dict[str, str]:
         """按发布角色查询任务日期重叠的场景及其占用规划名。"""
-        if not bbk_id or not scene_ids:
+        if not bbk_id or not scene_ids or target_sap_ids == set():
             return {}
         source_labels = _SCENE_RESERVING_SOURCE_LABELS_BY_ROLE.get(role)
         if not source_labels:
@@ -302,6 +303,7 @@ class WealthPlanStore:
                 scene_ids,
                 exclude_plan_id,
                 ranges,
+                target_sap_ids,
             )
 
         ordered_scene_ids = sorted(scene_ids)
@@ -318,6 +320,14 @@ class WealthPlanStore:
             params.append(sap_id)
         params.extend(sorted(source_labels))
         params.extend(ordered_scene_ids)
+        target_sql = ""
+        if target_sap_ids is not None:
+            placeholders = ", ".join(["%s"] * len(target_sap_ids))
+            target_sql = f"""AND EXISTS (
+                SELECT 1 FROM {_TARGET_TABLE} t
+                WHERE t.plan_id = p.id AND t.sap_id IN ({placeholders})
+            )"""
+            params.extend(sorted(target_sap_ids))
         if exclude_plan_id:
             params.append(exclude_plan_id)
         rows = await self.db.fetch_all(
@@ -330,6 +340,7 @@ class WealthPlanStore:
               AND p.status <> %s
               AND {reservation_sql}
               AND s.scene_id IN ({scene_placeholders})
+              {target_sql}
               {exclude_sql}
             ORDER BY p.created_at DESC
             """,
@@ -353,6 +364,7 @@ class WealthPlanStore:
         scene_ids: set[str],
         exclude_plan_id: str | None,
         ranges: dict[str, tuple[str | None, str | None]],
+        target_sap_ids: set[str] | None = None,
     ) -> dict[str, str]:
         """内存模式按创建时间倒序查找日期重叠的占用规划。"""
         records = sorted(
@@ -368,6 +380,10 @@ class WealthPlanStore:
                 sap_id,
                 bbk_id,
                 exclude_plan_id,
+            ):
+                continue
+            if target_sap_ids is not None and not any(
+                t.sap_id in target_sap_ids for t in record.targets
             ):
                 continue
             for scene in record.scenes:

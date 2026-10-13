@@ -1354,3 +1354,23 @@ async def test_management_list_and_detail_share_source_scope(
             and record.id != "peer-president"
             else 403
         )
+
+
+@pytest.mark.parametrize("target,expected", [("c-rm", 200), ("a-rm", 409)])
+def test_middle_ab_plan_allows_c_branch_recipients(client, target, expected):
+    created = client.post(
+        "/api/wealth/plans",
+        headers={**VIEWER, "X-Position-Id": "RB0301"},
+        json=plan_payload(targets=[{"sap_id": "a-rm"}, {"sap_id": "b-rm"}]),
+    )
+    assert created.status_code == 200
+    response = client.post(
+        "/api/wealth/plans",
+        headers={
+            **VIEWER,
+            "X-User-Id": "c-president",
+            "X-Position-Id": "RB1101",
+        },
+        json=plan_payload(targets=[{"sap_id": target}]),
+    )
+    assert response.status_code == expected

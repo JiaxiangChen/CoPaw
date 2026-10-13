@@ -191,6 +191,31 @@ describe("WealthWorkbench api", () => {
     await expect(api.fetchSkillStats([])).resolves.toEqual({});
   });
 
+  it.each(["business", "customer"] as const)(
+    "今日任务 %s 保留原始 touched，包括未知或缺失状态",
+    async (view) => {
+      const statuses = [0, 1, 3, 2, -1, null, undefined];
+      mockRequest.mockResolvedValueOnce({
+        items: statuses.map((touched, index) => ({
+          custUid: `cust-${index}`,
+          custNm: `客户${index}`,
+          touched,
+        })),
+      });
+      const customers = await api.fetchTodayCustomers([TASK], "10086", view);
+      expect(customers.map((customer) => customer.touched)).toEqual(statuses);
+      expect(customers.map((customer) => customer.done)).toEqual([
+        false,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ]);
+    },
+  );
+
   it("fetchTodayCustomers 按任务上下文映射名单并去重", async () => {
     const customers = await api.fetchTodayCustomers(
       [

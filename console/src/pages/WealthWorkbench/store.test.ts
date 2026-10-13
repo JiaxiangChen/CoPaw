@@ -680,6 +680,59 @@ describe("WealthWorkbench store", () => {
     expect(done.every((c) => c.done)).toBe(true);
   });
 
+  it("标签页切回刷新三个名单，沿用今日客户视角和登录人", async () => {
+    useIframeStore.setState({ userId: "10086" });
+    await useWealthStore.getState().loadTodayCustomers("customer");
+    mockRequest.mockClear();
+    await useWealthStore.getState().refreshTaskLists();
+    const paths = mockRequest.mock.calls.map(([path]) => String(path));
+    expect(paths[0]).toBe("/wealth/plans");
+    const lists = paths.slice(1).map((path) => new URL(path, "http://test"));
+    expect(lists).toHaveLength(3);
+    expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
+      "2",
+      "0",
+      "1",
+    ]);
+    expect(
+      lists.every((url) => url.searchParams.get("sap_id") === "10086"),
+    ).toBe(true);
+    expect(lists.every((url) => !url.searchParams.has("skill_id"))).toBe(true);
+    expect(useWealthStore.getState().taskListsRefreshing).toBe(false);
+  });
+
+  it("三个名单刷新期间忽略重复请求，完成后可以再次刷新", async () => {
+    useWealthStore.setState({ todayCustomerView: "customer" });
+    let finishPlans!: (value: unknown) => void;
+    mockRequest.mockClear();
+    mockRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPlans = resolve;
+        }),
+    );
+    const refresh = useWealthStore.getState().refreshTaskLists();
+    await useWealthStore.getState().refreshTaskLists();
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    finishPlans({ items: [] });
+    await refresh;
+    expect(mockRequest).toHaveBeenCalledTimes(4);
+    await useWealthStore.getState().refreshTaskLists();
+    expect(mockRequest).toHaveBeenCalledTimes(8);
+  });
+
+  it.each([
+    { initialized: false },
+    { plansLoaded: false },
+    { accountId: "president" as const },
+    { accountId: "unknown" as const },
+  ])("身份或初始规划未就绪、无任务权限时不刷新：%j", async (state) => {
+    useWealthStore.setState(state);
+    mockRequest.mockClear();
+    await useWealthStore.getState().refreshTaskLists();
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
   it("editPlan 将规划内容载入草稿并设置编辑态", () => {
     useWealthStore.getState().editPlan("plan-demo-2");
     const s = useWealthStore.getState();

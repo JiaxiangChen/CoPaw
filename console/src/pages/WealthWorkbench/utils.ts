@@ -255,6 +255,7 @@ export function findSceneConflicts(
   plans: Plan[],
   draft: Draft,
   editingId: string | null,
+  targetSapIds?: readonly string[],
 ): SceneConflict[] {
   const retainedItems =
     plans.find((plan) => plan.id === editingId)?.items ?? [];
@@ -273,6 +274,10 @@ export function findSceneConflicts(
         (plan) =>
           plan.id !== editingId &&
           plan.publishStatus !== "publish_failed" &&
+          (targetSapIds === undefined ||
+            (plan.targetSapIds ?? []).some((id) =>
+              targetSapIds.includes(id),
+            )) &&
           (plan.items ?? []).some(
             (item) =>
               item.id === scene.id &&

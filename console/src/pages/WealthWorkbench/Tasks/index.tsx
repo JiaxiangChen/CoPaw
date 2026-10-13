@@ -15,6 +15,8 @@ import { CustomerSchemePreview } from "../components/CustomerSchemePreview";
 import { CustomerMetrics } from "../components/CustomerMetrics";
 import { CustomerScenes } from "../components/CustomerScenes";
 import { buildCustomerGroups } from "./customerGroups";
+import { ContactStatusFilter } from "./ContactStatusFilter";
+import { contactStatusOf, type ContactStatusFilterValue } from "./contactStatus";
 import { buildInsightUrl, buildTelUrl, fetchSchemeSignature } from "../api";
 import { useCanAccess, useWealthStore } from "../store";
 import type { Customer } from "../types";
@@ -260,6 +262,9 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   const navigate = useNavigate();
   const [view, setView] = useState<"business" | "customer">("business");
   const [taskLabel, setTaskLabel] = useState("全部");
+  const [contactStatus, setContactStatus] = useState<ContactStatusFilterValue>(
+    "全部",
+  );
   const [search, setSearch] = useState("");
   const [selectedTask, setSelectedTask] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -312,7 +317,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
         : customers;
 
   /** 原型 customerList：ignoreLabel 用于标签浮层计数 */
-  const buildList = (ignoreLabel: boolean) => {
+  const buildList = (ignoreLabel: boolean, ignoreContactStatus = false) => {
     let list = page === "pending" ? pool.filter((c) => !c.done) : pool;
     if (isBiz)
       list = list.filter(
@@ -330,16 +335,32 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
       );
     if (!ignoreLabel && taskLabel !== "全部")
       list = list.filter((c) => matchLabel(c.label, taskLabel));
+    if (page === "today" && !ignoreContactStatus && contactStatus !== "全部")
+      list = list.filter((c) => contactStatusOf(c.touched) === contactStatus);
     return list;
   };
 
   const list = useMemo(
     () => buildList(false),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [page, pool, isBiz, selectedTask, selectedCategory, search, taskLabel],
+    [
+      page,
+      pool,
+      isBiz,
+      selectedTask,
+      selectedCategory,
+      search,
+      taskLabel,
+      contactStatus,
+    ],
   );
   const groups = useMemo(() => buildCustomerGroups(list, isBiz), [list, isBiz]);
-  const columnCount = isBiz ? 5 : 7;
+  const showContactStatus = page === "today";
+  const contactStatusCustomers = buildList(false, true);
+  const columnCount = (isBiz ? 5 : 7) + Number(showContactStatus);
+  const contactedCount = list.filter((c) =>
+    showContactStatus ? c.touched === 1 : c.done,
+  ).length;
   const tableGroups = groups.length
     ? groups
     : [{ key: "empty", fields: [], customers: [] }];
@@ -374,10 +395,6 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     loadPendingCustomers,
     loadDoneCustomers,
   ]);
-
-  const doneToday = customers.filter(
-    (c) => c.done && (taskLabel === "全部" || matchLabel(c.label, taskLabel)),
-  ).length;
 
   // 标签筛选浮层：外部点击 / Escape / 滚动 / 缩放时关闭
   useEffect(() => {
@@ -690,32 +707,17 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                     : "今日任务：客户经营"}
             </h3>
             <div className={styles.summaryMetrics}>
-              {doneView ? (
-                <>
-                  <span>
-                    累计已完成 <b>{list.length}</b> 人
-                  </span>
-                  <span>
-                    今日已完成 <b>{doneToday}</b> 人
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>
-                    目标客户 <b>{list.length}</b> 人
-                  </span>
-                  <span>
-                    今日已触达 <b>{list.filter((c) => c.done).length}</b> 人
-                  </span>
-                  <span>
-                    待处理{" "}
-                    <b className={styles.red}>
-                      {list.filter((c) => !c.done).length}
-                    </b>{" "}
-                    人
-                  </span>
-                </>
-              )}
+              <span>
+                目标客户 <b>{list.length}</b> 人
+              </span>
+              <span>
+                今日已触达 <b>{contactedCount}</b> 人
+              </span>
+              <span>
+                待处理{" "}
+                <b className={styles.red}>{list.length - contactedCount}</b>{" "}
+                人
+              </span>
             </div>
           </div>
         </div>
@@ -799,6 +801,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                       styles.metricsTable,
                       showScenes && styles.sceneTable,
                       page === "today" && !isBiz && styles.todayCustomerTable,
+                      showContactStatus && styles.todayTaskTable,
                     )}
                   >
                     <thead>
@@ -859,6 +862,21 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                         <th className={doneView ? styles.channelCol : undefined}>
                           {doneView ? "触达方式" : "经营方案"}
                         </th>
+                        {showContactStatus && (
+                          <th
+                            scope="col"
+                            className={cx(
+                              styles.contactStatusCol,
+                              styles.tagFilterHeading,
+                            )}
+                          >
+                            <ContactStatusFilter
+                              value={contactStatus}
+                              customers={contactStatusCustomers}
+                              onChange={setContactStatus}
+                            />
+                          </th>
+                        )}
                         <th className={styles.executionCol}>
                           {doneView ? "完成时间" : "执行"}
                         </th>
@@ -917,6 +935,20 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                                 </button>
                               )}
                             </td>
+                            {showContactStatus && (
+                              <td className={styles.contactStatusCol}>
+                                <span
+                                  className={cx(
+                                    styles.tag,
+                                    c.touched === 1
+                                      ? styles.green
+                                      : styles.emptyTag,
+                                  )}
+                                >
+                                  {contactStatusOf(c.touched)}
+                                </span>
+                              </td>
+                            )}
                             <td className={styles.executionCol}>
                               {doneView ? (
                                 c.time
@@ -965,7 +997,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                                   : customersLoading
                               )
                                 ? "客户清单加载中…"
-                                : isBiz && selectedTask && !search.trim()
+                                : isBiz && selectedTask && !search.trim() && contactStatus === "全部"
                                 ? `「${selectedTask}」暂无客户名单，待定时任务执行后生成`
                                 : "暂无符合条件的客户"}
                             </div>

@@ -18,8 +18,10 @@ import { Topbar } from "./components/Topbar";
 import Board from "./Board";
 import Create from "./Create";
 import Tasks from "./Tasks";
+import { useVisibilityRefresh } from "./useVisibilityRefresh";
 
 export default function WealthWorkbench() {
+  useVisibilityRefresh();
   const initialized = useWealthStore((s) => s.initialized);
   const accountId = useWealthStore((s) => s.accountId);
   const init = useWealthStore((s) => s.init);

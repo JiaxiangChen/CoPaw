@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Customer } from "../types";
 import Tasks from "./index";
+import styles from "../index.module.less";
 
 const state = vi.hoisted(() => ({
   customers: [] as Customer[],
@@ -76,6 +77,125 @@ beforeEach(() => {
 });
 
 describe("经营分类独立表格", () => {
+  it("已完成复用三项汇总，按自身筛选名单统计，不依赖今日任务缓存", () => {
+    state.doneCustomers = state.customers.map((customer) => ({
+      ...customer,
+      touched: 1,
+      done: true,
+    }));
+    state.customers = [];
+    render(
+      <MemoryRouter>
+        <Tasks page="done" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/累计已完成|今日已完成/)).not.toBeInTheDocument();
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 3 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 3 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "搜索客户或经营机会" }),
+      { target: { value: "客户1" } },
+    );
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 1 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 1 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+  });
+
+  it.each(["business", "customer"] as const)(
+    "%s 接触状态筛选联动名单、人数统计，支持清除和未知状态",
+    (view) => {
+      const template = state.customers[0];
+      state.customers = [0, 1, 3, null].map((touched, index) => ({
+        ...template,
+        id: `status-${index}`,
+        name: `状态客户${index}`,
+        touched,
+        label: index % 2 === 0 ? "行长指派" : "我的关注",
+        groupFields: [],
+      }));
+      render(
+        <MemoryRouter>
+          <Tasks page="today" />
+        </MemoryRouter>,
+      );
+      if (view === "customer")
+        fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+      fireEvent.click(screen.getByRole("button", { name: "筛选接触状态" }));
+      const dialog = screen.getByRole("dialog", { name: "筛选接触状态" });
+      expect(
+        within(dialog).getByRole("button", { name: /^全部状态/ }),
+      ).toHaveTextContent("4");
+      expect(
+        within(dialog).getByRole("button", { name: /^--/ }),
+      ).toHaveTextContent("2");
+      fireEvent.click(within(dialog).getByRole("button", { name: /^已接触/ }));
+      expect(screen.getAllByRole("row")).toHaveLength(2);
+      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 1 人");
+      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
+        "今日已触达 1 人",
+      );
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+      fireEvent.click(screen.getByRole("button", { name: "清除接触状态筛选" }));
+      expect(screen.getAllByRole("row")).toHaveLength(5);
+      fireEvent.click(screen.getByRole("button", { name: "筛选接触状态" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "筛选接触状态" })).getByRole(
+          "button",
+          { name: /^--/ },
+        ),
+      );
+      expect(screen.getAllByRole("row")).toHaveLength(3);
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 2 人");
+      if (view === "customer") {
+        fireEvent.click(screen.getByRole("button", { name: "筛选重点标签" }));
+        fireEvent.click(
+          within(
+            screen.getByRole("dialog", { name: "筛选重点标签" }),
+          ).getByRole("button", { name: /^行长指派/ }),
+        );
+        expect(screen.getAllByRole("row")).toHaveLength(2);
+        expect(screen.getByText("状态客户2")).toBeInTheDocument();
+        fireEvent.click(
+          screen.getByRole("button", { name: /筛选接触状态，当前/ }),
+        );
+        const choices = screen.getByRole("dialog", { name: "筛选接触状态" });
+        expect(
+          within(choices).getByRole("button", { name: /^全部状态/ }),
+        ).toHaveTextContent("2");
+        expect(
+          within(choices).getByRole("button", { name: /^已接触/ }),
+        ).toHaveTextContent("0");
+      }
+    },
+  );
+
+  it("接触状态筛选无结果时展示筛选空态，切换视角仍保留筛选", () => {
+    state.customers = state.customers.map((customer) => ({
+      ...customer,
+      touched: 0,
+      groupFields: [],
+    }));
+    render(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "筛选接触状态" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "筛选接触状态" })).getByRole(
+        "button",
+        { name: /^已接触/ },
+      ),
+    );
+    expect(screen.getByText("暂无符合条件的客户")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+    expect(
+      screen.getByRole("button", { name: "筛选接触状态，当前：已接触" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("暂无符合条件的客户")).toBeInTheDocument();
+  });
+
   it.each(["today", "pending", "done"] as const)(
     "%s 的经营场景默认两项，支持展开收起与查看完整名称",
     async (page) => {
@@ -141,6 +261,7 @@ describe("经营分类独立表格", () => {
       "经营机会",
       "客户指标",
       "经营方案",
+      "接触状态",
       "执行",
     ]);
     const rows = within(table).getAllByRole("row");
@@ -156,8 +277,70 @@ describe("经营分类独立表格", () => {
     );
     expect(
       screen.getByText("暂无符合条件的客户").closest("td"),
-    ).toHaveAttribute("colspan", "7");
+    ).toHaveAttribute("colspan", "8");
   });
+
+  it.each(["business", "customer"] as const)(
+    "今日任务 %s 按 touched 展示接触状态并统计待处理人数",
+    (view) => {
+      const statuses = [0, 1, 3, 2, -1, null, undefined];
+      const template = state.customers[0];
+      state.customers = statuses.map((touched, index) => ({
+        ...template,
+        id: `cust-${index}`,
+        touched,
+        // 故意与 touched 相反，验证展示和今日统计以接口原值为准。
+        done: touched !== 1,
+        groupFields: [],
+      }));
+      const { rerender } = render(
+        <MemoryRouter>
+          <Tasks page="today" />
+        </MemoryRouter>,
+      );
+      if (view === "customer") {
+        fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+      }
+      const headers = screen.getAllByRole("columnheader");
+      const statusColumn = headers.findIndex(
+        (th) => th.textContent === "接触状态",
+      );
+      expect(statusColumn).toBeGreaterThan(-1);
+      const cells = screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[statusColumn]);
+      expect(cells.map((cell) => cell.textContent)).toEqual([
+        "未接触",
+        "已接触",
+        "--",
+        "--",
+        "--",
+        "--",
+        "--",
+      ]);
+      cells.forEach((cell, index) => {
+        expect(cell.firstElementChild).toHaveClass(
+          index === 1 ? styles.green : styles.emptyTag,
+        );
+      });
+      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 7 人");
+      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
+        "今日已触达 1 人",
+      );
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 6 人");
+      state.customers = [];
+      rerender(
+        <MemoryRouter>
+          <Tasks page="today" />
+        </MemoryRouter>,
+      );
+      expect(screen.getByRole("cell")).toHaveAttribute(
+        "colspan",
+        String(headers.length),
+      );
+    },
+  );
 
   it.each(["pending", "done"] as const)(
     "%s 在标签之后展示接口技能名称，并保持空态列数一致",
