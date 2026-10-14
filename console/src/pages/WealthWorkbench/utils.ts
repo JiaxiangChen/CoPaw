@@ -176,6 +176,7 @@ export function planScheduledOn(p: Plan, day: string): boolean {
 
 /** 今日任务树节点：一个排程到当天的场景条目 */
 export interface TaskTreeNode {
+  schedule: CronParts;
   sceneId: string;
   sceneName: string;
   /** 来源规划名（hover 提示用） */
@@ -210,6 +211,7 @@ export function buildTaskTree(plans: Plan[], day: string): TaskTreeGroup[] {
         groups.push(group);
       }
       group.nodes.push({
+        schedule: item.schedule,
         sceneId: item.id,
         sceneName: item.sceneName,
         planName: p.name,

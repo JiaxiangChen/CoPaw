@@ -903,11 +903,26 @@ def test_scene_skills_allows_empty_category(client: TestClient) -> None:
 
 
 def test_name_list_allows_empty_skill_id(client: TestClient) -> None:
-    """skill_id 为空表示客户视角（该经理名下全部技能客户），参数合法。"""
-    resp = client.get("/api/wealth/name-list?sap_id=10086")
+    """数组含空条目时忽略空值，查询仍限定在有效技能内。"""
+    resp = client.get(
+        "/api/wealth/name-list?sap_id=10086&skill_id=&skill_id=skill-a",
+    )
 
     assert resp.status_code == 200
-    assert resp.json() == {"items": [], "skillFieldList": [], "allFields": []}
+    assert resp.json() == {
+        "items": [],
+        "skillFieldList": [],
+        "allFields": [],
+        "targetCusCount": None,
+        "todayTouchCount": None,
+        "sevenDayTouchCount": None,
+        "unTouchedCount": None,
+    }
+
+
+def test_name_list_requires_skill_ids(client: TestClient) -> None:
+    assert client.get("/api/wealth/name-list?sap_id=10086").status_code == 422
+    assert client.get("/api/wealth/name-list?skill_id=").status_code == 400
 
 
 def test_name_list_empty_when_external_absent(client: TestClient) -> None:
@@ -915,7 +930,15 @@ def test_name_list_empty_when_external_absent(client: TestClient) -> None:
     resp = client.get("/api/wealth/name-list?skill_id=loan_verify")
 
     assert resp.status_code == 200
-    assert resp.json() == {"items": [], "skillFieldList": [], "allFields": []}
+    assert resp.json() == {
+        "items": [],
+        "skillFieldList": [],
+        "allFields": [],
+        "targetCusCount": None,
+        "todayTouchCount": None,
+        "sevenDayTouchCount": None,
+        "unTouchedCount": None,
+    }
 
 
 def test_name_list_allows_empty_sap_id(client: TestClient) -> None:
@@ -923,16 +946,24 @@ def test_name_list_allows_empty_sap_id(client: TestClient) -> None:
     resp = client.get("/api/wealth/name-list?skill_id=loan_verify&sap_id=")
 
     assert resp.status_code == 200
-    assert resp.json() == {"items": [], "skillFieldList": [], "allFields": []}
+    assert resp.json() == {
+        "items": [],
+        "skillFieldList": [],
+        "allFields": [],
+        "targetCusCount": None,
+        "todayTouchCount": None,
+        "sevenDayTouchCount": None,
+        "unTouchedCount": None,
+    }
 
 
 def test_name_list_rejects_invalid_touched(client: TestClient) -> None:
     """touched 仅接受 0 未触达 / 1 已触达 / 2 全部。"""
-    resp = client.get("/api/wealth/name-list?touched=3")
+    resp = client.get("/api/wealth/name-list?skill_id=skill-a&touched=3")
 
     assert resp.status_code == 400
 
-    ok = client.get("/api/wealth/name-list?touched=2")
+    ok = client.get("/api/wealth/name-list?skill_id=skill-a&touched=2")
     assert ok.status_code == 200
 
 
@@ -985,6 +1016,10 @@ def test_name_list_forwards_touch_filter_context(
                         },
                     ],
                     "allFields": [{"filedName": "age", "filedNameCn": "年龄"}],
+                    "targetCusCount": 100,
+                    "todayTouchCount": 0,
+                    "sevenDayTouchCount": 25,
+                    "unTouchedCount": 80,
                 },
             }
 
@@ -1013,7 +1048,8 @@ def test_name_list_forwards_touch_filter_context(
     monkeypatch.setattr(wealth_router.httpx, "AsyncClient", FakeClient)
 
     resp = client.get(
-        "/api/wealth/name-list?skill_id=SKILL0001&sap_id=80280256&touched=0",
+        "/api/wealth/name-list?skill_id=SKILL0001"
+        "&skill_id=SKILL0002&skill_id=SKILL0001&sap_id=80280256&touched=0",
         headers={
             **VIEWER,
             "X-Bbk-Id": "755",
@@ -1030,12 +1066,19 @@ def test_name_list_forwards_touch_filter_context(
         "platformSource": "WP",
         "pageSource": "WP_AGENT_WORKSPACE_TASK_LIST",
         "touched": 0,
-        "skillId": "SKILL0001",
+        "skillId": ["SKILL0001", "SKILL0002"],
         "sapId": "80280256",
         "subBbkId": "755480",
         "posId": "RB0101",
     }
     assert captured["headers"] == {"Cookie": "session=active"}
+    for key, count in {
+        "targetCusCount": 100,
+        "todayTouchCount": 0,
+        "sevenDayTouchCount": 25,
+        "unTouchedCount": 80,
+    }.items():
+        assert resp.json()[key] == count
     assert resp.json()["items"] == [
         {
             "custUid": "PNCIF6571543777",

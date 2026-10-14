@@ -282,22 +282,22 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富任务名单动态字段
 
-- 侧栏“今日任务”红色数字角标与客户视角口径一致：`fetchTodayCustomers(..., "customer")` 查询 `/wealth/name-list`，传当前用户 sapId 与 touched=2、不带 skillId，统计聚合名单总人数（包含已接触客户），为 0 时隐藏。store 独立保存 `todayCustomerCount`，避免经营视角按技能查询的重复客户影响总数；侧栏首次加载及今日名单刷新时更新。待触达和已完成角标分别来自对应客户名单长度。入口为 `components/Sidebar.tsx` 和 `store.ts`，回归入口为 `components/Sidebar.test.tsx` 和 `store.test.ts`。
+- 侧栏“今日任务”红色数字角标与客户视角口径一致：`fetchTodayCustomers(..., "customer")` 查询 `/wealth/name-list`，传当前用户 sapId、当天工作任务树全部去重技能 ID 数组与 touched=2，统计该范围内聚合名单总人数（包含已接触客户），为 0 时隐藏。store 独立保存 `todayCustomerCount`，避免经营视角按技能查询影响总数；侧栏首次加载及今日名单刷新时更新。待触达和已完成角标分别来自对应客户名单长度。入口为 `components/Sidebar.tsx` 和 `store.ts`，回归入口为 `components/Sidebar.test.tsx` 和 `store.test.ts`。
 
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
 - 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 待处理”，按各自当前筛选名单计算；已完成页不再展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。待触达和已完成沿用名单映射的 `done` 判断，正常已完成名单待处理为 0。“今日已触达”文案沿用三页统一表达，不新增完成日期过滤。
 - 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `GET /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。
-- 今日任务、待触达和已完成分别查询客户名单：今日任务传 `touched=2`，待触达通过 `fetchPendingCustomers` 传 `touched=0`，已完成通过 `fetchDoneCustomers` 传 `touched=1`。待触达/已完成都传 `sap_id`、不传 `skill_id`，直接使用各自接口返回的名单，不再查询全部后做临时前端过滤；列表与侧栏角标使用对应名单。回归入口为 `api.test.ts` 和 `store.test.ts`。
+- 今日任务、待触达和已完成分别查询客户名单，均传 `sap_id` 与 `skill_id` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端 GET 使用重复查询键 `skill_id=a&skill_id=b`，后端转发为外部 JSON 的 `skillId: ["a", "b"]`；缺少技能参数返回 422，仅空值返回 400，防止查询范围扩大。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。
 - 只有今日任务经营视角使用 `groupField`。组合值完全一致才合并，空数组不分组；把客户姓名配置为分组字段可能导致每人一组。每个分类对应独立表格，分类标题、人数和折叠按钮放在表格上方；多个字段以 ` / ` 分隔。
 - `touched=1` 标记客户已触达；客户字段缺失不展示、返回空值显示“未提供”、数值 `0` 正常展示。
-- 今日任务的经营/客户双视角在经营方案与执行之间展示“接触状态”：保留接口原始 `Customer.touched`，`0` 显示灰色“未接触”，`1` 显示绿色“已接触”，其余或缺失显示灰色 `--`。今日已触达仅统计 `touched === 1`，待处理为当前筛选名单总数减已接触人数（包含未知状态）；不要由 `done` 布尔值反推 `0`。今日任务表格使用固定 135px 状态列，最小宽度同步增加，指标空间和执行列保持可用；回归入口为 `api.test.ts`、`Tasks/groupTables.test.tsx`。
-- 接触状态表头通过 `Tasks/ContactStatusFilter.tsx` 单选筛选“全部 / 未接触 / 已接触 / --”，复用重点标签浮层和已选条件的样式，支持一键清除、方向键、Escape、外部点击及滚动/缩放关闭。选项人数基于其他筛选条件下的名单（排除接触状态自身），筛选与经营任务/重点标签叠加，目标客户、今日已触达、待处理和分类人数同步更新。状态列为 135px 以容纳筛选图标，表格最小宽度同步增加。回归入口增加 `Tasks/ContactStatusFilter.test.tsx`。
+- 今日任务的经营/客户双视角在经营方案与执行之间展示“接触状态”：保留接口原始 `Customer.touched`，`0` 显示灰色“未接触”，`1` 显示绿色“已接触”，其余或缺失显示灰色 `--`。顶部汇总使用后端独立计数字段，不按明细 `touched` 或 `done` 计算；不要由 `done` 布尔值反推接触状态 `0`。今日任务表格使用固定 135px 状态列，最小宽度同步增加，指标空间和执行列保持可用；回归入口为 `api.test.ts`、`Tasks/groupTables.test.tsx`。
+- 接触状态表头通过 `Tasks/ContactStatusFilter.tsx` 单选筛选“全部 / 未接触 / 已接触 / --”，复用重点标签浮层和已选条件的样式，支持一键清除、方向键、Escape、外部点击及滚动/缩放关闭。选项人数基于其他筛选条件下的名单（排除接触状态自身），筛选与经营任务/重点标签叠加，表格和分类人数同步更新，顶部四项后端汇总保持不变。状态列为 135px 以容纳筛选图标，表格最小宽度同步增加。回归入口增加 `Tasks/ContactStatusFilter.test.tsx`。
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
-- 视角切换时统计数量先增后减，先查 `Tasks/index.tsx` 是否把旧经营名单直接用于客户视角：经营名单按技能与客户组合去重，客户名单由接口聚合，计数口径不同。名单查询在绘制前进入加载状态；加载时保留缓存，但不渲染旧名单，三个汇总及总记录数显示 `--`。使用延迟接口响应验证首个客户视角绘制帧，不能只检查请求完成后的数量。
+- 视角切换时统计数量先增后减，先查 `Tasks/index.tsx` 是否把旧经营名单直接用于客户视角：经营名单按技能与客户组合去重，客户名单由接口聚合，计数口径不同。名单查询在绘制前进入加载状态；加载时保留缓存，但不渲染旧名单，四个汇总及总记录数显示 `--`。使用延迟接口响应验证首个客户视角绘制帧，不能只检查请求完成后的数量。
 - 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：客户姓名 150px、重点标签 135px、经营场景 180px、触达方式 150px、完成时间 190px、经营结果 160px，固定列合计 965px，表格最小宽度 1485px（视口不超过 1600px 时为 1321px），为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
 - 客户视角、待触达和已完成表格的重点标签溢出时，检查 `index.module.less` 的 `.customerTable.metricsTable.sceneTable`：标签列固定 135px，多标签内容限定在单元格内换行。经营场景列 160px，由 `components/CustomerScenes.tsx` 每行展示一个背景项，超宽省略并支持悬停或键盘聚焦查看全名；默认两项，更多通过“展开剩余 X 项”查看。经营机会列 240px，预览最多三行并通过悬停或键盘聚焦查看完整内容。今日任务客户视角的经营方案列固定 135px。新增或加宽列时同步调整表格最小宽度，保留其他列空间并使用表格内部滚动。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
@@ -324,3 +324,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 ## 财富任务列表后台刷新显示
 
 - 浏览器标签页切回引发的自动刷新由 `taskListsRefreshing` 标记。任务页在此期间保留现有名单、分类和统计，不清空为加载占位；最新名单返回后更新。首次进入页面、切换任务视角和手动刷新仍使用原加载提示。入口为 `Tasks/index.tsx`，回归入口为 `Tasks/loading.test.tsx`，覆盖今日任务、待触达和已完成三页。
+
+工作台任务页顶部汇总随客户名单响应读取 `targetCusCount`、`todayTouchCount`、`sevenDayTouchCount`、`unTouchedCount`（外部响应 `data` 下，由代理透传到响应顶层）。今日任务经营视角使用所选当天技能的统计，其余视角/模块使用当天全部技能；搜索、标签和接触状态筛选只过滤表格，不重算后端汇总。各模块独立保存名单及统计并同步更新；首次加载显示 `--`，后台刷新保留旧值，缺失统计显示 `--`，当天无场景时显示 0 且不查询名单。列表分页条数仍按当前筛选结果展示。
+
+今日任务经营视角原始客户名单为空且查询完成时，在当前任务标题旁展示执行时间；使用 `plans.items[].scenes[].cron_expr` 经 `mapSceneItem` 解析的排程，由任务树节点透传 `schedule` 并复用 `scheduleLabel`。日/周排程显示具体时分，小时排程显示“每小时整点”，自定义排程显示原表达式。搜索或接触状态筛选导致的空列表不触发展示；客户视角、待触达、已完成不显示。`plans` 不返回实际执行状态，空名单不能严格证明任务尚未执行。
