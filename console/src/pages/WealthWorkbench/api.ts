@@ -230,12 +230,14 @@ interface SkillStatsResponse {
  */
 export async function fetchSkillStats(
   queries: SkillStatQuery[],
+  signal?: AbortSignal,
 ): Promise<Record<string, SkillStat> | null> {
   if (!queries.length) return {};
   try {
     const resp = await request<SkillStatsResponse>("/wealth/skill-stats", {
       method: "POST",
       body: JSON.stringify({ skills: queries }),
+      signal,
     });
     // 外部按请求顺序返回且我们入参字段齐全（不会跳项），按下标对齐；
     // skillId 不一致时退化为按 skillId 查找兜底
@@ -433,6 +435,7 @@ export async function fetchTodayCustomers(
         reason,
         category: task.category,
         task: task.sceneName,
+        touched: item.touched,
         done: item.touched === 1,
         channel: item.touchMethod ?? "",
         time: item.strongContactTime ?? "",
@@ -452,23 +455,27 @@ const TOUCHED_PENDING = 0;
 const TOUCHED_DONE = 1;
 const TOUCHED_ALL = 2;
 
-/** 待触达客户名单：客户视角口径（仅 sapId + touched=0） */
+/** 待触达名单：临时查询 sapId + touched=2，再仅保留 touched=0 的客户。 */
 export async function fetchPendingCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
 ): Promise<Customer[]> {
-  return fetchCustomerViewCustomers(tasks, sapId, { touched: TOUCHED_PENDING });
+  const customers = await fetchCustomerViewCustomers(tasks, sapId, {
+    touched: TOUCHED_ALL,
+  });
+  return customers.filter((customer) => customer.touched === TOUCHED_PENDING);
 }
 
-/** 已完成名单：客户视角口径（仅 sapId + touched=1），名单内客户均为已触达。 */
+/** 已完成名单：临时查询 sapId + touched=2，再仅保留 touched=1 的客户。 */
 export async function fetchDoneCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
 ): Promise<Customer[]> {
-  return fetchCustomerViewCustomers(tasks, sapId, {
-    touched: TOUCHED_DONE,
+  const customers = await fetchCustomerViewCustomers(tasks, sapId, {
+    touched: TOUCHED_ALL,
     done: true,
   });
+  return customers.filter((customer) => customer.touched === TOUCHED_DONE);
 }
 
 /**
@@ -512,6 +519,7 @@ async function fetchCustomerViewCustomers(
       task: opts.done
         ? skillNames.join("、")
         : scenes.map((t) => t.sceneName).join("、"),
+      touched: item.touched,
       done: item.touched == null ? opts.done ?? false : item.touched === 1,
       channel: item.touchMethod ?? "",
       time: item.strongContactTime ?? "",
@@ -671,25 +679,32 @@ function buildScenePayload(item: PlanItem): PlanScenePayload {
   };
 }
 
-async function fetchPlans(): Promise<Plan[]> {
-  const resp = await request<PlanListResponse>("/wealth/plans");
+async function fetchPlans(signal?: AbortSignal): Promise<Plan[]> {
+  const resp = await request<PlanListResponse>(
+    "/wealth/plans",
+    signal ? { signal } : undefined,
+  );
   return resp.items.map(mapPlan);
 }
 
 /** 轮询场景的接口告警只打一次，恢复后重置 */
 let planListErrorWarned = false;
 
-/** 看板轮询用：拉取最新规划列表，接口不可达时返回空（read 路径容忍，绝不回退假数据） */
-export async function fetchPlanList(): Promise<Plan[]> {
+/** 默认容错读取返回空；严格刷新上抛错误，由调用方保留已有规划并提示。 */
+export async function fetchPlanList(
+  throwOnError = false,
+  signal?: AbortSignal,
+): Promise<Plan[]> {
   try {
-    const plans = await fetchPlans();
+    const plans = await fetchPlans(signal);
     planListErrorWarned = false;
     return plans;
   } catch (error) {
     if (!planListErrorWarned) {
-      console.warn("[Wealth] 规划接口不可用，返回空列表", error);
+      console.warn("[Wealth] 规划接口不可用", error);
       planListErrorWarned = true;
     }
+    if (throwOnError) throw error;
     return [];
   }
 }

@@ -11,6 +11,7 @@ import cx from "classnames";
 import dayjs from "dayjs";
 import type { CronType } from "@/utils/parseCron";
 import styles from "../index.module.less";
+import { useIframeStore } from "../../../stores/iframeStore";
 import { Icon } from "../components/Icon";
 import { TargetPicker } from "../components/TargetPicker";
 import { TimeField } from "../components/TimeField";
@@ -642,7 +643,15 @@ export default function Create() {
       plans,
       account?.id ?? "unknown",
     );
-    const conflicts = findSceneConflicts(conflictPlans, draft, currentId);
+    const recipients = needsTargets
+      ? targetSapIds
+      : [useIframeStore.getState().userId ?? account.id];
+    const conflicts = findSceneConflicts(
+      conflictPlans,
+      draft,
+      currentId,
+      recipients,
+    );
     openDialog({
       title: currentId ? "保存规划修改" : "发布工作规划",
       body: (

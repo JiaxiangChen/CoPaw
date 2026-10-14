@@ -82,4 +82,9 @@ describe("WealthWorkbench api 错误传播", () => {
 
     await expect(api.fetchPlanList()).resolves.toEqual([]);
   });
+  it("看板严格刷新上抛网络错误，默认读取仍保持容错行为", async () => {
+    mockRequest.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(api.fetchPlanList(true)).rejects.toThrow("Failed to fetch");
+    await expect(api.fetchPlanList()).resolves.toEqual([]);
+  });
 });

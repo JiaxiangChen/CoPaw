@@ -136,6 +136,8 @@ export interface Customer {
   task: string;
   /** 客户名单接口 skillList 返回的去重技能名称 */
   skillNames?: string[];
+  /** 接口原始接触状态：0 未接触、1 已接触，其余或缺失为未知。 */
+  touched?: number | null;
   done: boolean;
   channel: string;
   time: string;

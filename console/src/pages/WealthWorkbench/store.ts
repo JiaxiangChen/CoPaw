@@ -79,12 +79,17 @@ interface WealthState {
   /** 规划基础数据已完成首次加载（失败时也会以空列表完成） */
   plansLoaded: boolean;
   customers: Customer[];
+  /** 今日任务客户视角聚合名单的总人数，独立于当前页面视角。 */
+  todayCustomerCount: number;
   /** 客户名单查询中（今日任务视角切换时重新拉取） */
   customersLoading: boolean;
-  /** 待触达客户名单（/wealth/name-list，touched=0） */
+  /** 最近查询的今日任务视角，用于标签页切回时保持名单口径。 */
+  todayCustomerView: "business" | "customer";
+  taskListsRefreshing: boolean;
+  /** 待触达客户名单（/wealth/name-list 查询 touched=2，前端筛选 touched=0） */
   pendingCustomers: Customer[];
   pendingLoading: boolean;
-  /** 已完成客户名单（/wealth/name-list，touched=1） */
+  /** 已完成客户名单（/wealth/name-list 查询 touched=2，前端筛选 touched=1） */
   doneCustomers: Customer[];
   doneLoading: boolean;
   draft: Draft;
@@ -106,15 +111,17 @@ interface WealthState {
 
   init: () => Promise<void>;
   /** 看板轮询：有规划处于发布中时刷新列表 */
-  refreshPlans: () => Promise<void>;
+  refreshPlans: (throwOnError?: boolean, signal?: AbortSignal) => Promise<void>;
   /**
    * 拉取今日任务的客户经营清单（/wealth/name-list）。
    * 两个视角都传当前登录人 sapId；经营视角（business）另带 skillId 按技能过滤，
    * 客户视角（customer）不带 skillId 一次查全。仅客户经理可访问任务页。
    */
   loadTodayCustomers: (view: "business" | "customer") => Promise<void>;
+  loadTodayCustomerCount: () => Promise<void>;
   refreshTodayCustomers: (view: "business" | "customer") => Promise<void>;
-  /** 加载待触达客户名单（仅客户经理；touched=0） */
+  refreshTaskLists: () => Promise<void>;
+  /** 加载待触达客户名单（仅客户经理；查询全部后筛选 touched=0） */
   loadPendingCustomers: () => Promise<void>;
   /** 加载已完成客户名单（仅客户经理；touched=1） */
   loadDoneCustomers: () => Promise<void>;
@@ -265,7 +272,10 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   plans: [],
   plansLoaded: false,
   customers: [],
+  todayCustomerCount: 0,
   customersLoading: false,
+  todayCustomerView: "business",
+  taskListsRefreshing: false,
   pendingCustomers: [],
   pendingLoading: false,
   doneCustomers: [],
@@ -297,8 +307,9 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     set({ ...data, plansLoaded: true });
   },
 
-  refreshPlans: async () => {
-    const plans = await api.fetchPlanList();
+  refreshPlans: async (throwOnError = false, signal) => {
+    const plans = await api.fetchPlanList(throwOnError, signal);
+    signal?.throwIfAborted();
     set({ plans });
   },
 
@@ -321,18 +332,60 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     }
   },
 
+  refreshTaskLists: async () => {
+    const state = get();
+    if (
+      !state.initialized ||
+      !state.plansLoaded ||
+      !canAccessPage(state.accountId, "tasks") ||
+      state.taskListsRefreshing
+    )
+      return;
+    set({ taskListsRefreshing: true });
+    try {
+      await get().refreshTodayCustomers(state.todayCustomerView);
+      const results = await Promise.allSettled([
+        get().pendingLoading ? Promise.resolve() : get().loadPendingCustomers(),
+        get().doneLoading ? Promise.resolve() : get().loadDoneCustomers(),
+      ]);
+      if (results.some((result) => result.status === "rejected")) {
+        get().toast("任务名单刷新失败，请重试");
+      }
+    } finally {
+      set({ taskListsRefreshing: false });
+    }
+  },
+
   loadTodayCustomers: async (view) => {
     const { accountId, plans } = get();
     // 仅客户经理有任务页；行长/中台不发名单查询
     if (!canAccessPage(accountId, "tasks")) return;
-    set({ customersLoading: true });
+    set({ customersLoading: true, todayCustomerView: view });
+    const sapId = useIframeStore.getState().userId || undefined;
+    const tasks = todayTaskRefs(plans);
+    const [customers, customerViewCustomers] = await Promise.all([
+      api.fetchTodayCustomers(tasks, sapId, view),
+      view === "business"
+        ? api.fetchTodayCustomers(tasks, sapId, "customer")
+        : Promise.resolve(null),
+    ]);
+    set({
+      customers,
+      todayCustomerCount: (customerViewCustomers ?? customers).length,
+      customersLoading: false,
+    });
+  },
+
+  loadTodayCustomerCount: async () => {
+    const { accountId, plans } = get();
+    if (!canAccessPage(accountId, "tasks")) return;
     const sapId = useIframeStore.getState().userId || undefined;
     const customers = await api.fetchTodayCustomers(
       todayTaskRefs(plans),
       sapId,
-      view,
+      "customer",
     );
-    set({ customers, customersLoading: false });
+    set({ todayCustomerCount: customers.length });
   },
 
   loadPendingCustomers: async () => {

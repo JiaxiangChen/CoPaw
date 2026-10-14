@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import cx from "classnames";
-import { DatePicker } from "antd";
+import { DatePicker, Tooltip } from "antd";
+import { RotateCw } from "lucide-react";
 import dayjs from "dayjs";
 import styles from "../index.module.less";
 import { Icon } from "../components/Icon";
@@ -13,7 +14,6 @@ import {
   addCalendarDays,
   calendarDate,
   calendarRange,
-  collectSkillStatQueries,
   cycleRange,
   dateKey,
   planFrequency,
@@ -23,15 +23,14 @@ import {
   todayKey,
 } from "../utils";
 import { selectCurrentAccount, useWealthStore } from "../store";
-import { fetchAvailableSceneCount, fetchSkillStats } from "../api";
-import type { Plan, SkillStat } from "../types";
+import { fetchAvailableSceneCount } from "../api";
+import type { Plan } from "../types";
 import { BOARD_SOURCES_BY_ROLE } from "../permissions";
 import { Calendar } from "./Calendar";
+import { usePlanStats } from "./usePlanStats";
+import { useBoardRefresh } from "./useBoardRefresh";
 
 const PERIODS = ["本季", "本月", "本周", "今日", "T+1日", "自定义"];
-
-/** 发布中轮询间隔（毫秒） */
-const PUBLISH_POLL_INTERVAL = 3000;
 
 /** 状态着色：失败→红；发布中/分发中→蓝；已下发等稳定态→默认 */
 function statusClass(status: string) {
@@ -82,8 +81,8 @@ export default function Board() {
     boardMode === "calendar"
       ? calendarRange(anchor, dimension)
       : period === "自定义"
-        ? customRange
-        : cycleRange(period) ?? [todayKey(), todayKey()];
+      ? customRange
+      : cycleRange(period) ?? [todayKey(), todayKey()];
   const [rangeStart, rangeEnd] = range;
 
   const all = useMemo(
@@ -106,22 +105,27 @@ export default function Board() {
     all.flatMap((p) => p.items?.map((x) => x.id) ?? []),
   ).size;
 
+  const hasActive = plans.some(
+    (p) =>
+      p.publishStatus === "publishing" ||
+      p.status.includes("发布中") ||
+      p.status.includes("分发中"),
+  );
+  const { refreshing, statsRefreshVersion, manualRefresh } = useBoardRefresh(
+    hasActive,
+    refreshPlans,
+  );
+
   // 目标客户 / 已生成任务：按「技能 + 区间」批量查询技能统计接口；
   // 接口不可达时 planStat 返回 null，对应位置保持 "--" 占位
-  const [sceneStats, setSceneStats] = useState<Record<
-    string,
-    SkillStat
-  > | null>(null);
-  const statQueries = useMemo(() => collectSkillStatQueries(all), [all]);
-  useEffect(() => {
-    let alive = true;
-    void fetchSkillStats(statQueries).then((result) => {
-      if (alive) setSceneStats(result);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [statQueries]);
+  const { sceneStats, statsLoading, statsUpdating, statsFailed } = usePlanStats(
+    all,
+    plans,
+    account.id,
+    statsRefreshVersion,
+  );
+
+  const boardRefreshing = refreshing || statsLoading || statsUpdating;
 
   /** 单个规划的统计汇总：各场景目标客户/已生成任务求和 */
   const planStat = (p: Plan): { customers: number; tasks: number } | null => {
@@ -156,19 +160,6 @@ export default function Board() {
     sceneStats == null
       ? null
       : all.reduce((sum, p) => sum + (planStat(p)?.tasks ?? 0), 0);
-
-  // 发布中/分发中的规划都需要轮询，直至发布与分发状态收敛
-  const hasActive = plans.some(
-    (p) =>
-      p.publishStatus === "publishing" ||
-      p.status.includes("发布中") ||
-      p.status.includes("分发中"),
-  );
-  useEffect(() => {
-    if (!hasActive) return;
-    const timer = setInterval(() => void refreshPlans(), PUBLISH_POLL_INTERVAL);
-    return () => clearInterval(timer);
-  }, [hasActive, refreshPlans]);
 
   const onEditPlan = (id: string) => {
     editPlan(id);
@@ -440,7 +431,40 @@ export default function Board() {
       </div>
 
       <section className={`${styles.panel} ${styles.overview}`}>
-        <h2>本期规划概览</h2>
+        <div className={styles.sectionHead}>
+          <h2>本期规划概览</h2>
+          <Tooltip
+            placement="topRight"
+            trigger={["hover", "focus"]}
+            title={boardRefreshing ? "正在刷新看板" : "刷新看板"}
+          >
+            <span>
+              <button
+                type="button"
+                className={styles.taskRefresh}
+                aria-label="刷新看板"
+                disabled={!plansLoaded || boardRefreshing}
+                aria-busy={boardRefreshing}
+                onClick={() => void manualRefresh()}
+              >
+                <RotateCw
+                  size={16}
+                  aria-hidden="true"
+                  className={
+                    boardRefreshing ? styles.taskRefreshBusy : undefined
+                  }
+                />
+              </button>
+            </span>
+          </Tooltip>
+        </div>
+        {statsFailed && (
+          <p className={styles.readonlyHint} role="status">
+            {sceneStats === null
+              ? "客户与任务统计加载失败"
+              : "统计更新失败，暂显示上次数据"}
+          </p>
+        )}
         <div className={styles.stats}>
           {stats.map((s) => (
             <div className={styles.stat} key={s.title}>
@@ -558,11 +582,11 @@ export default function Board() {
                         </span>
                       </div>
                     </div>
-                    <div className={styles.metric}>
+                    <div className={styles.metric} aria-busy={statsLoading}>
                       <small>目标客户</small>
                       <strong>{customersText(p)}</strong>
                     </div>
-                    <div className={styles.metric}>
+                    <div className={styles.metric} aria-busy={statsLoading}>
                       <small>已生成任务</small>
                       <strong>{tasksText(p)}</strong>
                     </div>

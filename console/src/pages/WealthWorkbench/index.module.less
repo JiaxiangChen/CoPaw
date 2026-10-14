@@ -1098,6 +1098,12 @@
     max-height: 264px;
     overflow: auto;
   }
+  .targetList > .empty {
+    grid-column: 1 / -1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow-x: auto;
+  }
   .targetItem {
     display: flex;
     align-items: center;
@@ -3401,6 +3407,12 @@
     width: 520px;
     white-space: normal;
   }
+  .customerTable.metricsTable.todayTaskTable {
+    min-width: 1275px;
+    .contactStatusCol {
+      width: 135px;
+    }
+  }
   .customerTable.metricsTable.sceneTable {
     min-width: 1510px;
     th:nth-child(1),
@@ -3442,21 +3454,43 @@
     &.todayCustomerTable td:nth-child(6) {
       width: 135px;
     }
+    &.todayCustomerTable th:nth-child(2),
+    &.todayCustomerTable td:nth-child(2) {
+      width: 125px;
+    }
+    &.opportunityTable:not(.todayCustomerTable) {
+      min-width: 1565px;
+      .opportunityCol,
+      .reason {
+        width: 260px;
+      }
+      th:nth-child(6),
+      td:nth-child(6) {
+        width: 135px;
+      }
+    }
     &.completedTable {
-      // 固定操作列合计 755px，指标区至少保留 520px（窄屏 356px）。
-      min-width: 1275px;
+      // 固定操作列合计 965px，指标区至少保留 520px（窄屏 356px）。
+      min-width: 1485px;
+      th:first-child,
+      td:first-child {
+        width: 150px;
+      }
+      .sceneCol {
+        width: 180px;
+      }
       .channelCol {
-        width: 100px;
+        width: 150px;
         white-space: normal;
       }
       .executionCol {
-        width: 160px;
+        width: 190px;
         white-space: normal;
         overflow-wrap: anywhere;
       }
       th:last-child,
       td:last-child {
-        width: 100px;
+        width: 160px;
       }
     }
   }
@@ -3467,6 +3501,9 @@
     background: var(--console-management-surface, #fff);
     border-left: 1px solid var(--console-management-border, #e5e7eb);
     z-index: 1;
+  }
+  .customerTable.metricsTable.sceneTable.todayTaskTable {
+    min-width: 1635px;
   }
   .customerTable.metricsTable.opportunityTable th.executionCol {
     background: linear-gradient(100deg, #f0f8ff, #edf6ff);
@@ -3599,11 +3636,22 @@
     .customerTable.metricsTable.sceneTable {
       min-width: 1346px;
     }
+    .customerTable.metricsTable.sceneTable.opportunityTable:not(
+        .todayCustomerTable
+      ) {
+      min-width: 1401px;
+    }
     .customerTable.metricsTable.sceneTable.completedTable {
-      min-width: 1111px;
+      min-width: 1321px;
     }
     .tasksLayout.business .customerTable.metricsTable {
       min-width: 960px;
+    }
+    .customerTable.metricsTable.sceneTable.todayTaskTable {
+      min-width: 1471px;
+    }
+    .tasksLayout.business .customerTable.metricsTable.todayTaskTable {
+      min-width: 1095px;
     }
     .customerTable.metricsTable .metricsCol {
       width: 356px;
