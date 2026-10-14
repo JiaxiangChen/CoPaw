@@ -256,6 +256,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   const pendingLoading = useWealthStore((s) => s.pendingLoading);
   const doneCustomers = useWealthStore((s) => s.doneCustomers);
   const doneLoading = useWealthStore((s) => s.doneLoading);
+  const taskListsRefreshing = useWealthStore((s) => s.taskListsRefreshing);
   const plans = useWealthStore((s) => s.plans);
   const plansLoaded = useWealthStore((s) => s.plansLoaded);
   const refreshTodayCustomers = useWealthStore((s) => s.refreshTodayCustomers);
@@ -315,11 +316,12 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   /** 当前页的名单数据源：今日=customers；待触达/已完成=各自接口名单 */
   const loading =
     !plansLoaded ||
-    (page === "done"
-      ? doneLoading
-      : page === "pending"
-        ? pendingLoading
-        : customersLoading);
+    (!taskListsRefreshing &&
+      (page === "done"
+        ? doneLoading
+        : page === "pending"
+          ? pendingLoading
+          : customersLoading));
   const pool =
     loading
       ? []

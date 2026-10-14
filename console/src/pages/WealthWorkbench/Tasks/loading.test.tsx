@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   pendingLoading: false,
   doneCustomers: [] as Customer[],
   doneLoading: false,
+  taskListsRefreshing: false,
   plans: [],
   plansLoaded: true,
   refreshTodayCustomers: vi.fn().mockResolvedValue(undefined),
@@ -36,9 +37,73 @@ beforeEach(() => {
   state.customersLoading = false;
   state.pendingLoading = false;
   state.doneLoading = false;
+  state.taskListsRefreshing = false;
 });
 
 describe("今日任务加载", () => {
+  it.each(["today", "pending", "done"] as const)(
+    "%s 标签页后台刷新保留旧名单和统计，不显示加载占位，返回后更新数据",
+    (page) => {
+      const customer: Customer = {
+        id: "cached",
+        custUid: "cached",
+        skillId: "skill",
+        name: "现有客户",
+        label: "",
+        reason: "",
+        category: "",
+        task: "",
+        touched: 0,
+        done: page === "done",
+        channel: "",
+        time: "",
+        note: "",
+      };
+      state.customers = [customer];
+      state.pendingCustomers = [customer];
+      state.doneCustomers = [customer];
+      const { rerender } = render(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      if (page === "today")
+        fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+      state.taskListsRefreshing = true;
+      state.customersLoading = true;
+      state.pendingLoading = true;
+      state.doneLoading = true;
+      rerender(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText("现有客户")).toBeInTheDocument();
+      expect(screen.getByText(/目标客户/).querySelector("b")).toHaveTextContent(
+        "1",
+      );
+      expect(screen.getByText("共 1 条记录")).toBeInTheDocument();
+      expect(screen.queryByText(/客户清单加载中/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      const updated = { ...customer, id: "updated", name: "最新客户" };
+      state.customers = [updated];
+      state.pendingCustomers = [updated];
+      state.doneCustomers = [updated];
+      state.taskListsRefreshing = false;
+      state.customersLoading = false;
+      state.pendingLoading = false;
+      state.doneLoading = false;
+      rerender(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText("最新客户")).toBeInTheDocument();
+      expect(screen.queryByText("现有客户")).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    },
+  );
+
   it.each(["today", "pending", "done"] as const)(
     "%s 加载时不展示缓存的26条统计和名单，返回后展示24条真实数据",
     (page) => {
