@@ -615,10 +615,41 @@ async def test_sync_skill_to_market_db_fails_when_upsert_returns_false():
             skill_id="skill-1",
             imported_name="demo_skill",
             resolved_cn_name="",
+            category_id=None,
+            bbk_ids=None,
             include_in_statistics=False,
             x_user_id="u1",
             user_name="User",
         )
+
+
+@pytest.mark.asyncio
+async def test_sync_skill_to_market_db_persists_category_and_bbk_ids():
+    svc = type("Svc", (), {})()
+    svc.db = type("Db", (), {"is_connected": True})()
+    svc.market_skill_registry = type("Registry", (), {})()
+    svc.market_skill_registry.upsert_market_skill = AsyncMock(
+        return_value=True,
+    )
+
+    await skills_router._sync_skill_to_market_db(
+        svc=svc,
+        source_id="src_a",
+        item_id="item-1",
+        skill_id="skill-1",
+        imported_name="demo_skill",
+        resolved_cn_name="演示技能",
+        category_id=3,
+        bbk_ids=["110"],
+        include_in_statistics=False,
+        x_user_id="u1",
+        user_name="User",
+    )
+
+    svc.market_skill_registry.upsert_market_skill.assert_awaited_once()
+    call = svc.market_skill_registry.upsert_market_skill.await_args.kwargs
+    assert call["category_id"] == 3
+    assert call["bbk_ids"] == ["110"]
 
 
 def test_publish_upload_returns_503_when_database_is_unavailable(tmp_path):
@@ -1070,21 +1101,22 @@ def test_update_statistics_config_non_manager_returns_403(tmp_path):
     assert resp.status_code == 403
 
 
-def test_init_statistics_returns_200(tmp_path):
-    """测试初始化历史数据接口（dry_run 模式）."""
-    app = _make_app(tmp_path)
-    client = TestClient(app)
-    # dry_run 模式会检查数据库连接
-    resp = client.post(
-        "/api/market/admin/skills/init-statistics",
-        json={
-            "source_ids": ["src_a"],
-            "default_include": True,
-            "dry_run": True,
-        },
-    )
-    # 由于 mock 数据库连接，dry_run 模式应该成功
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "processed" in data
-    assert "errors" in data
+# 已由 /api/market/admin/metadata/migrate 替代。
+# def test_init_statistics_returns_200(tmp_path):
+#     """测试初始化历史数据接口（dry_run 模式）."""
+#     app = _make_app(tmp_path)
+#     client = TestClient(app)
+#     # dry_run 模式会检查数据库连接
+#     resp = client.post(
+#         "/api/market/admin/skills/init-statistics",
+#         json={
+#             "source_ids": ["src_a"],
+#             "default_include": True,
+#             "dry_run": True,
+#         },
+#     )
+#     # 由于 mock 数据库连接，dry_run 模式应该成功
+#     assert resp.status_code == 200
+#     data = resp.json()
+#     assert "processed" in data
+#     assert "errors" in data
