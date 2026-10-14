@@ -338,7 +338,10 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
       !state.initialized ||
       !state.plansLoaded ||
       !canAccessPage(state.accountId, "tasks") ||
-      state.taskListsRefreshing
+      state.taskListsRefreshing ||
+      state.customersLoading ||
+      state.pendingLoading ||
+      state.doneLoading
     )
       return;
     set({ taskListsRefreshing: true });

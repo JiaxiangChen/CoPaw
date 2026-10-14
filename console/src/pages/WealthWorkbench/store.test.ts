@@ -729,14 +729,16 @@ describe("WealthWorkbench store", () => {
     expect(done.every((c) => c.done)).toBe(true);
   });
 
-  it("标签页切回刷新三个名单，沿用今日客户视角和登录人", async () => {
+  it("标签页切回直接刷新三个名单，沿用今日客户视角和登录人", async () => {
     useIframeStore.setState({ userId: "10086" });
     await useWealthStore.getState().loadTodayCustomers("customer");
     mockRequest.mockClear();
     await useWealthStore.getState().refreshTaskLists();
     const paths = mockRequest.mock.calls.map(([path]) => String(path));
     expect(paths[0]).toBe("/wealth/plans");
-    const lists = paths.slice(1).map((path) => new URL(path, "http://test"));
+    const lists = paths
+      .filter((path) => path.startsWith("/wealth/name-list"))
+      .map((path) => new URL(path, "http://test"));
     expect(lists).toHaveLength(3);
     expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
       "2",
@@ -751,7 +753,10 @@ describe("WealthWorkbench store", () => {
   });
 
   it("三个名单刷新期间忽略重复请求，完成后可以再次刷新", async () => {
-    useWealthStore.setState({ todayCustomerView: "customer" });
+    useWealthStore.setState({
+      todayCustomerView: "customer",
+      todayCustomerCount: 0,
+    });
     let finishPlans!: (value: unknown) => void;
     mockRequest.mockClear();
     mockRequest.mockImplementationOnce(
@@ -763,11 +768,36 @@ describe("WealthWorkbench store", () => {
     const refresh = useWealthStore.getState().refreshTaskLists();
     await useWealthStore.getState().refreshTaskLists();
     expect(mockRequest).toHaveBeenCalledTimes(1);
-    finishPlans({ items: [] });
+    finishPlans({ items: planViews });
     await refresh;
     expect(mockRequest).toHaveBeenCalledTimes(4);
     await useWealthStore.getState().refreshTaskLists();
     expect(mockRequest).toHaveBeenCalledTimes(8);
+  });
+
+  it("人数相同也刷新客户明细，不再先查询数量", async () => {
+    await useWealthStore.getState().loadTodayCustomers("customer");
+    const originalCount = useWealthStore.getState().todayCustomerCount;
+    const updated = NAME_LIST_FIXTURE.map((item, index) => ({
+      ...item,
+      custNm: `最新客户${index}`,
+      touched: index,
+    }));
+    mockRequest.mockClear();
+    mockRequest.mockResolvedValueOnce({ items: planViews });
+    mockRequest.mockResolvedValueOnce({ items: updated });
+    mockRequest.mockResolvedValueOnce({ items: updated });
+    mockRequest.mockResolvedValueOnce({ items: updated });
+    await useWealthStore.getState().refreshTaskLists();
+    expect(mockRequest).toHaveBeenCalledTimes(4);
+    expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");
+    expect(useWealthStore.getState().todayCustomerCount).toBe(originalCount);
+    expect(useWealthStore.getState().customers[0].name).toBe("最新客户0");
+    expect(useWealthStore.getState().pendingCustomers[0].name).toBe(
+      "最新客户0",
+    );
+    expect(useWealthStore.getState().doneCustomers[0].name).toBe("最新客户1");
+    expect(useWealthStore.getState().taskListsRefreshing).toBe(false);
   });
 
   it.each([
@@ -775,6 +805,9 @@ describe("WealthWorkbench store", () => {
     { plansLoaded: false },
     { accountId: "president" as const },
     { accountId: "unknown" as const },
+    { customersLoading: true },
+    { pendingLoading: true },
+    { doneLoading: true },
   ])("身份或初始规划未就绪、无任务权限时不刷新：%j", async (state) => {
     useWealthStore.setState(state);
     mockRequest.mockClear();

@@ -301,7 +301,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：客户姓名 150px、重点标签 135px、经营场景 180px、触达方式 150px、完成时间 190px、经营结果 160px，固定列合计 965px，表格最小宽度 1485px（视口不超过 1600px 时为 1321px），为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
 - 客户视角、待触达和已完成表格的重点标签溢出时，检查 `index.module.less` 的 `.customerTable.metricsTable.sceneTable`：标签列固定 135px，多标签内容限定在单元格内换行。经营场景列 160px，由 `components/CustomerScenes.tsx` 每行展示一个背景项，超宽省略并支持悬停或键盘聚焦查看全名；默认两项，更多通过“展开剩余 X 项”查看。经营机会列 240px，预览最多三行并通过悬停或键盘聚焦查看完整内容。今日任务客户视角的经营方案列固定 135px。新增或加宽列时同步调整表格最小宽度，保留其他列空间并使用表格内部滚动。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
-- 浏览器标签页从隐藏切回可见时，工作台入口的 `useVisibilityRefresh` 调用 `refreshTaskLists`，更新今日任务（保持最近查询视角）、待触达和已完成名单及侧栏数量；仅客户经理且初始化/规划加载完成后生效，刷新期间忽略重复切回请求，已有名单请求进行中时不重复发起。iframe 内同样适用；宿主内部业务页签仅通过 CSS 隐藏 iframe 时不会触发该事件。回归入口：`useVisibilityRefresh.test.tsx` 和 `store.test.ts`。
+- 浏览器标签页从隐藏切回可见时，工作台入口的 `useVisibilityRefresh` 调用 `refreshTaskLists`，每次直接后台更新今日任务（保持最近查询视角）、待触达和已完成名单及侧栏数量，不再先查询或比较客户数量；人数相同但客户或明细变化时也会同步。刷新期间保留当前名单和统计，不展示列表加载占位。仅客户经理且初始化/规划加载完成后生效，刷新期间忽略重复切回请求，已有名单请求进行中时不重复发起。iframe 内同样适用；宿主内部业务页签仅通过 CSS 隐藏 iframe 时不会触发该事件。回归入口：`useVisibilityRefresh.test.tsx`、`store.test.ts` 和 `Tasks/loading.test.tsx`。
 
 ### 财富规划分发目标
 
@@ -320,3 +320,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 级联查询失败时显示重试，不当作末级；切换上级清空当前候选人员并使旧请求失效，但保留跨支行累计的人员选择。子支行按需加载并缓存，搜索范围仅包含已经加载的机构。
 - 业务例外：`mOrgCode=121516` 在任意层级直接视为末级，跳过下级支行查询，用该条目的 `mOrgCode/mOrgLvl` 查询人员。
 - 修改规划的人员回显：`api.ts::mapPlan` 保留计划返回的 `targets.sap_id/name`；`store.ts::editPlan` 恢复 ID 与姓名缓存，并重置当前支行候选状态。后续人员加载保留编辑计划的历史目标信息；历史目标无姓名时回显 ID。计划未保存机构路径，修改页的级联路径需重新选择，但已选人员无需重新勾选。
+
+## 财富任务列表后台刷新显示
+
+- 浏览器标签页切回引发的自动刷新由 `taskListsRefreshing` 标记。任务页在此期间保留现有名单、分类和统计，不清空为加载占位；最新名单返回后更新。首次进入页面、切换任务视角和手动刷新仍使用原加载提示。入口为 `Tasks/index.tsx`，回归入口为 `Tasks/loading.test.tsx`，覆盖今日任务、待触达和已完成三页。
