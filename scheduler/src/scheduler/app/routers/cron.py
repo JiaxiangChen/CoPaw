@@ -75,16 +75,8 @@ async def record_dispatch_execution(
         return RecordExecutionResponse(recorded=False, execution_id=None)
 
     try:
-        intent_id, batch_id, dispatch_attempt = dispatch_identity
-        execution_id = await sync_service.find_execution_by_dispatch_identity(
-            intent_id=intent_id,
-            batch_id=batch_id,
-            dispatch_attempt=dispatch_attempt,
-        )
         accepted = await scheduling_service.handle_execution_recorded(
-            execution_id=(
-                int(execution_id) if execution_id is not None else None
-            ),
+            execution_id=None,
             status=request.status,
             meta=request.meta,
             job_id=request.job_id,
@@ -97,8 +89,7 @@ async def record_dispatch_execution(
             raise RuntimeError(
                 "dispatch intent was not updated from scheduler feedback",
             )
-        if execution_id is None:
-            execution_id = await sync_service.record_execution(request)
+        execution_id = await sync_service.record_dispatch_execution(request)
         return RecordExecutionResponse(
             recorded=True,
             execution_id=execution_id,

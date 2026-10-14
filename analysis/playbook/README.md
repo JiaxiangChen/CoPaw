@@ -8,6 +8,7 @@
 |------|------|
 | [agent-config-read-consistency.md](agent-config-read-consistency.md) | agent 控制面读写一致性边界、排查入口和与 console agent switching 的职责分界 |
 | [common-errors.md](common-errors.md) | 常见报错模式、典型触发点和第一落点 |
+| [cron-execution-final-marker.md](cron-execution-final-marker.md) | 执行记录最终标记、历史兼容、重试替换与 MySQL 验证入口 |
 | [external-job-list.md](external-job-list.md) | 外部 jobs 列表的无初始化接口、原接口契约及任务绑定的只读边界 |
 | [location-paths.md](location-paths.md) | 按问题类型给出代码、配置与命令入口，包含财富任务动态指标与经营分组 |
 | [log-entrypoints.md](log-entrypoints.md) | 运行日志、daemon logs、query error dump、Tracing 的实际入口 |

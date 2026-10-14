@@ -546,7 +546,7 @@ async def test_repeated_receipt_does_not_reset_current_attempt(
 async def test_rejected_receipt_cannot_seed_execution_for_later_scan():
     sync = MagicMock()
     sync.find_execution_by_dispatch_identity = AsyncMock(return_value=None)
-    sync.record_execution = AsyncMock(return_value=42)
+    sync.record_dispatch_execution = AsyncMock(return_value=42)
     service = MagicMock()
     service.handle_execution_recorded = AsyncMock(return_value=False)
     request = ExecutionSyncRequest(
@@ -565,7 +565,7 @@ async def test_rejected_receipt_cannot_seed_execution_for_later_scan():
             scheduling_service=service,
         )
 
-    sync.record_execution.assert_not_awaited()
+    sync.record_dispatch_execution.assert_not_awaited()
 
 
 @pytest.mark.asyncio

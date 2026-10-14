@@ -90,14 +90,14 @@ def test_latest_capacity_is_scope_level_not_worker_level() -> None:
 
 
 def test_record_execution_uses_insert_cursor_lastrowid() -> None:
-    source = inspect.getsource(ExecutionSyncService.record_execution)
+    source = inspect.getsource(ExecutionSyncService._insert_execution)
 
     assert "lastrowid" in source
     assert "LAST_INSERT_ID" not in source
 
 
 def test_record_execution_persists_dispatch_identity_columns() -> None:
-    source = inspect.getsource(ExecutionSyncService.record_execution)
+    source = inspect.getsource(ExecutionSyncService._insert_execution)
 
     assert "dispatch_intent_id" in source
     assert "dispatch_batch_id" in source
@@ -742,7 +742,7 @@ async def test_sync_execution_with_dispatch_meta_is_durable() -> None:
     """Scheduler dispatch execution sync should await DB write and intent update."""
     sync_service = MagicMock()
     sync_service.find_execution_by_dispatch_identity = AsyncMock(return_value=None)
-    sync_service.record_execution = AsyncMock(return_value=42)
+    sync_service.record_dispatch_execution = AsyncMock(return_value=42)
     scheduling_service = MagicMock()
     scheduling_service.handle_execution_recorded = AsyncMock(return_value=True)
     request = ExecutionSyncRequest(
@@ -773,12 +773,8 @@ async def test_sync_execution_with_dispatch_meta_is_durable() -> None:
 
     assert response.recorded is True
     assert response.execution_id == 42
-    sync_service.find_execution_by_dispatch_identity.assert_awaited_once_with(
-        intent_id=7,
-        batch_id="batch-1",
-        dispatch_attempt=1,
-    )
-    sync_service.record_execution.assert_awaited_once_with(request)
+    sync_service.find_execution_by_dispatch_identity.assert_not_awaited()
+    sync_service.record_dispatch_execution.assert_awaited_once_with(request)
     scheduling_service.handle_execution_recorded.assert_awaited_once()
 
 
@@ -787,7 +783,7 @@ async def test_sync_execution_without_dispatch_meta_is_ignored_not_400() -> None
     """Scheduler execution endpoint is open to non-dispatch calls but ignores them."""
     sync_service = MagicMock()
     sync_service.find_execution_by_dispatch_identity = AsyncMock()
-    sync_service.record_execution = AsyncMock()
+    sync_service.record_dispatch_execution = AsyncMock()
     scheduling_service = MagicMock()
     scheduling_service.handle_execution_recorded = AsyncMock()
     request = ExecutionSyncRequest(
@@ -809,7 +805,7 @@ async def test_sync_execution_without_dispatch_meta_is_ignored_not_400() -> None
     assert response.recorded is False
     assert response.execution_id is None
     sync_service.find_execution_by_dispatch_identity.assert_not_awaited()
-    sync_service.record_execution.assert_not_awaited()
+    sync_service.record_dispatch_execution.assert_not_awaited()
     scheduling_service.handle_execution_recorded.assert_not_awaited()
 
 
@@ -819,7 +815,7 @@ async def test_sync_execution_with_dispatch_meta_reuses_existing_execution(
     """Scheduler feedback retry must not duplicate execution rows."""
     sync_service = MagicMock()
     sync_service.find_execution_by_dispatch_identity = AsyncMock(return_value=42)
-    sync_service.record_execution = AsyncMock()
+    sync_service.record_dispatch_execution = AsyncMock(return_value=42)
     scheduling_service = MagicMock()
     scheduling_service.handle_execution_recorded = AsyncMock(return_value=True)
     request = ExecutionSyncRequest(
@@ -848,7 +844,8 @@ async def test_sync_execution_with_dispatch_meta_reuses_existing_execution(
 
     assert response.recorded is True
     assert response.execution_id == 42
-    sync_service.record_execution.assert_not_awaited()
+    sync_service.record_dispatch_execution.assert_awaited_once_with(request)
+    sync_service.find_execution_by_dispatch_identity.assert_not_awaited()
     scheduling_service.handle_execution_recorded.assert_awaited_once()
 
 
@@ -858,7 +855,7 @@ async def test_dispatch_execution_sync_fails_when_intent_update_fails(
     """Dispatch-meta execution sync success requires the intent update too."""
     sync_service = MagicMock()
     sync_service.find_execution_by_dispatch_identity = AsyncMock(return_value=None)
-    sync_service.record_execution = AsyncMock(return_value=42)
+    sync_service.record_dispatch_execution = AsyncMock(return_value=42)
     scheduling_service = MagicMock()
     scheduling_service.handle_execution_recorded = AsyncMock(return_value=False)
     request = ExecutionSyncRequest(
