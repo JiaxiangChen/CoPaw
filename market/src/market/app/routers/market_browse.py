@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import logging
 from typing import Literal, Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
@@ -14,13 +16,40 @@ from ...marketplace.browse import (
     is_orphaned_item,
 )
 from ...marketplace.schemas import (
+    MarketMCPItem,
     MarketBrowseBranch,
     MarketBrowseCategory,
     MarketBrowseResponse,
+    MarketSkillResponse,
 )
 from ..deps import require_source_id
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_BROWSE_STATS_CHUNK_SIZE = 500
+
+_BROWSE_SKILL_STATS_SQL = """
+    SELECT
+        skill_name AS item_key,
+        COUNT(*) AS call_count,
+        COUNT(DISTINCT user_id) AS user_count
+    FROM swe_tracing_spans
+    WHERE event_type = 'skill_invocation'
+      AND source_id = %s
+      AND skill_name IN ({placeholders})
+    GROUP BY skill_name
+"""
+
+_BROWSE_MCP_STATS_SQL = """
+    SELECT
+        mcp_server AS item_key,
+        COUNT(*) AS call_count,
+        COUNT(DISTINCT user_id) AS user_count
+    FROM swe_tracing_spans
+    WHERE source_id = %s
+      AND mcp_server IN ({placeholders})
+    GROUP BY mcp_server
+"""
 
 
 async def _load_categories(request: Request, source_id: str) -> list[dict]:
@@ -139,45 +168,144 @@ def _build_category_facets(
     return result
 
 
-async def _load_items(
+def _decode_creator_name(value: str) -> str:
+    if not value:
+        return value
+    try:
+        return unquote(value)
+    except Exception:  # pylint: disable=broad-except
+        return value
+
+
+async def _load_batch_stats(
     request: Request,
     source_id: str,
     resource_type: str,
-    user_bbk_id: str,
-    selected_bbk_id: str | None,
-    selected_category_id: int | None,
-    is_head_office: bool,
-    visible_category_ids: set[int] | None,
-    selected_uncategorized: bool,
-    selected_orphaned: bool,
-    known_category_ids: set[int],
-) -> list[dict]:
-    svc = request.app.state.marketplace
+    items: list,
+) -> dict[str, tuple[int, int]]:
+    keys = _stats_keys(resource_type, items)
+    if not keys:
+        return {}
+    try:
+        return await _fetch_batch_stats(
+            request,
+            source_id,
+            resource_type,
+            keys,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("Failed to load browse stats: %s", exc)
+        return {}
+
+
+async def _fetch_batch_stats(
+    request: Request,
+    source_id: str,
+    resource_type: str,
+    keys: list[str],
+) -> dict[str, tuple[int, int]]:
+    stats: dict[str, tuple[int, int]] = {}
+    for start in range(0, len(keys), _BROWSE_STATS_CHUNK_SIZE):
+        chunk = keys[start : start + _BROWSE_STATS_CHUNK_SIZE]
+        stats.update(
+            await _fetch_batch_stats_chunk(
+                request,
+                source_id,
+                resource_type,
+                chunk,
+            ),
+        )
+    return stats
+
+
+async def _fetch_batch_stats_chunk(
+    request: Request,
+    source_id: str,
+    resource_type: str,
+    keys: list[str],
+) -> dict[str, tuple[int, int]]:
+    placeholders = ", ".join(["%s"] * len(keys))
+    sql_template = (
+        _BROWSE_SKILL_STATS_SQL
+        if resource_type == "skill"
+        else _BROWSE_MCP_STATS_SQL
+    )
+    rows = await request.app.state.marketplace.db.fetch_all(
+        sql_template.format(placeholders=placeholders),
+        (source_id, *keys),
+    )
+    return {
+        str(row.get("item_key") or ""): (
+            int(row.get("call_count", 0)),
+            int(row.get("user_count", 0)),
+        )
+        for row in rows
+        if row.get("item_key")
+    }
+
+
+def _stats_keys(resource_type: str, items: list) -> list[str]:
+    key_attr = "name" if resource_type == "skill" else "client_key"
+    return list(
+        dict.fromkeys(
+            value
+            for item in items
+            if (value := str(getattr(item, key_attr, "") or ""))
+        ),
+    )
+
+
+def _browse_item_dict(
+    item,
+    resource_type: str,
+    stats: dict[str, tuple[int, int]],
+) -> dict:
     if resource_type == "skill":
-        result = await svc.list_skills(
-            source_id,
-            user_bbk_id,
-            category_id=selected_category_id,
-            bbk_ids=[selected_bbk_id] if selected_bbk_id else None,
-            is_manager=is_head_office,
-            visible_category_ids=visible_category_ids,
-            selected_uncategorized=selected_uncategorized,
-            selected_orphaned=selected_orphaned,
-            known_category_ids=known_category_ids,
-        )
-    else:
-        result = await svc.list_mcp_items(
-            source_id,
-            user_bbk_id,
-            category_id=selected_category_id,
-            bbk_ids=[selected_bbk_id] if selected_bbk_id else None,
-            is_manager=is_head_office,
-            visible_category_ids=visible_category_ids,
-            selected_uncategorized=selected_uncategorized,
-            selected_orphaned=selected_orphaned,
-            known_category_ids=known_category_ids,
-        )
-    return [item.model_dump() for item in result]
+        call_count, user_count = stats.get(item.name, (0, 0))
+        return MarketSkillResponse(
+            item_id=item.item_id,
+            name=item.name,
+            skill_id=item.skill_id,
+            chinese_name=item.chinese_name,
+            description=item.description,
+            version=item.version,
+            creator_id=item.creator_id,
+            creator_name=_decode_creator_name(item.creator_name),
+            category_id=item.category_id,
+            bbk_ids=item.bbk_ids,
+            status=item.status,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+            call_count=call_count,
+            user_count=user_count,
+            include_in_statistics=item.include_in_statistics,
+        ).model_dump()
+    call_count, user_count = stats.get(item.client_key, (0, 0))
+    return MarketMCPItem(
+        item_id=item.item_id,
+        client_key=item.client_key,
+        name=item.name,
+        chinese_name=item.chinese_name,
+        description=item.description,
+        guidance=item.guidance,
+        version=item.version,
+        creator_id=item.creator_id,
+        creator_name=_decode_creator_name(item.creator_name),
+        category_id=item.category_id,
+        bbk_ids=item.bbk_ids,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+        call_count=call_count,
+        user_count=user_count,
+    ).model_dump()
+
+
+def _browse_item_dicts(
+    items: list,
+    resource_type: str,
+    stats: dict[str, tuple[int, int]],
+) -> list[dict]:
+    return [_browse_item_dict(item, resource_type, stats) for item in items]
 
 
 @router.get("/market/browse", response_model=MarketBrowseResponse)
@@ -260,9 +388,8 @@ async def browse_market(
         known_category_ids,
         is_head_office,
     )
-    result_items = await _load_items(
-        request,
-        source_id,
+    result_items = filter_market_items(
+        base_items,
         resource_type,
         user_bbk_id,
         bbk_id,
@@ -273,9 +400,15 @@ async def browse_market(
         orphaned,
         known_category_ids,
     )
+    stats = await _load_batch_stats(
+        request,
+        source_id,
+        resource_type,
+        result_items,
+    )
     return MarketBrowseResponse(
         resource_type=resource_type,
-        items=result_items,
+        items=_browse_item_dicts(result_items, resource_type, stats),
         total=len(result_items),
         category_total=len(branch_items),
         branch_total=len(category_items),
