@@ -2601,6 +2601,16 @@
     margin-top: 3px;
     opacity: 0.85;
   }
+  .calendarEventScenes {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.6;
+  }
   .calendarMore {
     border: 0;
     background: transparent;
@@ -3096,6 +3106,21 @@
   .calendarEventTitle strong {
     flex: 1;
     min-width: 0;
+  }
+  .calendarPlanIdentity {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+  .calendarPlanIdentity strong {
+    flex: 0 1 auto;
+  }
+  .calendarSkillCount {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 1.5;
   }
   .calendarFrequency {
     font-size: 10px;
@@ -4019,4 +4044,10 @@
     color: var(--console-management-primary, #3769fc);
     font-size: 12px;
   }
+}
+
+.calendarEventTooltip {
+  max-width: 320px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
