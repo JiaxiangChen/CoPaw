@@ -695,7 +695,7 @@ describe("WealthWorkbench store", () => {
     expect(mockRequest).not.toHaveBeenCalled();
   });
 
-  it("loadPendingCustomers / loadDoneCustomers 查询全部后筛选各自名单", async () => {
+  it("loadPendingCustomers / loadDoneCustomers 按各自触达参数查询名单", async () => {
     useIframeStore.setState({ userId: "10086" });
     useWealthStore.setState({ plans: [makeTodayPlan()] });
     const nameListCalls = () =>
@@ -704,23 +704,18 @@ describe("WealthWorkbench store", () => {
         .map(([p]) => String(p));
 
     mockRequest.mockResolvedValueOnce({
-      items: NAME_LIST_FIXTURE.map((item, index) => ({
-        ...item,
-        touched: index,
-      })),
+      items: [{ ...NAME_LIST_FIXTURE[0], touched: 0 }],
     });
     await useWealthStore.getState().loadPendingCustomers();
     mockRequest.mockResolvedValueOnce({
-      items: NAME_LIST_FIXTURE.map((item, index) => ({
-        ...item,
-        touched: index,
-      })),
+      items: [{ ...NAME_LIST_FIXTURE[1], touched: 1 }],
     });
     await useWealthStore.getState().loadDoneCustomers();
 
     const calls = nameListCalls();
     expect(calls).toHaveLength(2);
-    expect(calls.every((c) => c.includes("touched=2"))).toBe(true);
+    expect(calls[0]).toContain("touched=0");
+    expect(calls[1]).toContain("touched=1");
     expect(useWealthStore.getState().pendingCustomers).toHaveLength(1);
     expect(useWealthStore.getState().pendingCustomers[0].touched).toBe(0);
     const done = useWealthStore.getState().doneCustomers;
@@ -742,8 +737,8 @@ describe("WealthWorkbench store", () => {
     expect(lists).toHaveLength(3);
     expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
       "2",
-      "2",
-      "2",
+      "0",
+      "1",
     ]);
     expect(
       lists.every((url) => url.searchParams.get("sap_id") === "10086"),
@@ -786,8 +781,8 @@ describe("WealthWorkbench store", () => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValueOnce({ items: planViews });
     mockRequest.mockResolvedValueOnce({ items: updated });
-    mockRequest.mockResolvedValueOnce({ items: updated });
-    mockRequest.mockResolvedValueOnce({ items: updated });
+    mockRequest.mockResolvedValueOnce({ items: [updated[0]] });
+    mockRequest.mockResolvedValueOnce({ items: [updated[1]] });
     await useWealthStore.getState().refreshTaskLists();
     expect(mockRequest).toHaveBeenCalledTimes(4);
     expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");

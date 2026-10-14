@@ -339,12 +339,12 @@ describe("WealthWorkbench api", () => {
     expect(customers[0]?.label).toBe("行长指派、分行重点、我的关注");
   });
 
-  it("fetchPendingCustomers / fetchDoneCustomers 均查询全部客户名单", async () => {
+  it("fetchPendingCustomers / fetchDoneCustomers 分别传递触达状态参数", async () => {
     await api.fetchPendingCustomers([TASK], "10086");
     await api.fetchDoneCustomers([TASK], "10086");
     const calls = mockRequest.mock.calls.map(([p]) => String(p));
-    expect(calls[0]).toContain("touched=2");
-    expect(calls[1]).toContain("touched=2");
+    expect(calls[0]).toContain("touched=0");
+    expect(calls[1]).toContain("touched=1");
     // 两个口径都不带 skillId（客户视角粒度），都带 sapId
     for (const c of calls) {
       expect(c).not.toContain("skill_id=");
@@ -352,38 +352,26 @@ describe("WealthWorkbench api", () => {
     }
   });
 
-  it("fetchPendingCustomers 查询全部名单后仅保留 touched 为 0 的客户", async () => {
+  it("fetchPendingCustomers 使用接口返回的待触达名单，不依赖明细触达字段筛选", async () => {
     mockRequest.mockResolvedValueOnce({
-      items: [0, 1, 2, undefined, null, "0"].map((touched, index) => ({
-        ...NAME_LIST_FIXTURE[0],
-        custUid: `CUST${index}`,
-        touched,
-      })),
+      items: NAME_LIST_FIXTURE,
     });
 
     const pending = await api.fetchPendingCustomers([TASK], "10086");
 
-    expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({
-      custUid: "CUST0",
-      touched: 0,
-      done: false,
-    });
+    expect(pending).toHaveLength(2);
+    expect(pending.every((customer) => !customer.done)).toBe(true);
   });
 
-  it("fetchDoneCustomers 查询全部名单后仅保留 touched 为 1 的客户", async () => {
+  it("fetchDoneCustomers 使用接口返回的已完成名单，不依赖明细触达字段筛选", async () => {
     mockRequest.mockResolvedValueOnce({
-      items: [0, 1, 2, undefined, null, "1"].map((touched, index) => ({
-        ...NAME_LIST_FIXTURE[0],
-        custUid: `CUST${index}`,
-        touched,
-      })),
+      items: NAME_LIST_FIXTURE,
     });
 
     const done = await api.fetchDoneCustomers([TASK], "10086");
 
-    expect(done).toHaveLength(1);
-    expect(done[0]).toMatchObject({ custUid: "CUST1", touched: 1, done: true });
+    expect(done).toHaveLength(2);
+    expect(done.every((customer) => customer.done)).toBe(true);
   });
 
   it("fetchDoneCustomers 使用 skillName 作为经营任务", async () => {
