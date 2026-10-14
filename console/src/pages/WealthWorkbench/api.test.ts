@@ -97,9 +97,14 @@ describe("WealthWorkbench api", () => {
 
   it("fetchNameList 传递去重后的 skill_id 数组，空数组不发起请求", async () => {
     await api.fetchNameList(["skill-a", "skill-b", "skill-a"], "10086", 0);
-    const url = new URL(String(mockRequest.mock.calls[0][0]), "http://test");
-    expect(url.searchParams.getAll("skill_id")).toEqual(["skill-a", "skill-b"]);
-    expect(url.searchParams.get("touched")).toBe("0");
+    expect(mockRequest).toHaveBeenCalledWith("/wealth/name-list", {
+      method: "POST",
+      body: JSON.stringify({
+        skill_id: ["skill-a", "skill-b"],
+        sap_id: "10086",
+        touched: 0,
+      }),
+    });
     mockRequest.mockClear();
     await expect(api.fetchNameList([], "10086", 2)).resolves.toEqual({
       items: [],
@@ -188,14 +193,28 @@ describe("WealthWorkbench api", () => {
     expect("history" in data).toBe(false);
   });
 
+  it("大量技能通过一次 POST 请求体传递，URL 保持固定", async () => {
+    const ids = Array.from({ length: 2000 }, (_, index) => `skill-${index}`);
+    await api.fetchNameList(ids, "10086", 2);
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    const [path, options] = mockRequest.mock.calls[0];
+    expect(path).toBe("/wealth/name-list");
+    expect(options?.method).toBe("POST");
+    expect(JSON.parse(String(options?.body)).skill_id).toEqual(ids);
+  });
+
   it("fetchNameList 透传 skillId 与 sapId；接口失败返回空列表", async () => {
     const list = await api.fetchNameList(["skill-loan-1"], "10086");
     expect(list.items).toHaveLength(2);
-    expect(mockRequest.mock.calls[0]?.[0]).toContain("skill_id=skill-loan-1");
-    expect(mockRequest.mock.calls[0]?.[0]).toContain("sap_id=10086");
+    expect(JSON.parse(String(mockRequest.mock.calls[0]?.[1]?.body))).toEqual({
+      skill_id: ["skill-loan-1"],
+      sap_id: "10086",
+    });
 
     await api.fetchNameList(["skill-loan-1"]);
-    expect(mockRequest.mock.calls[1]?.[0]).not.toContain("sap_id=");
+    expect(
+      JSON.parse(String(mockRequest.mock.calls[1]?.[1]?.body)),
+    ).not.toHaveProperty("sap_id");
 
     mockRequest.mockRejectedValueOnce(new Error("boom"));
     await expect(api.fetchNameList(["skill-loan-1"])).resolves.toEqual({
@@ -305,7 +324,9 @@ describe("WealthWorkbench api", () => {
       String(p).startsWith("/wealth/name-list"),
     );
     expect(nameListCalls).toHaveLength(1);
-    expect(String(nameListCalls[0]?.[0])).toContain("sap_id=10086");
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sap_id).toBe(
+      "10086",
+    );
   });
 
   it("fetchTodayCustomers 客户视角：直接映射外部聚合名单并标注命中场景", async () => {
@@ -344,12 +365,12 @@ describe("WealthWorkbench api", () => {
       String(p).startsWith("/wealth/name-list"),
     );
     expect(nameListCalls).toHaveLength(1);
-    expect(
-      new URL(String(nameListCalls[0]?.[0]), "http://test").searchParams.getAll(
-        "skill_id",
-      ),
-    ).toEqual([TASK.skillId]);
-    expect(String(nameListCalls[0]?.[0])).toContain("sap_id=10086");
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).skill_id).toEqual([
+      TASK.skillId,
+    ]);
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sap_id).toBe(
+      "10086",
+    );
     // 以 custUid 为页面 id；重点标签按规划创建角色映射，树外技能不产生标签
     expect(customers[0]).toMatchObject({
       id: "CUST001",
@@ -405,15 +426,15 @@ describe("WealthWorkbench api", () => {
   it("fetchPendingCustomers / fetchDoneCustomers 分别传递触达状态参数", async () => {
     await api.fetchPendingCustomers([TASK], "10086");
     await api.fetchDoneCustomers([TASK], "10086");
-    const calls = mockRequest.mock.calls.map(([p]) => String(p));
-    expect(calls[0]).toContain("touched=0");
-    expect(calls[1]).toContain("touched=1");
+    const calls = mockRequest.mock.calls.map(([, options]) =>
+      JSON.parse(String(options?.body)),
+    );
+    expect(calls[0].touched).toBe(0);
+    expect(calls[1].touched).toBe(1);
     // 两个口径都带当天技能数组和 sapId
     for (const c of calls) {
-      expect(new URL(c, "http://test").searchParams.getAll("skill_id")).toEqual(
-        [TASK.skillId],
-      );
-      expect(c).toContain("sap_id=10086");
+      expect(c.skill_id).toEqual([TASK.skillId]);
+      expect(c.sap_id).toBe("10086");
     }
   });
 

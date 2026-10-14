@@ -348,19 +348,10 @@ export async function fetchNameList(
   const ids = [...new Set(skillIds.filter(Boolean))];
   if (!ids.length) return { items: [] };
   try {
-    const params = new URLSearchParams();
-    for (const skillId of ids) {
-      params.append("skill_id", skillId);
-    }
-    if (sapId) {
-      params.set("sap_id", sapId);
-    }
-    if (touched !== undefined) {
-      params.set("touched", String(touched));
-    }
-    const resp = await request<NameListResponse>(
-      `/wealth/name-list?${params.toString()}`,
-    );
+    const resp = await request<NameListResponse>("/wealth/name-list", {
+      method: "POST",
+      body: JSON.stringify({ skill_id: ids, sap_id: sapId, touched }),
+    });
     return resp;
   } catch (error) {
     console.warn("[Wealth] 客户名单接口不可用，返回空列表", error);
@@ -596,21 +587,15 @@ function isDevEnv(): boolean {
 }
 
 function signBaseUrl(): string {
-  return isDevEnv()
-    ? "https://xxx.st.xxxx.cn"
-    : "https://xxx.as.xxxx.cn";
+  return isDevEnv() ? "https://xxx.st.xxxx.cn" : "https://xxx.as.xxxx.cn";
 }
 
 function insightBaseUrl(): string {
-  return isDevEnv()
-    ? "https://xxx.st.xxxx.cn/#"
-    : "https://xxx.oa.xxxx.cn/#";
+  return isDevEnv() ? "https://xxx.st.xxxx.cn/#" : "https://xxx.oa.xxxx.cn/#";
 }
 
 function telBaseUrl(): string {
-  return isDevEnv()
-    ? "https://xxx.st.xxxx.cn"
-    : "https://xxx.oa.xxxx.cn";
+  return isDevEnv() ? "https://xxx.st.xxxx.cn" : "https://xxx.oa.xxxx.cn";
 }
 
 /**
@@ -634,7 +619,7 @@ export async function fetchSchemeSignature(
     headers: {
       "Content-Type": "application/json",
       "x-header-cookie": auth["x-header-cookie"] ?? "",
-      "Cookie": auth["x-header-cookie"] ?? ""
+      Cookie: auth["x-header-cookie"] ?? "",
     },
     body: JSON.stringify({ bbkOrgId, custUid }),
   });

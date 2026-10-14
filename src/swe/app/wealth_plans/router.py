@@ -14,7 +14,8 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..crons.broadcast_task_store import CronBroadcastTaskStore
 from .market_dispatch import (
@@ -238,12 +239,18 @@ def _parse_skill_stat(row: Any) -> SkillStatItem | None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/name-list", response_model=NameListResponse)
+class NameListQueryRequest(BaseModel):
+    """名单查询参数通过 JSON 传递，避免技能数组受 URL 长度限制。"""
+
+    skill_id: list[str]
+    sap_id: str = ""
+    touched: int | None = None
+
+
+@router.post("/name-list", response_model=NameListResponse)
 async def list_name_list(
     request: Request,
-    skill_id: list[str] = Query(...),
-    sap_id: str = "",
-    touched: int | None = None,
+    body: NameListQueryRequest,
 ) -> NameListResponse:
     """客户名单查询；两个视角都传 sap_id（当前登录客户经理）。
 
@@ -252,17 +259,24 @@ async def list_name_list(
     1 已触达（已完成）/ 2 全部（今日任务）；缺省不过滤。
     外部接口不可用时返回空列表，由前端展示空态，不做假数据兜底。
     """
-    if touched is not None and touched not in (0, 1, 2):
+    if body.touched is not None and body.touched not in (0, 1, 2):
         raise HTTPException(status_code=400, detail="invalid touched")
     skill_ids = list(
-        dict.fromkeys(value.strip() for value in skill_id if value.strip()),
+        dict.fromkeys(
+            value.strip() for value in body.skill_id if value.strip()
+        ),
     )
     if not skill_ids:
         raise HTTPException(
             status_code=400,
             detail="skill_id must not be empty",
         )
-    return await _fetch_external_name_list(request, skill_ids, sap_id, touched)
+    return await _fetch_external_name_list(
+        request,
+        skill_ids,
+        body.sap_id,
+        body.touched,
+    )
 
 
 async def _fetch_external_name_list(

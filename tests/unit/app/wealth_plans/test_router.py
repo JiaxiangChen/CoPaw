@@ -904,8 +904,9 @@ def test_scene_skills_allows_empty_category(client: TestClient) -> None:
 
 def test_name_list_allows_empty_skill_id(client: TestClient) -> None:
     """数组含空条目时忽略空值，查询仍限定在有效技能内。"""
-    resp = client.get(
-        "/api/wealth/name-list?sap_id=10086&skill_id=&skill_id=skill-a",
+    resp = client.post(
+        "/api/wealth/name-list",
+        json={"sap_id": "10086", "skill_id": ["", "skill-a"]},
     )
 
     assert resp.status_code == 200
@@ -921,13 +922,41 @@ def test_name_list_allows_empty_skill_id(client: TestClient) -> None:
 
 
 def test_name_list_requires_skill_ids(client: TestClient) -> None:
-    assert client.get("/api/wealth/name-list?sap_id=10086").status_code == 422
-    assert client.get("/api/wealth/name-list?skill_id=").status_code == 400
+    for body, status in [
+        ({"sap_id": "10086"}, 422),
+        ({"skill_id": [""]}, 400),
+        ({"skill_id": []}, 400),
+        ({"skill_id": "skill-a"}, 422),
+    ]:
+        assert (
+            client.post("/api/wealth/name-list", json=body).status_code
+            == status
+        )
+
+
+def test_name_list_accepts_large_skill_array(client, monkeypatch):
+    captured = {}
+
+    async def fetch(request, skill_ids, sap_id, touched):
+        captured["skill_ids"] = skill_ids
+        return wealth_router.NameListResponse()
+
+    monkeypatch.setattr(wealth_router, "_fetch_external_name_list", fetch)
+    skills = [f"skill-{index}" for index in range(2000)]
+    response = client.post(
+        "/api/wealth/name-list",
+        json={"skill_id": skills, "sap_id": "10086", "touched": 2},
+    )
+    assert response.status_code == 200
+    assert captured["skill_ids"] == skills
 
 
 def test_name_list_empty_when_external_absent(client: TestClient) -> None:
     """外部接口未配置/不可达时返回空列表，不做假数据兜底。"""
-    resp = client.get("/api/wealth/name-list?skill_id=loan_verify")
+    resp = client.post(
+        "/api/wealth/name-list",
+        json={"skill_id": ["loan_verify"]},
+    )
 
     assert resp.status_code == 200
     assert resp.json() == {
@@ -943,7 +972,10 @@ def test_name_list_empty_when_external_absent(client: TestClient) -> None:
 
 def test_name_list_allows_empty_sap_id(client: TestClient) -> None:
     """sap_id 可空（缺省场景/兼容调用），参数合法。"""
-    resp = client.get("/api/wealth/name-list?skill_id=loan_verify&sap_id=")
+    resp = client.post(
+        "/api/wealth/name-list",
+        json={"skill_id": ["loan_verify"], "sap_id": ""},
+    )
 
     assert resp.status_code == 200
     assert resp.json() == {
@@ -959,11 +991,17 @@ def test_name_list_allows_empty_sap_id(client: TestClient) -> None:
 
 def test_name_list_rejects_invalid_touched(client: TestClient) -> None:
     """touched 仅接受 0 未触达 / 1 已触达 / 2 全部。"""
-    resp = client.get("/api/wealth/name-list?skill_id=skill-a&touched=3")
+    resp = client.post(
+        "/api/wealth/name-list",
+        json={"skill_id": ["skill-a"], "touched": 3},
+    )
 
     assert resp.status_code == 400
 
-    ok = client.get("/api/wealth/name-list?skill_id=skill-a&touched=2")
+    ok = client.post(
+        "/api/wealth/name-list",
+        json={"skill_id": ["skill-a"], "touched": 2},
+    )
     assert ok.status_code == 200
 
 
@@ -1047,9 +1085,13 @@ def test_name_list_forwards_touch_filter_context(
     monkeypatch.setenv("SWE_SKILL_CONFIG_API_BASE", "http://external.test")
     monkeypatch.setattr(wealth_router.httpx, "AsyncClient", FakeClient)
 
-    resp = client.get(
-        "/api/wealth/name-list?skill_id=SKILL0001"
-        "&skill_id=SKILL0002&skill_id=SKILL0001&sap_id=80280256&touched=0",
+    resp = client.post(
+        "/api/wealth/name-list",
+        json={
+            "skill_id": ["SKILL0001", "SKILL0002", "SKILL0001"],
+            "sap_id": "80280256",
+            "touched": 0,
+        },
         headers={
             **VIEWER,
             "X-Bbk-Id": "755",
