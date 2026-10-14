@@ -1840,8 +1840,8 @@ export default function CronJobOverviewPage() {
 
       <p className={styles.formulaNote}>
         说明： 执行成功率 = 成功执行次数 / 任务执行次数； 任务已读率 =
-        已读执行次数 / 任务执行次数； 查看方案任务率 = 查看方案次数 /
-        任务执行次数
+        已读执行次数 / 成功执行次数； 查看方案任务率 = 查看方案次数 /
+        成功执行次数
       </p>
 
       {/* 任务视角分行排行 */}

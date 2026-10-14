@@ -378,7 +378,9 @@ class CronJobSyncRequest(BaseModel):
     def validate_workflow_binding(self) -> "CronJobSyncRequest":
         if self.task_type == "workflow":
             if not self.workflow_binding_id:
-                raise ValueError("workflow_binding_id is required for workflow")
+                raise ValueError(
+                    "workflow_binding_id is required for workflow",
+                )
         elif self.workflow_binding_id:
             raise ValueError("workflow_binding_id is only valid for workflow")
         return self
@@ -544,7 +546,11 @@ class PaginatedResponse(BaseModel, Generic[T]):
 class CronScheduleDistributionDiagnostics(BaseModel):
     """Bounded definition diagnostics for a schedule calculation."""
 
-    invalid_cron_jobs: int = Field(default=0, ge=0, description="无效 Cron 任务数")
+    invalid_cron_jobs: int = Field(
+        default=0,
+        ge=0,
+        description="无效 Cron 任务数",
+    )
     invalid_timezone_jobs: int = Field(
         default=0,
         ge=0,
@@ -575,7 +581,9 @@ class CronScheduleDistributionBucket(BaseModel):
     text_count: int = Field(default=0, ge=0, description="Text 计划触发次数")
     agent_count: int = Field(default=0, ge=0, description="Agent 计划触发次数")
     workflow_count: int = Field(
-        default=0, ge=0, description="Workflow 计划触发次数",
+        default=0,
+        ge=0,
+        description="Workflow 计划触发次数",
     )
     total_count: int = Field(default=0, ge=0, description="计划触发总次数")
 
@@ -599,7 +607,9 @@ class CronScheduleDistributionResponse(BaseModel):
     text_count: int = Field(default=0, ge=0, description="Text 计划触发次数")
     agent_count: int = Field(default=0, ge=0, description="Agent 计划触发次数")
     workflow_count: int = Field(
-        default=0, ge=0, description="Workflow 计划触发次数",
+        default=0,
+        ge=0,
+        description="Workflow 计划触发次数",
     )
     total_count: int = Field(default=0, ge=0, description="计划触发总次数")
     buckets: List[CronScheduleDistributionBucket] = Field(
@@ -630,7 +640,10 @@ class CronScheduleDistributionDetailsResponse(BaseModel):
 
     start_time: datetime = Field(..., description="区间开始时间（UTC，含）")
     end_time: datetime = Field(..., description="区间结束时间（UTC，不含）")
-    task_type: Optional[TaskType] = Field(default=None, description="任务类型筛选")
+    task_type: Optional[TaskType] = Field(
+        default=None,
+        description="任务类型筛选",
+    )
     calculated_at: datetime = Field(..., description="计算完成时间（UTC）")
     definition_revision: str = Field(..., description="任务定义确定性版本")
     items: List[CronScheduleOccurrenceItem] = Field(
@@ -845,7 +858,8 @@ class CronDispatchBatchItem(BaseModel):
     failed_count: int = Field(default=0, description="失败数")
     skipped_count: int = Field(default=0, description="跳过／取消数")
     dispatch_paused: Optional[bool] = Field(
-        default=None, description="独立批调度暂停状态；空表示未知"
+        default=None,
+        description="独立批调度暂停状态；空表示未知",
     )
     error_message: str = Field(default="", description="错误摘要")
     completed_at: Optional[datetime] = Field(
@@ -944,7 +958,10 @@ class CronDispatchBatchDetailResponse(BaseModel):
     batch: CronDispatchBatchItem
     intents: List[CronDispatchIntentItem] = Field(default_factory=list)
     intent_total: int = Field(default=0, description="Intent 总数")
-    intent_filtered_total: int = Field(default=0, description="筛选后 Intent 数")
+    intent_filtered_total: int = Field(
+        default=0,
+        description="筛选后 Intent 数",
+    )
     intent_page: int = Field(default=1, description="Intent 页码")
     intent_page_size: int = Field(default=100, description="Intent 每页数量")
     events: List[CronDispatchEventItem] = Field(default_factory=list)
@@ -1072,7 +1089,7 @@ class CronOverviewStatsResponse(BaseModel):
     )
     read_tasks: int = Field(
         default=0,
-        description="已读任务数（按job_id去重）",
+        description="成功且已读执行次数",
     )
     read_rate: float = Field(default=0.0, description="已读率")
     report_rate: float = Field(default=0.0, description="查看报告任务率")

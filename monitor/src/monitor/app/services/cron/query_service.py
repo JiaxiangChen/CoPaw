@@ -3405,6 +3405,8 @@ class QueryService:
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
             WHERE e.actual_time >= %s AND e.actual_time <= %s
+              AND e.status = 'success'
+              AND e.async_status = 'success'
               AND e.is_read = 1
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
@@ -3539,8 +3541,8 @@ class QueryService:
         insight_count = report_behavior_counts["insight_count"]
         phone_count = report_behavior_counts["phone_count"]
         success_rate = self._percent(success_count, total_executions)
-        read_rate = self._percent(read_tasks, total_executions)
-        report_rate = self._percent(report_count, total_executions)
+        read_rate = self._percent(read_tasks, success_count)
+        report_rate = self._percent(report_count, success_count)
         error_rate = self._percent(error_count, total_executions)
 
         return CronOverviewStatsResponse(
@@ -3811,7 +3813,7 @@ class QueryService:
 
         成功：status='success' AND async_status='success'
         失败：status='error' OR (status='success' AND async_status='error')
-        已读任务数：按已读执行次数统计（与概览口径一致）
+        已读任务数：按成功且已读的执行次数统计（与概览口径一致）
         """
         if not job_ids:
             return {
@@ -3831,7 +3833,14 @@ class QueryService:
                 COUNT(*) AS total_executions,
                 SUM(CASE WHEN status = 'success' AND async_status = 'success'
                     THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN is_read = 1 THEN 1 ELSE 0 END) AS read_tasks,
+                SUM(
+                    CASE
+                        WHEN status = 'success'
+                         AND async_status = 'success'
+                         AND is_read = 1
+                        THEN 1 ELSE 0
+                    END
+                ) AS read_tasks,
                 SUM(CASE WHEN status = 'error'
                          OR (status = 'success' AND async_status = 'error')
                     THEN 1 ELSE 0 END) AS error_count
@@ -4346,6 +4355,8 @@ class QueryService:
             JOIN swe_cron_jobs j ON e.job_id = j.id
             WHERE j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
+              AND e.status = 'success'
+              AND e.async_status = 'success'
               AND e.is_read = 1
               {source_where}
         """
@@ -4379,6 +4390,8 @@ class QueryService:
             JOIN swe_cron_jobs j ON e.job_id = j.id
             WHERE j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
+              AND e.status = 'success'
+              AND e.async_status = 'success'
               AND e.is_read = 1
               AND {skill_exists}
               {jkh_filter_sql}
@@ -5137,7 +5150,7 @@ class QueryService:
         # 成功：status='success' AND async_status='success'
         if status == "success" and async_status == "success":
             skill_success[sk] += 1
-        if is_read:
+        if is_read and status == "success" and async_status == "success":
             skill_read[sk] += 1
         # 失败：status='error' OR (status='success' AND async_status='error')
         if status in ("error", "timeout", "cancelled") or (
@@ -5348,7 +5361,14 @@ class QueryService:
                 COUNT(DISTINCT j.id) AS total_tasks,
                 SUM(CASE WHEN e.status = 'success' AND e.async_status = 'success'
                     THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN e.is_read = 1 THEN 1 ELSE 0 END) AS read_tasks
+                SUM(
+                    CASE
+                        WHEN e.status = 'success'
+                         AND e.async_status = 'success'
+                         AND e.is_read = 1
+                        THEN 1 ELSE 0
+                    END
+                ) AS read_tasks
             FROM swe_cron_jobs j
             JOIN swe_cron_executions e ON j.id = e.job_id
                 AND e.actual_time >= %s AND e.actual_time <= %s
@@ -5711,7 +5731,14 @@ class QueryService:
             SELECT
                 j.tenant_id AS user_id,
                 MAX(j.tenant_name) AS user_name,
-                COUNT(DISTINCT CASE WHEN e.is_read = 1 THEN e.id END) AS read_count,
+                COUNT(
+                    DISTINCT CASE
+                        WHEN e.status = 'success'
+                         AND e.async_status = 'success'
+                         AND e.is_read = 1
+                        THEN e.id
+                    END
+                ) AS read_count,
                 COUNT(DISTINCT CASE WHEN c.event_type = 'preview_view' AND c.template_type = 'sub' THEN c.id END) AS plan_count,
                 COUNT(DISTINCT CASE WHEN c.button_type = 'insight' THEN c.id END) AS insight_count,
                 COUNT(DISTINCT CASE WHEN c.button_type = 'phone' THEN c.id END) AS phone_count,
@@ -5889,7 +5916,14 @@ class QueryService:
                 COUNT(DISTINCT e.job_id) AS cron_task_count,
                 SUM(CASE WHEN e.status = 'success' AND e.async_status = 'success'
                     THEN 1 ELSE 0 END) AS success_count,
-                SUM(CASE WHEN e.is_read = 1 THEN 1 ELSE 0 END) AS read_count,
+                SUM(
+                    CASE
+                        WHEN e.status = 'success'
+                         AND e.async_status = 'success'
+                         AND e.is_read = 1
+                        THEN 1 ELSE 0
+                    END
+                ) AS read_count,
                 SUM(CASE WHEN e.status = 'error'
                          OR (e.status = 'success' AND e.async_status = 'error')
                     THEN 1 ELSE 0 END) AS error_count
