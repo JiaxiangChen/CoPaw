@@ -290,7 +290,7 @@ async def _fetch_external_name_list(
         return NameListResponse()
     bbk_id = getattr(request.state, "bbk_id", None) or ""
     body: dict[str, Any] = {
-        "skillId": skill_id,
+        "skillIds": skill_id,
         "bbkId": bbk_id,
         "platformSource": "WP",
         "pageSource": "WP_AGENT_WORKSPACE_TASK_LIST",

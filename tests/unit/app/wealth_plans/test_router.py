@@ -1108,7 +1108,7 @@ def test_name_list_forwards_touch_filter_context(
         "platformSource": "WP",
         "pageSource": "WP_AGENT_WORKSPACE_TASK_LIST",
         "touched": 0,
-        "skillId": ["SKILL0001", "SKILL0002"],
+        "skillIds": ["SKILL0001", "SKILL0002"],
         "sapId": "80280256",
         "subBbkId": "755480",
         "posId": "RB0101",
