@@ -52,6 +52,61 @@ beforeEach(() => {
 });
 
 describe("WealthWorkbench api", () => {
+  it.each(["business", "customer", "pending", "done"] as const)(
+    "%s 名单保留后端统计，不根据名单长度或 touched 计算",
+    async (view) => {
+      const counts = {
+        targetCusCount: 100,
+        todayTouchCount: 0,
+        sevenDayTouchCount: 25,
+        unTouchedCount: 80,
+      };
+      mockRequest.mockResolvedValueOnce({
+        items: NAME_LIST_FIXTURE,
+        ...counts,
+      });
+      const result =
+        view === "pending"
+          ? await api.fetchPendingCustomers([TASK], "10086")
+          : view === "done"
+          ? await api.fetchDoneCustomers([TASK], "10086")
+          : await api.fetchTodayCustomers([TASK], "10086", view);
+      expect(result.customers).toHaveLength(2);
+      expect(result.counts).toEqual(counts);
+    },
+  );
+
+  it("未返回统计时保留未知状态；没有当天任务时人数为零且不发请求", async () => {
+    expect((await api.fetchPendingCustomers([TASK])).counts).toEqual({
+      targetCusCount: null,
+      todayTouchCount: null,
+      sevenDayTouchCount: null,
+      unTouchedCount: null,
+    });
+    mockRequest.mockClear();
+    expect(
+      (await api.fetchTodayCustomers([], undefined, "business")).counts,
+    ).toEqual({
+      targetCusCount: 0,
+      todayTouchCount: 0,
+      sevenDayTouchCount: 0,
+      unTouchedCount: 0,
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("fetchNameList 传递去重后的 skill_id 数组，空数组不发起请求", async () => {
+    await api.fetchNameList(["skill-a", "skill-b", "skill-a"], "10086", 0);
+    const url = new URL(String(mockRequest.mock.calls[0][0]), "http://test");
+    expect(url.searchParams.getAll("skill_id")).toEqual(["skill-a", "skill-b"]);
+    expect(url.searchParams.get("touched")).toBe("0");
+    mockRequest.mockClear();
+    await expect(api.fetchNameList([], "10086", 2)).resolves.toEqual({
+      items: [],
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
   it("动态字段按技能配置排序，只展示客户自己的值，保留组合分组及触达状态", async () => {
     const response = {
       items: [
@@ -88,11 +143,9 @@ describe("WealthWorkbench api", () => {
       ],
     };
     mockRequest.mockResolvedValue(response);
-    const [business] = await api.fetchTodayCustomers(
-      [TASK],
-      "10086",
-      "business",
-    );
+    const {
+      customers: [business],
+    } = await api.fetchTodayCustomers([TASK], "10086", "business");
     expect(business.done).toBe(true);
     expect(business.dynamicFields).toEqual([
       { name: "risk", label: "风险等级", value: "未提供" },
@@ -102,11 +155,9 @@ describe("WealthWorkbench api", () => {
       { name: "age", label: "客户年龄", value: "0" },
       { name: "missing", label: "缺失字段", value: "未提供" },
     ]);
-    const [customer] = await api.fetchTodayCustomers(
-      [TASK],
-      "10086",
-      "customer",
-    );
+    const {
+      customers: [customer],
+    } = await api.fetchTodayCustomers([TASK], "10086", "customer");
     expect(customer.dynamicFields?.map((f) => f.name)).toEqual([
       "age",
       "risk",
@@ -114,13 +165,17 @@ describe("WealthWorkbench api", () => {
     ]);
     expect(customer.groupFields).toEqual([]);
     expect(customer.done).toBe(true);
-    const [done] = await api.fetchDoneCustomers([TASK], "10086");
+    const {
+      customers: [done],
+    } = await api.fetchDoneCustomers([TASK], "10086");
     expect(done.dynamicFields).toEqual(customer.dynamicFields);
     mockRequest.mockResolvedValueOnce({
       ...response,
       items: response.items.map((item) => ({ ...item, touched: 0 })),
     });
-    const [pending] = await api.fetchPendingCustomers([TASK], "10086");
+    const {
+      customers: [pending],
+    } = await api.fetchPendingCustomers([TASK], "10086");
     expect(pending.dynamicFields).toEqual(customer.dynamicFields);
   });
 
@@ -134,16 +189,16 @@ describe("WealthWorkbench api", () => {
   });
 
   it("fetchNameList 透传 skillId 与 sapId；接口失败返回空列表", async () => {
-    const list = await api.fetchNameList("skill-loan-1", "10086");
+    const list = await api.fetchNameList(["skill-loan-1"], "10086");
     expect(list.items).toHaveLength(2);
     expect(mockRequest.mock.calls[0]?.[0]).toContain("skill_id=skill-loan-1");
     expect(mockRequest.mock.calls[0]?.[0]).toContain("sap_id=10086");
 
-    await api.fetchNameList("skill-loan-1");
+    await api.fetchNameList(["skill-loan-1"]);
     expect(mockRequest.mock.calls[1]?.[0]).not.toContain("sap_id=");
 
     mockRequest.mockRejectedValueOnce(new Error("boom"));
-    await expect(api.fetchNameList("skill-loan-1")).resolves.toEqual({
+    await expect(api.fetchNameList(["skill-loan-1"])).resolves.toEqual({
       items: [],
     });
   });
@@ -207,7 +262,11 @@ describe("WealthWorkbench api", () => {
           touched,
         })),
       });
-      const customers = await api.fetchTodayCustomers([TASK], "10086", view);
+      const { customers: customers } = await api.fetchTodayCustomers(
+        [TASK],
+        "10086",
+        view,
+      );
       expect(customers.map((customer) => customer.touched)).toEqual(statuses);
       expect(customers.map((customer) => customer.done)).toEqual([
         false,
@@ -222,7 +281,7 @@ describe("WealthWorkbench api", () => {
   );
 
   it("fetchTodayCustomers 按任务上下文映射名单并去重", async () => {
-    const customers = await api.fetchTodayCustomers(
+    const { customers: customers } = await api.fetchTodayCustomers(
       [
         TASK,
         { ...TASK }, // 同一技能重复任务只查一次、只出一条
@@ -275,7 +334,7 @@ describe("WealthWorkbench api", () => {
       throw new Error(`未 mock 的请求：${p}`);
     });
 
-    const customers = await api.fetchTodayCustomers(
+    const { customers: customers } = await api.fetchTodayCustomers(
       [TASK],
       "10086",
       "customer",
@@ -285,7 +344,11 @@ describe("WealthWorkbench api", () => {
       String(p).startsWith("/wealth/name-list"),
     );
     expect(nameListCalls).toHaveLength(1);
-    expect(String(nameListCalls[0]?.[0])).not.toContain("skill_id=");
+    expect(
+      new URL(String(nameListCalls[0]?.[0]), "http://test").searchParams.getAll(
+        "skill_id",
+      ),
+    ).toEqual([TASK.skillId]);
     expect(String(nameListCalls[0]?.[0])).toContain("sap_id=10086");
     // 以 custUid 为页面 id；重点标签按规划创建角色映射，树外技能不产生标签
     expect(customers[0]).toMatchObject({
@@ -325,7 +388,7 @@ describe("WealthWorkbench api", () => {
       ],
     });
 
-    const customers = await api.fetchTodayCustomers(
+    const { customers: customers } = await api.fetchTodayCustomers(
       [
         { ...TASK, skillId: "skill-president", source: "行长关注" },
         { ...TASK, skillId: "skill-middle", source: "分行关注" },
@@ -345,9 +408,11 @@ describe("WealthWorkbench api", () => {
     const calls = mockRequest.mock.calls.map(([p]) => String(p));
     expect(calls[0]).toContain("touched=0");
     expect(calls[1]).toContain("touched=1");
-    // 两个口径都不带 skillId（客户视角粒度），都带 sapId
+    // 两个口径都带当天技能数组和 sapId
     for (const c of calls) {
-      expect(c).not.toContain("skill_id=");
+      expect(new URL(c, "http://test").searchParams.getAll("skill_id")).toEqual(
+        [TASK.skillId],
+      );
       expect(c).toContain("sap_id=10086");
     }
   });
@@ -357,7 +422,10 @@ describe("WealthWorkbench api", () => {
       items: NAME_LIST_FIXTURE,
     });
 
-    const pending = await api.fetchPendingCustomers([TASK], "10086");
+    const { customers: pending } = await api.fetchPendingCustomers(
+      [TASK],
+      "10086",
+    );
 
     expect(pending).toHaveLength(2);
     expect(pending.every((customer) => !customer.done)).toBe(true);
@@ -368,7 +436,7 @@ describe("WealthWorkbench api", () => {
       items: NAME_LIST_FIXTURE,
     });
 
-    const done = await api.fetchDoneCustomers([TASK], "10086");
+    const { customers: done } = await api.fetchDoneCustomers([TASK], "10086");
 
     expect(done).toHaveLength(2);
     expect(done.every((customer) => customer.done)).toBe(true);
@@ -386,7 +454,7 @@ describe("WealthWorkbench api", () => {
         },
       ],
     });
-    const done = await api.fetchDoneCustomers([TASK], "10086");
+    const { customers: done } = await api.fetchDoneCustomers([TASK], "10086");
     expect(done).toHaveLength(1);
     expect(done.every((c) => c.done)).toBe(true);
     expect(done[0]).toMatchObject({

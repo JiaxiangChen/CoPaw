@@ -2,17 +2,36 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Tasks from "./index";
-import type { Customer } from "../types";
+import type { Customer, Plan } from "../types";
+import type { CustomerCounts } from "../api";
 
 const state = vi.hoisted(() => ({
   customers: [] as Customer[],
   customersLoading: false,
+  todayCounts: {
+    targetCusCount: 1,
+    todayTouchCount: 0,
+    sevenDayTouchCount: 0,
+    unTouchedCount: 1,
+  } as CustomerCounts | null,
+  pendingCounts: {
+    targetCusCount: 1,
+    todayTouchCount: 0,
+    sevenDayTouchCount: 0,
+    unTouchedCount: 1,
+  } as CustomerCounts | null,
+  doneCounts: {
+    targetCusCount: 1,
+    todayTouchCount: 0,
+    sevenDayTouchCount: 0,
+    unTouchedCount: 1,
+  } as CustomerCounts | null,
   pendingCustomers: [] as Customer[],
   pendingLoading: false,
   doneCustomers: [] as Customer[],
   doneLoading: false,
   taskListsRefreshing: false,
-  plans: [],
+  plans: [] as Plan[],
   plansLoaded: true,
   refreshTodayCustomers: vi.fn().mockResolvedValue(undefined),
   loadTodayCustomers: vi.fn().mockResolvedValue(undefined),
@@ -30,7 +49,17 @@ vi.mock("../store", () => ({
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  state.todayCounts =
+    state.pendingCounts =
+    state.doneCounts =
+      {
+        targetCusCount: 1,
+        todayTouchCount: 0,
+        sevenDayTouchCount: 0,
+        unTouchedCount: 1,
+      };
   state.plansLoaded = true;
+  state.plans = [];
   state.customers = [];
   state.pendingCustomers = [];
   state.doneCustomers = [];
@@ -41,6 +70,150 @@ beforeEach(() => {
 });
 
 describe("今日任务加载", () => {
+  it.each(["today", "pending", "done"] as const)(
+    "%s 显示自身后端四项汇总，零值保留，缺失字段显示占位",
+    (page) => {
+      const counts = {
+        targetCusCount: 99,
+        todayTouchCount: 0,
+        sevenDayTouchCount: 30,
+        unTouchedCount: 75,
+      };
+      state.todayCounts = state.pendingCounts = state.doneCounts = null;
+      if (page === "today") state.todayCounts = counts;
+      if (page === "pending") state.pendingCounts = counts;
+      if (page === "done") state.doneCounts = counts;
+      const { rerender } = render(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(/目标客户/).querySelector("b")).toHaveTextContent(
+        "99",
+      );
+      expect(
+        screen.getByText(/今日已触达/).querySelector("b"),
+      ).toHaveTextContent("0");
+      expect(
+        screen.getByText(/七日内已触达/).querySelector("b"),
+      ).toHaveTextContent("30");
+      expect(
+        screen.getByText(/^待处理/, { selector: "span" }).querySelector("b"),
+      ).toHaveTextContent("75");
+      state.todayCounts = state.pendingCounts = state.doneCounts = null;
+      rerender(
+        <MemoryRouter>
+          <Tasks page={page} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(/目标客户/).querySelector("b")).toHaveTextContent(
+        "--",
+      );
+      expect(
+        screen.getByText(/七日内已触达/).querySelector("b"),
+      ).toHaveTextContent("--");
+    },
+  );
+
+  it("空名单显示所选场景执行时间，切换场景与刷新保留对应技能", () => {
+    state.plans = [
+      {
+        id: "plan",
+        name: "规划",
+        source: "我的关注",
+        desc: "",
+        customers: 0,
+        tasks: 0,
+        rate: 0,
+        status: "已自动下发",
+        publishStatus: "published",
+        period: "自定义",
+        start: "2020-01-01",
+        end: "2030-12-31",
+        items: ["a", "b"].map((id) => ({
+          id,
+          sceneName: `场景${id}`,
+          categoryLabel: "理财",
+          categoryCode: "finance",
+          mcpRelations: [],
+          direction: "",
+          cycle: "自定义",
+          start: "2020-01-01",
+          end: "2030-12-31",
+          schedule: { type: "daily", hour: id === "a" ? 9 : 15, minute: 0 },
+        })),
+      },
+    ];
+    const { rerender } = render(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    expect(state.refreshTodayCustomers).toHaveBeenCalledExactlyOnceWith(
+      "business",
+      "a",
+    );
+    expect(screen.getByText("执行时间：每日 09:00")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "我的关注场景b" }));
+    expect(state.loadTodayCustomers).toHaveBeenLastCalledWith("business", "b");
+    expect(screen.getByText("执行时间：每日 15:00")).toBeInTheDocument();
+    expect(state.refreshTodayCustomers).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "刷新工作任务" }));
+    expect(state.refreshTodayCustomers).toHaveBeenLastCalledWith(
+      "business",
+      "b",
+    );
+    state.customersLoading = true;
+    rerender(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+    state.customersLoading = false;
+    state.customers = [
+      {
+        id: "customer",
+        custUid: "customer",
+        skillId: "b",
+        name: "已生成客户",
+        label: "",
+        reason: "",
+        category: "理财",
+        task: "场景b",
+        done: false,
+        channel: "",
+        time: "",
+        note: "",
+      },
+    ];
+    rerender(
+      <MemoryRouter>
+        <Tasks page="today" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "筛选接触状态" }));
+    fireEvent.click(screen.getByRole("button", { name: /^已接触/ }));
+    expect(screen.queryByText("已生成客户")).not.toBeInTheDocument();
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+    state.customers = [];
+    fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+    rerender(
+      <MemoryRouter>
+        <Tasks page="pending" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+    rerender(
+      <MemoryRouter>
+        <Tasks page="done" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/执行时间：/)).not.toBeInTheDocument();
+  });
+
   it.each(["today", "pending", "done"] as const)(
     "%s 标签页后台刷新保留旧名单和统计，不显示加载占位，返回后更新数据",
     (page) => {
@@ -155,6 +328,15 @@ describe("今日任务加载", () => {
       const loaded = cached
         .slice(0, 24)
         .map((customer, index) => ({ ...customer, name: `返回客户${index}` }));
+      state.todayCounts =
+        state.pendingCounts =
+        state.doneCounts =
+          {
+            targetCusCount: 24,
+            todayTouchCount: 5,
+            sevenDayTouchCount: 12,
+            unTouchedCount: 19,
+          };
       state.customers = loaded;
       state.pendingCustomers = loaded;
       state.doneCustomers = loaded;

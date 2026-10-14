@@ -14,6 +14,24 @@ import styles from "../index.module.less";
 const state = vi.hoisted(() => ({
   customers: [] as Customer[],
   customersLoading: false,
+  todayCounts: {
+    targetCusCount: 42,
+    todayTouchCount: 5,
+    sevenDayTouchCount: 10,
+    unTouchedCount: 37,
+  },
+  pendingCounts: {
+    targetCusCount: 42,
+    todayTouchCount: 5,
+    sevenDayTouchCount: 10,
+    unTouchedCount: 37,
+  },
+  doneCounts: {
+    targetCusCount: 42,
+    todayTouchCount: 5,
+    sevenDayTouchCount: 10,
+    unTouchedCount: 37,
+  },
   pendingCustomers: [] as Customer[],
   pendingLoading: false,
   doneCustomers: [] as Customer[],
@@ -159,7 +177,7 @@ describe("经营分类独立表格", () => {
     expect(state.doneCustomers[0].channel).toBe("强接触");
   });
 
-  it("已完成复用三项汇总，按自身筛选名单统计，不依赖今日任务缓存", () => {
+  it("已完成展示后端四项统计，搜索不改变统计口径", () => {
     state.doneCustomers = state.customers.map((customer) => ({
       ...customer,
       touched: 1,
@@ -172,20 +190,26 @@ describe("经营分类独立表格", () => {
       </MemoryRouter>,
     );
     expect(screen.queryByText(/累计已完成|今日已完成/)).not.toBeInTheDocument();
-    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 3 人");
-    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 3 人");
-    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+    expect(screen.getByText(/七日内已触达/)).toHaveTextContent(
+      "七日内已触达 10 人",
+    );
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 42 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 5 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 37 人");
     fireEvent.change(
       screen.getByRole("textbox", { name: "搜索客户或经营机会" }),
       { target: { value: "客户1" } },
     );
-    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 1 人");
-    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 1 人");
-    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+    expect(screen.getByText(/七日内已触达/)).toHaveTextContent(
+      "七日内已触达 10 人",
+    );
+    expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 42 人");
+    expect(screen.getByText(/今日已触达/)).toHaveTextContent("今日已触达 5 人");
+    expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 37 人");
   });
 
   it.each(["business", "customer"] as const)(
-    "%s 接触状态筛选联动名单、人数统计，支持清除和未知状态",
+    "%s 接触状态筛选联动名单且保留后端统计，支持清除和未知状态",
     (view) => {
       const template = state.customers[0];
       state.customers = [0, 1, 3, null].map((touched, index) => ({
@@ -213,11 +237,14 @@ describe("经营分类独立表格", () => {
       ).toHaveTextContent("2");
       fireEvent.click(within(dialog).getByRole("button", { name: /^已接触/ }));
       expect(screen.getAllByRole("row")).toHaveLength(2);
-      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 1 人");
-      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
-        "今日已触达 1 人",
+      expect(screen.getByText(/七日内已触达/)).toHaveTextContent(
+        "七日内已触达 10 人",
       );
-      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 0 人");
+      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 42 人");
+      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
+        "今日已触达 5 人",
+      );
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 37 人");
       fireEvent.click(screen.getByRole("button", { name: "清除接触状态筛选" }));
       expect(screen.getAllByRole("row")).toHaveLength(5);
       fireEvent.click(screen.getByRole("button", { name: "筛选接触状态" }));
@@ -228,7 +255,7 @@ describe("经营分类独立表格", () => {
         ),
       );
       expect(screen.getAllByRole("row")).toHaveLength(3);
-      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 2 人");
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 37 人");
       if (view === "customer") {
         fireEvent.click(screen.getByRole("button", { name: "筛选重点标签" }));
         fireEvent.click(
@@ -363,7 +390,7 @@ describe("经营分类独立表格", () => {
   });
 
   it.each(["business", "customer"] as const)(
-    "今日任务 %s 按 touched 展示接触状态并统计待处理人数",
+    "今日任务 %s 按 touched 展示接触状态，人数使用后端统计",
     (view) => {
       const statuses = [0, 1, 3, 2, -1, null, undefined];
       const template = state.customers[0];
@@ -371,7 +398,7 @@ describe("经营分类独立表格", () => {
         ...template,
         id: `cust-${index}`,
         touched,
-        // 故意与 touched 相反，验证展示和今日统计以接口原值为准。
+        // 故意与 touched 相反，验证接触状态展示以接口原值为准。
         done: touched !== 1,
         groupFields: [],
       }));
@@ -406,11 +433,14 @@ describe("经营分类独立表格", () => {
           index === 6 ? styles.green : styles.emptyTag,
         );
       });
-      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 7 人");
-      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
-        "今日已触达 1 人",
+      expect(screen.getByText(/七日内已触达/)).toHaveTextContent(
+        "七日内已触达 10 人",
       );
-      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 6 人");
+      expect(screen.getByText(/目标客户/)).toHaveTextContent("目标客户 42 人");
+      expect(screen.getByText(/今日已触达/)).toHaveTextContent(
+        "今日已触达 5 人",
+      );
+      expect(screen.getByText(/^待处理/)).toHaveTextContent("待处理 37 人");
       state.customers = [];
       rerender(
         <MemoryRouter>

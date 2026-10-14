@@ -75,6 +75,7 @@ describe("buildTaskTree", () => {
       planName: "九月重点客户经营计划",
       source: "行长关注",
     });
+    expect(tree[0].nodes[0].schedule).toEqual(plan.items[0].schedule);
     expect(tree[1].nodes[0].sceneName).toBe("产品到期承接");
   });
 

@@ -20,7 +20,7 @@ import { contactStatusOf, type ContactStatusFilterValue } from "./contactStatus"
 import { buildInsightUrl, buildTelUrl, fetchSchemeSignature } from "../api";
 import { useCanAccess, useWealthStore } from "../store";
 import type { Customer } from "../types";
-import { buildTaskTree, dateKey } from "../utils";
+import { buildTaskTree, dateKey, scheduleLabel } from "../utils";
 // import { htmlPreviewEventsApi } from "@/api/modules/htmlPreviewEvents";
 // import type { HtmlTrackerPayloadType } from "@/api/types/htmlPreviewEvents";
 
@@ -251,6 +251,13 @@ export function CustomerLabel({ label }: { label: string }) {
 export default function Tasks({ page }: { page: TaskPageKind }) {
   const canViewTasks = useCanAccess("tasks");
   const customers = useWealthStore((s) => s.customers);
+  const counts = useWealthStore((s) =>
+    page === "done"
+      ? s.doneCounts
+      : page === "pending"
+        ? s.pendingCounts
+        : s.todayCounts,
+  );
   const customersLoading = useWealthStore((s) => s.customersLoading);
   const pendingCustomers = useWealthStore((s) => s.pendingCustomers);
   const pendingLoading = useWealthStore((s) => s.pendingLoading);
@@ -281,6 +288,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const lastLoadedPageRef = useRef<TaskPageKind | null>(null);
+  const lastLoadedViewRef = useRef(view);
   const groupTablesId = useId();
   /**
    * 经营方案 iframe 自增序列：作为 _t 时间戳附加到 URL 强制刷新加载，
@@ -297,6 +305,12 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   /** 工作任务树：从「已发布且今日有排程」的规划场景实时推导 */
   const today = dateKey(new Date());
   const taskTree = useMemo(() => buildTaskTree(plans, today), [plans, today]);
+  const selectedNode =
+    taskTree
+      .find((group) => group.category === selectedCategory)
+      ?.nodes.find((node) => node.sceneName === selectedTask) ??
+    taskTree[0]?.nodes[0];
+  const selectedSkillId = selectedNode?.sceneId;
 
   // 规划变更/移除后选中节点可能失效：回退到树的第一个节点
   useEffect(() => {
@@ -383,14 +397,11 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   const showContactStatus = page === "today";
   const contactStatusCustomers = buildList(false, true);
   const columnCount = (isBiz ? 5 : 7) + Number(showContactStatus);
-  const contactedCount = list.filter((c) =>
-    showContactStatus ? c.touched === 1 : c.done,
-  ).length;
   const tableGroups = groups.length
     ? groups
     : [{ key: "empty", fields: [], customers: [] }];
 
-  // 进入今日任务或切回经营视角更新规划；页内切到客户视角仅查询聚合名单。
+  // 进入今日任务或切回经营视角更新规划；场景切换仅查询所选技能。
   // 绘制前启动查询，避免新视角短暂显示旧名单和统计。
   useLayoutEffect(() => {
     if (!plansLoaded) {
@@ -398,10 +409,16 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
     }
     const enteringToday =
       page === "today" && lastLoadedPageRef.current !== "today";
+    const switchingView = lastLoadedViewRef.current !== view;
     lastLoadedPageRef.current = page;
+    lastLoadedViewRef.current = view;
     if (page === "today") {
-      if (enteringToday || view === "business") {
-        void refreshTodayCustomers(view);
+      if (enteringToday || (view === "business" && switchingView)) {
+        if (view === "business" && selectedSkillId)
+          void refreshTodayCustomers(view, selectedSkillId);
+        else void refreshTodayCustomers(view);
+      } else if (view === "business" && selectedSkillId) {
+        void loadTodayCustomers(view, selectedSkillId);
       } else {
         void loadTodayCustomers(view);
       }
@@ -415,6 +432,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
   }, [
     page,
     view,
+    selectedSkillId,
     plansLoaded,
     refreshTodayCustomers,
     loadTodayCustomers,
@@ -614,7 +632,11 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                   aria-label="刷新工作任务"
                   disabled={!plansLoaded || customersLoading}
                   aria-busy={customersLoading}
-                  onClick={() => void refreshTodayCustomers("business")}
+                  onClick={() =>
+                    void (selectedSkillId
+                      ? refreshTodayCustomers("business", selectedSkillId)
+                      : refreshTodayCustomers("business"))
+                  }
                 >
                   <RotateCw
                     size={16}
@@ -721,7 +743,7 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
             <Icon name={doneView ? "check" : "list"} />
           </div>
           <div>
-            <h3>
+            <h3 className={styles.taskSummaryTitle}>
               {doneView
                 ? "客户经营任务已完成"
                 : page === "pending"
@@ -731,18 +753,33 @@ export default function Tasks({ page }: { page: TaskPageKind }) {
                       ? "当前任务：" + selectedTask
                       : "今日暂无排程中的任务"
                     : "今日任务：客户经营"}
+              {isBiz &&
+                !loading &&
+                !customersLoading &&
+                selectedNode &&
+                !pool.length && (
+                  <span className={styles.taskExecutionTime}>
+                    执行时间：{scheduleLabel(selectedNode.schedule)}
+                  </span>
+                )}
             </h3>
             <div className={styles.summaryMetrics}>
               <span>
-                目标客户 <b>{loading ? "--" : list.length}</b> 人
+                目标客户 <b>{loading ? "--" : (counts?.targetCusCount ?? "--")}</b>{" "}
+                人
               </span>
               <span>
-                今日已触达 <b>{loading ? "--" : contactedCount}</b> 人
+                今日已触达{" "}
+                <b>{loading ? "--" : (counts?.todayTouchCount ?? "--")}</b> 人
+              </span>
+              <span>
+                七日内已触达{" "}
+                <b>{loading ? "--" : (counts?.sevenDayTouchCount ?? "--")}</b> 人
               </span>
               <span>
                 待处理{" "}
                 <b className={styles.red}>
-                  {loading ? "--" : list.length - contactedCount}
+                  {loading ? "--" : (counts?.unTouchedCount ?? "--")}
                 </b>{" "}
                 人
               </span>

@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..crons.broadcast_task_store import CronBroadcastTaskStore
 from .market_dispatch import (
@@ -241,26 +241,33 @@ def _parse_skill_stat(row: Any) -> SkillStatItem | None:
 @router.get("/name-list", response_model=NameListResponse)
 async def list_name_list(
     request: Request,
-    skill_id: str = "",
+    skill_id: list[str] = Query(...),
     sap_id: str = "",
     touched: int | None = None,
 ) -> NameListResponse:
     """客户名单查询；两个视角都传 sap_id（当前登录客户经理）。
 
-    skill_id 非空为经营视角（按技能过滤）；为空为客户视角
-    （该经理名下全部技能客户，一次查全）。
+    skill_id 必传数组；经营视角传当前场景，其余口径传当天全部场景。
     touched 透传外部接口的触达状态过滤：0 未触达（待触达）/
     1 已触达（已完成）/ 2 全部（今日任务）；缺省不过滤。
     外部接口不可用时返回空列表，由前端展示空态，不做假数据兜底。
     """
     if touched is not None and touched not in (0, 1, 2):
         raise HTTPException(status_code=400, detail="invalid touched")
-    return await _fetch_external_name_list(request, skill_id, sap_id, touched)
+    skill_ids = list(
+        dict.fromkeys(value.strip() for value in skill_id if value.strip()),
+    )
+    if not skill_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="skill_id must not be empty",
+        )
+    return await _fetch_external_name_list(request, skill_ids, sap_id, touched)
 
 
 async def _fetch_external_name_list(
     request: Request,
-    skill_id: str,
+    skill_id: list[str],
     sap_id: str,
     touched: int | None,
 ) -> NameListResponse:
@@ -269,14 +276,13 @@ async def _fetch_external_name_list(
         return NameListResponse()
     bbk_id = getattr(request.state, "bbk_id", None) or ""
     body: dict[str, Any] = {
+        "skillId": skill_id,
         "bbkId": bbk_id,
         "platformSource": "WP",
         "pageSource": "WP_AGENT_WORKSPACE_TASK_LIST",
     }
     if touched is not None:
         body["touched"] = touched
-    if skill_id:
-        body["skillId"] = skill_id
     if sap_id:
         body["sapId"] = sap_id
     sub_bbk_id = request.headers.get("X-Org-Code")
@@ -316,6 +322,10 @@ def _parse_name_list_response(payload: dict[str, Any]) -> NameListResponse:
             items.append(item)
     return NameListResponse(
         items=items,
+        targetCusCount=data.get("targetCusCount"),
+        todayTouchCount=data.get("todayTouchCount"),
+        sevenDayTouchCount=data.get("sevenDayTouchCount"),
+        unTouchedCount=data.get("unTouchedCount"),
         skillFieldList=data.get("skillFieldList") or [],
         allFields=data.get("allFields") or [],
     )

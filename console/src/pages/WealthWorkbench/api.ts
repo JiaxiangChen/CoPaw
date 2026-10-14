@@ -300,7 +300,35 @@ interface NameListItemView {
   fieldList?: NameListFieldValue[];
 }
 
-interface NameListResponse {
+export interface CustomerCounts {
+  targetCusCount: number | null;
+  todayTouchCount: number | null;
+  sevenDayTouchCount: number | null;
+  unTouchedCount: number | null;
+}
+
+export interface CustomerListResult {
+  customers: Customer[];
+  counts: CustomerCounts;
+}
+
+function customerCounts(response?: Partial<CustomerCounts>): CustomerCounts {
+  return {
+    targetCusCount: response?.targetCusCount ?? null,
+    todayTouchCount: response?.todayTouchCount ?? null,
+    sevenDayTouchCount: response?.sevenDayTouchCount ?? null,
+    unTouchedCount: response?.unTouchedCount ?? null,
+  };
+}
+
+const EMPTY_CUSTOMER_COUNTS: CustomerCounts = {
+  targetCusCount: 0,
+  todayTouchCount: 0,
+  sevenDayTouchCount: 0,
+  unTouchedCount: 0,
+};
+
+interface NameListResponse extends Partial<CustomerCounts> {
   items: NameListItemView[];
   skillFieldList?: NameListSkillFields[];
   allFields?: NameListField[];
@@ -308,19 +336,21 @@ interface NameListResponse {
 
 /**
  * 查询客户名单。两个视角都传 sapId（当前登录客户经理）：
- * 传 skillId 为经营视角（按技能过滤）；不传为客户视角（该经理全部技能客户）。
+ * skillIds 必传：经营视角传当前场景，其他口径传当天任务树的全部技能。
  * touched 透传外部接口的触达状态过滤：0 未触达 / 1 已触达 / 2 全部；缺省不过滤。
  * 接口不可达时返回空列表，由页面展示空态，不做假数据兜底。
  */
 export async function fetchNameList(
-  skillId?: string,
+  skillIds: string[],
   sapId?: string,
   touched?: number,
 ): Promise<NameListResponse> {
+  const ids = [...new Set(skillIds.filter(Boolean))];
+  if (!ids.length) return { items: [] };
   try {
     const params = new URLSearchParams();
-    if (skillId) {
-      params.set("skill_id", skillId);
+    for (const skillId of ids) {
+      params.append("skill_id", skillId);
     }
     if (sapId) {
       params.set("sap_id", sapId);
@@ -396,14 +426,14 @@ const CUSTOMER_LABEL_BY_PLAN_SOURCE: Record<string, string> = {
 
 /**
  * 拉取今日任务对应的客户经营清单。
- * 经营视角：按技能去重并发查询（skillId + sapId），同一客户在同一任务下只出现一次；
- * 客户视角：一次查询该经理名下全部技能客户（仅 sapId），直接使用外部已聚合名单。
+ * 经营视角由调用方传入当前场景；客户视角传入当天任务树全部场景。
+ * 两个口径都传技能 ID 数组和 sapId，客户视角直接使用外部聚合名单。
  */
 export async function fetchTodayCustomers(
   tasks: TodayTaskRef[],
   sapId: string | undefined,
   view: "business" | "customer",
-): Promise<Customer[]> {
+): Promise<CustomerListResult> {
   const uniqueTasks = [...new Map(tasks.map((t) => [t.skillId, t])).values()];
   if (view === "customer") {
     return fetchCustomerViewCustomers(uniqueTasks, sapId, {
@@ -413,7 +443,7 @@ export async function fetchTodayCustomers(
   const groups = await Promise.all(
     uniqueTasks.map(async (t) => ({
       task: t,
-      response: await fetchNameList(t.skillId, sapId, TOUCHED_ALL),
+      response: await fetchNameList([t.skillId], sapId, TOUCHED_ALL),
     })),
   );
   const seen = new Set<string>();
@@ -447,7 +477,12 @@ export async function fetchTodayCustomers(
       });
     }
   }
-  return customers;
+  return {
+    customers,
+    counts: groups.length
+      ? customerCounts(groups[0].response)
+      : { ...EMPTY_CUSTOMER_COUNTS },
+  };
 }
 
 /** 触达状态过滤（外部接口 touched 字段）：0 未触达 / 1 已触达 / 2 全部 */
@@ -455,21 +490,21 @@ const TOUCHED_PENDING = 0;
 const TOUCHED_DONE = 1;
 const TOUCHED_ALL = 2;
 
-/** 待触达客户名单：客户视角口径（仅 sapId + touched=0）。 */
+/** 待触达客户名单：当天技能数组 + sapId + touched=0。 */
 export async function fetchPendingCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
-): Promise<Customer[]> {
+): Promise<CustomerListResult> {
   return fetchCustomerViewCustomers(tasks, sapId, {
     touched: TOUCHED_PENDING,
   });
 }
 
-/** 已完成客户名单：客户视角口径（仅 sapId + touched=1）。 */
+/** 已完成客户名单：当天技能数组 + sapId + touched=1。 */
 export async function fetchDoneCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
-): Promise<Customer[]> {
+): Promise<CustomerListResult> {
   return fetchCustomerViewCustomers(tasks, sapId, {
     touched: TOUCHED_DONE,
     done: true,
@@ -477,7 +512,7 @@ export async function fetchDoneCustomers(
 }
 
 /**
- * 客户视角名单：一次查询（不带 skillId），直接映射外部已聚合的 data.list。
+ * 客户视角名单：按当天技能数组一次查询，映射外部聚合的 data.list。
  * 重点标签列按命中技能所属规划的创建角色展示；不在今日任务树中的
  * 技能无法关联本地规划来源，因此不产生标签。
  */
@@ -485,10 +520,14 @@ async function fetchCustomerViewCustomers(
   tasks: TodayTaskRef[],
   sapId?: string,
   opts: { touched?: number; done?: boolean } = {},
-): Promise<Customer[]> {
+): Promise<CustomerListResult> {
   const sceneBySkill = new Map(tasks.map((t) => [t.skillId, t]));
-  const response = await fetchNameList(undefined, sapId, opts.touched);
-  return response.items.map((item) => {
+  const response = await fetchNameList(
+    tasks.map((task) => task.skillId),
+    sapId,
+    opts.touched,
+  );
+  const customers = response.items.map((item) => {
     const skillList = item.skillList ?? [];
     const skillIds = [...new Set(skillList.map((s) => s.skillId))];
     const skillNames = [
@@ -528,6 +567,12 @@ async function fetchCustomerViewCustomers(
       ...customerFields(item, response),
     };
   });
+  return {
+    customers,
+    counts: tasks.length
+      ? customerCounts(response)
+      : { ...EMPTY_CUSTOMER_COUNTS },
+  };
 }
 
 // ---------------------------------------------------------------------------

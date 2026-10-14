@@ -298,6 +298,10 @@ class NameListItem(BaseModel):
 
 
 class NameListResponse(BaseModel):
+    targetCusCount: int | None = None
+    todayTouchCount: int | None = None
+    sevenDayTouchCount: int | None = None
+    unTouchedCount: int | None = None
     items: list[NameListItem] = Field(default_factory=list)
     skillFieldList: list[NameListSkillFields] = Field(default_factory=list)
     allFields: list[NameListField] = Field(default_factory=list)
