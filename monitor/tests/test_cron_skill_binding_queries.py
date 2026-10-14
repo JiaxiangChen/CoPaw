@@ -66,6 +66,14 @@ def test_branch_skill_aggregation_uses_skill_id_not_display_name():
                 "is_read": 1,
             },
             {
+                "skill_id": "skill-a",
+                "skill_name": "同名技能",
+                "job_id": "job-a",
+                "status": "error",
+                "async_status": "error",
+                "is_read": 1,
+            },
+            {
                 "skill_id": "skill-b",
                 "skill_name": "同名技能",
                 "job_id": "job-b",
@@ -86,6 +94,7 @@ def test_branch_skill_aggregation_uses_skill_id_not_display_name():
 
     assert len(items) == 2
     assert {item.cron_task_count for item in items} == {1}
+    assert [item.read_count for item in items] == [1, 1]
 
 
 @pytest.mark.asyncio

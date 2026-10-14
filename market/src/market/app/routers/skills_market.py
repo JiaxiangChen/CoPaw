@@ -778,6 +778,8 @@ async def _sync_skill_to_market_db(
     skill_id: str,
     imported_name: str,
     resolved_cn_name: str,
+    category_id: Optional[int],
+    bbk_ids: Optional[list[str]],
     include_in_statistics: bool,
     x_user_id: str,
     user_name: str,
@@ -793,6 +795,8 @@ async def _sync_skill_to_market_db(
         skill_id=skill_id,
         skill_name=imported_name,
         cn_name=resolved_cn_name,
+        category_id=category_id,
+        bbk_ids=bbk_ids,
         include_in_statistics=include_in_statistics,
         creator_id=x_user_id,
         creator_name=user_name,
@@ -890,6 +894,8 @@ async def _process_skill_upload_batch(
                 skill_id=skill_id,
                 imported_name=imported_name,
                 resolved_cn_name=resolved_cn_name,
+                category_id=category_id,
+                bbk_ids=parsed_bbk_ids,
                 include_in_statistics=include_in_statistics,
                 x_user_id=user_id,
                 user_name=user_name,
@@ -2668,164 +2674,165 @@ async def update_skill_statistics_config(
     )
 
 
-class InitStatisticsConfigRequest(BaseModel):
-    """初始化统计配置请求."""
-
-    source_ids: list[str] = Field(
-        default_factory=list,
-        description="来源ID列表，不传或为空时初始化所有来源",
-    )
-    default_include: bool = Field(
-        default=True,
-        description="默认是否纳入统计",
-    )
-    dry_run: bool = Field(
-        default=False,
-        description="试运行模式，仅统计不实际写入",
-    )
-
-
-class InitStatisticsConfigResult(TypedDict):
-    """初始化统计配置结果."""
-
-    dry_run: bool
-    source_ids: list[str]
-    total_skills: int
-    processed: int
-    inserted: int
-    updated: int
-    skipped: int
-    errors: list[dict]
-
-
-async def _init_single_skill_statistics(
-    registry,
-    item: MarketItem,
-    source_id: str,
-    default_include: bool,
-    dry_run: bool,
-) -> tuple[bool, dict | None]:
-    """初始化单个技能的统计配置.
-
-    Returns:
-        (success, error_dict) - 成功时 error_dict 为 None
-    """
-    if dry_run:
-        return True, None
-
-    try:
-        success = await registry.upsert_market_skill(
-            source_id=source_id,
-            item_id=item.item_id,
-            skill_id=item.skill_id,
-            skill_name=item.name,
-            cn_name=item.chinese_name,
-            include_in_statistics=default_include,
-            creator_id=item.creator_id,
-            creator_name=item.creator_name,
-            updator_id=item.creator_id,
-            updator_name=item.creator_name,
-        )
-        if success:
-            return True, None
-        return False, {
-            "item_id": item.item_id,
-            "skill_name": item.name,
-            "reason": "数据库写入返回失败",
-        }
-    except Exception as e:
-        return False, {
-            "item_id": item.item_id,
-            "skill_name": item.name,
-            "reason": str(e),
-        }
-
-
-@router.post(
-    "/market/admin/skills/init-statistics",
-)
-async def init_skill_statistics_config(
-    request: Request,
-    req: InitStatisticsConfigRequest,
-) -> InitStatisticsConfigResult:
-    """初始化技能统计配置."""
-    svc = request.app.state.marketplace
-
-    results: InitStatisticsConfigResult = {
-        "dry_run": req.dry_run,
-        "source_ids": [],
-        "total_skills": 0,
-        "processed": 0,
-        "inserted": 0,
-        "updated": 0,
-        "skipped": 0,
-        "errors": [],
-    }
-
-    # 检查数据库连接
-    if not svc.db or not svc.db.is_connected:
-        results["errors"].append(
-            {
-                "reason": "数据库未连接，无法初始化",
-            },
-        )
-        return results
-
-    # 确定 source_ids 列表
-    if req.source_ids:
-        source_ids = req.source_ids
-    else:
-        # 遍历 marketplace_root 下所有目录
-        source_ids = []
-        for dir_path in svc.marketplace_root.iterdir():
-            if dir_path.is_dir():
-                index_path = dir_path / "index.json"
-                if index_path.exists():
-                    source_ids.append(dir_path.name)
-
-    results["source_ids"] = source_ids
-
-    # 初始化数据库操作类
-    from ...marketplace.market_skill_registry import MarketSkillRegistry
-
-    registry = MarketSkillRegistry(svc.db)
-
-    # dry_run 模式：只统计数量，不写入数据库和文件
-    if req.dry_run:
-        for source_id in source_ids:
-            items = load_index(svc.marketplace_root, source_id)
-            skill_items = [i for i in items if i.item_type == "skill"]
-            results["total_skills"] += len(skill_items)
-            results["processed"] += len(skill_items)
-            results["inserted"] = results["processed"]  # dry_run 假设全部成功
-        return results
-
-    # 实际执行模式
-    for source_id in source_ids:
-        items = load_index(svc.marketplace_root, source_id)
-        skill_items = [i for i in items if i.item_type == "skill"]
-        results["total_skills"] += len(skill_items)
-
-        for item in skill_items:
-            results["processed"] += 1
-
-            success, error = await _init_single_skill_statistics(
-                registry=registry,
-                item=item,
-                source_id=source_id,
-                default_include=req.default_include,
-                dry_run=False,
-            )
-            if success:
-                results["inserted"] += 1
-                # 只更新 skill 类型的 include_in_statistics 字段
-                item.include_in_statistics = req.default_include
-            else:
-                results["skipped"] += 1
-                if error:
-                    results["errors"].append(error)
-
-        # 保存 index.json（只包含 skill 类型的变更）
-        save_index(svc.marketplace_root, source_id, items)
-
-    return results
+# 已由 /market/admin/metadata/migrate 替代，停用旧的全量统计初始化入口。
+# class InitStatisticsConfigRequest(BaseModel):
+#     """初始化统计配置请求."""
+#
+#     source_ids: list[str] = Field(
+#         default_factory=list,
+#         description="来源ID列表，不传或为空时初始化所有来源",
+#     )
+#     default_include: bool = Field(
+#         default=True,
+#         description="默认是否纳入统计",
+#     )
+#     dry_run: bool = Field(
+#         default=False,
+#         description="试运行模式，仅统计不实际写入",
+#     )
+#
+#
+# class InitStatisticsConfigResult(TypedDict):
+#     """初始化统计配置结果."""
+#
+#     dry_run: bool
+#     source_ids: list[str]
+#     total_skills: int
+#     processed: int
+#     inserted: int
+#     updated: int
+#     skipped: int
+#     errors: list[dict]
+#
+#
+# async def _init_single_skill_statistics(
+#     registry,
+#     item: MarketItem,
+#     source_id: str,
+#     default_include: bool,
+#     dry_run: bool,
+# ) -> tuple[bool, dict | None]:
+#     """初始化单个技能的统计配置.
+#
+#     Returns:
+#         (success, error_dict) - 成功时 error_dict 为 None
+#     """
+#     if dry_run:
+#         return True, None
+#
+#     try:
+#         success = await registry.upsert_market_skill(
+#             source_id=source_id,
+#             item_id=item.item_id,
+#             skill_id=item.skill_id,
+#             skill_name=item.name,
+#             cn_name=item.chinese_name,
+#             include_in_statistics=default_include,
+#             creator_id=item.creator_id,
+#             creator_name=item.creator_name,
+#             updator_id=item.creator_id,
+#             updator_name=item.creator_name,
+#         )
+#         if success:
+#             return True, None
+#         return False, {
+#             "item_id": item.item_id,
+#             "skill_name": item.name,
+#             "reason": "数据库写入返回失败",
+#         }
+#     except Exception as e:
+#         return False, {
+#             "item_id": item.item_id,
+#             "skill_name": item.name,
+#             "reason": str(e),
+#         }
+#
+#
+# @router.post(
+#     "/market/admin/skills/init-statistics",
+# )
+# async def init_skill_statistics_config(
+#     request: Request,
+#     req: InitStatisticsConfigRequest,
+# ) -> InitStatisticsConfigResult:
+#     """初始化技能统计配置."""
+#     svc = request.app.state.marketplace
+#
+#     results: InitStatisticsConfigResult = {
+#         "dry_run": req.dry_run,
+#         "source_ids": [],
+#         "total_skills": 0,
+#         "processed": 0,
+#         "inserted": 0,
+#         "updated": 0,
+#         "skipped": 0,
+#         "errors": [],
+#     }
+#
+#     # 检查数据库连接
+#     if not svc.db or not svc.db.is_connected:
+#         results["errors"].append(
+#             {
+#                 "reason": "数据库未连接，无法初始化",
+#             },
+#         )
+#         return results
+#
+#     # 确定 source_ids 列表
+#     if req.source_ids:
+#         source_ids = req.source_ids
+#     else:
+#         # 遍历 marketplace_root 下所有目录
+#         source_ids = []
+#         for dir_path in svc.marketplace_root.iterdir():
+#             if dir_path.is_dir():
+#                 index_path = dir_path / "index.json"
+#                 if index_path.exists():
+#                     source_ids.append(dir_path.name)
+#
+#     results["source_ids"] = source_ids
+#
+#     # 初始化数据库操作类
+#     from ...marketplace.market_skill_registry import MarketSkillRegistry
+#
+#     registry = MarketSkillRegistry(svc.db)
+#
+#     # dry_run 模式：只统计数量，不写入数据库和文件
+#     if req.dry_run:
+#         for source_id in source_ids:
+#             items = load_index(svc.marketplace_root, source_id)
+#             skill_items = [i for i in items if i.item_type == "skill"]
+#             results["total_skills"] += len(skill_items)
+#             results["processed"] += len(skill_items)
+#             results["inserted"] = results["processed"]  # dry_run 假设全部成功
+#         return results
+#
+#     # 实际执行模式
+#     for source_id in source_ids:
+#         items = load_index(svc.marketplace_root, source_id)
+#         skill_items = [i for i in items if i.item_type == "skill"]
+#         results["total_skills"] += len(skill_items)
+#
+#         for item in skill_items:
+#             results["processed"] += 1
+#
+#             success, error = await _init_single_skill_statistics(
+#                 registry=registry,
+#                 item=item,
+#                 source_id=source_id,
+#                 default_include=req.default_include,
+#                 dry_run=False,
+#             )
+#             if success:
+#                 results["inserted"] += 1
+#                 # 只更新 skill 类型的 include_in_statistics 字段
+#                 item.include_in_statistics = req.default_include
+#             else:
+#                 results["skipped"] += 1
+#                 if error:
+#                     results["errors"].append(error)
+#
+#         # 保存 index.json（只包含 skill 类型的变更）
+#         save_index(svc.marketplace_root, source_id, items)
+#
+#     return results

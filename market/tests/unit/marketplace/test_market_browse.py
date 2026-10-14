@@ -183,6 +183,225 @@ def test_browse_uses_tdsql_metadata_when_index_is_missing(tmp_path):
     svc.list_market_metadata.assert_awaited_once_with("src_a", "skill")
 
 
+def test_skill_browse_uses_batch_stats_without_per_item_queries(tmp_path):
+    from market.marketplace.models import MarketItem
+
+    app = _make_app(tmp_path)
+    item = MarketItem(
+        item_id="tdsql-item",
+        item_type="skill",
+        name="tdsql-skill",
+        skill_id="skill-1",
+        creator_id="u1",
+        category_id=1,
+        bbk_ids=[],
+        status="active",
+    )
+    svc = app.state.marketplace
+    svc.list_market_metadata = AsyncMock(return_value=[item])
+    svc.market_skill_registry.list_market_skills = AsyncMock(
+        return_value=[item],
+    )
+    app.state.marketplace.db.fetch_all = AsyncMock(
+        side_effect=[
+            [
+                {
+                    "id": 1,
+                    "source_id": "src_a",
+                    "name": "业务",
+                    "sort_order": 0,
+                    "branch_visible": 1,
+                },
+            ],
+            [
+                {
+                    "item_key": "tdsql-skill",
+                    "call_count": 7,
+                    "user_count": 3,
+                },
+            ],
+        ],
+    )
+    svc._get_stats = AsyncMock(  # noqa: SLF001
+        side_effect=AssertionError("browse must not query tracing stats"),
+    )
+
+    response = TestClient(app).get(
+        "/api/market/browse?resource_type=skill",
+        headers={"X-Source-Id": "src_a", "X-Bbk-Id": "100"},
+    )
+
+    assert response.status_code == 200
+    item_data = response.json()["items"][0]
+    assert item_data["call_count"] == 7
+    assert item_data["user_count"] == 3
+    svc.market_skill_registry.list_market_skills.assert_not_awaited()
+    svc._get_stats.assert_not_awaited()  # noqa: SLF001
+
+
+def test_skill_browse_falls_back_when_batch_stats_query_fails(tmp_path):
+    from market.marketplace.models import MarketItem
+
+    app = _make_app(tmp_path)
+    item = MarketItem(
+        item_id="tdsql-item",
+        item_type="skill",
+        name="tdsql-skill",
+        skill_id="skill-1",
+        creator_id="u1",
+        category_id=1,
+        bbk_ids=[],
+        status="active",
+    )
+    svc = app.state.marketplace
+    svc.list_market_metadata = AsyncMock(return_value=[item])
+    app.state.marketplace.db.fetch_all = AsyncMock(
+        side_effect=[
+            [
+                {
+                    "id": 1,
+                    "source_id": "src_a",
+                    "name": "业务",
+                    "sort_order": 0,
+                    "branch_visible": 1,
+                },
+            ],
+            RuntimeError("stats unavailable"),
+        ],
+    )
+
+    response = TestClient(app).get(
+        "/api/market/browse?resource_type=skill",
+        headers={"X-Source-Id": "src_a", "X-Bbk-Id": "100"},
+    )
+
+    assert response.status_code == 200
+    item_data = response.json()["items"][0]
+    assert item_data["call_count"] == 0
+    assert item_data["user_count"] == 0
+
+
+def test_skill_browse_chunks_batch_stats_queries(tmp_path, monkeypatch):
+    from market.app.routers import market_browse
+    from market.marketplace.models import MarketItem
+
+    monkeypatch.setattr(market_browse, "_BROWSE_STATS_CHUNK_SIZE", 2)
+    app = _make_app(tmp_path)
+    items = [
+        MarketItem(
+            item_id=f"tdsql-item-{index}",
+            item_type="skill",
+            name=f"tdsql-skill-{index}",
+            skill_id=f"skill-{index}",
+            creator_id="u1",
+            category_id=1,
+            bbk_ids=[],
+            status="active",
+        )
+        for index in range(3)
+    ]
+    svc = app.state.marketplace
+    svc.list_market_metadata = AsyncMock(return_value=items)
+    app.state.marketplace.db.fetch_all = AsyncMock(
+        side_effect=[
+            [
+                {
+                    "id": 1,
+                    "source_id": "src_a",
+                    "name": "业务",
+                    "sort_order": 0,
+                    "branch_visible": 1,
+                },
+            ],
+            [
+                {
+                    "item_key": "tdsql-skill-0",
+                    "call_count": 7,
+                    "user_count": 3,
+                },
+            ],
+            [
+                {
+                    "item_key": "tdsql-skill-2",
+                    "call_count": 5,
+                    "user_count": 2,
+                },
+            ],
+        ],
+    )
+
+    response = TestClient(app).get(
+        "/api/market/browse?resource_type=skill",
+        headers={"X-Source-Id": "src_a", "X-Bbk-Id": "100"},
+    )
+
+    assert response.status_code == 200
+    stats_by_name = {
+        item["name"]: (item["call_count"], item["user_count"])
+        for item in response.json()["items"]
+    }
+    assert stats_by_name == {
+        "tdsql-skill-0": (7, 3),
+        "tdsql-skill-1": (0, 0),
+        "tdsql-skill-2": (5, 2),
+    }
+    assert app.state.marketplace.db.fetch_all.await_count == 3
+
+
+def test_mcp_browse_uses_batch_stats_without_per_item_queries(tmp_path):
+    from market.marketplace.models import MarketItem
+
+    app = _make_app(tmp_path)
+    item = MarketItem(
+        item_id="mcp-item",
+        item_type="mcp",
+        client_key="weather",
+        name="weather",
+        creator_id="u1",
+        category_id=1,
+        bbk_ids=[],
+        status="active",
+    )
+    svc = app.state.marketplace
+    svc.list_market_metadata = AsyncMock(return_value=[item])
+    svc.mcp_market_registry.list_market_mcps = AsyncMock(return_value=[item])
+    app.state.marketplace.db.fetch_all = AsyncMock(
+        side_effect=[
+            [
+                {
+                    "id": 1,
+                    "source_id": "src_a",
+                    "name": "业务",
+                    "sort_order": 0,
+                    "branch_visible": 1,
+                },
+            ],
+            [
+                {
+                    "item_key": "weather",
+                    "call_count": 5,
+                    "user_count": 2,
+                },
+            ],
+        ],
+    )
+    svc._get_mcp_stats = AsyncMock(  # noqa: SLF001
+        side_effect=AssertionError("browse must not query tracing stats"),
+    )
+
+    response = TestClient(app).get(
+        "/api/market/browse?resource_type=mcp",
+        headers={"X-Source-Id": "src_a", "X-Bbk-Id": "100"},
+    )
+
+    assert response.status_code == 200
+    item_data = response.json()["items"][0]
+    assert item_data["call_count"] == 5
+    assert item_data["user_count"] == 2
+    svc.mcp_market_registry.list_market_mcps.assert_not_awaited()
+    svc._get_mcp_stats.assert_not_awaited()  # noqa: SLF001
+
+
 def test_browse_can_select_uncategorized_resources(tmp_path):
     app = _make_app(tmp_path)
     svc = app.state.marketplace

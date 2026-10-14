@@ -4,6 +4,7 @@
 import sqlite3
 import inspect
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -164,7 +165,9 @@ def populated_db(db):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source, count", [("app-a", 1), (None, 2)])
 async def test_branch_behavior_filters_all_metrics(
-    populated_db, source, count
+    populated_db,
+    source,
+    count,
 ):
     result = await QueryService().get_branch_behavior(
         "2026-06-01",
@@ -196,7 +199,9 @@ async def test_branch_behavior_filters_all_metrics(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source, count", [("app-a", 1), (None, 2)])
 async def test_manager_summary_filters_all_metrics(
-    populated_db, source, count
+    populated_db,
+    source,
+    count,
 ):
     result = await QueryService().get_branch_manager_summary(
         "100",
@@ -259,6 +264,11 @@ async def test_execution_stats_filters_executor_even_for_shared_job(
         "'2026-06-10 12:00:00', 'success', 'success', 1, 'other-trace')",
         (job,),
     )
+    populated_db.connection.execute(
+        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "'2026-06-10 12:00:00', 'error', 'error', 1, 'failed-trace')",
+        (job,),
+    )
     stats = await QueryService()._fetch_branch_execution_stats(
         populated_db,
         datetime(2026, 6, 1),
@@ -267,6 +277,80 @@ async def test_execution_stats_filters_executor_even_for_shared_job(
         sync_date="2026-06-30",
     )
     assert stats["success_count"] == stats["read_tasks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execution_stats_counts_execution_rows_without_trace_dedup(
+    populated_db,
+):
+    job = "app-a-100-included"
+    populated_db.connection.execute(
+        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "'2026-06-10 13:00:00', 'error', 'error', 0, 'retry-success')",
+        (job,),
+    )
+    populated_db.connection.execute(
+        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "'2026-06-10 14:00:00', 'success', 'success', 1, 'retry-success')",
+        (job,),
+    )
+    populated_db.connection.execute(
+        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "'2026-06-10 13:00:00', 'success', 'success', 1, 'retry-error')",
+        (job,),
+    )
+    populated_db.connection.execute(
+        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "'2026-06-10 14:00:00', 'error', 'error', 1, 'retry-error')",
+        (job,),
+    )
+
+    stats = await QueryService()._fetch_branch_execution_stats(
+        populated_db,
+        datetime(2026, 6, 1),
+        datetime(2026, 6, 15),
+        [job],
+        sync_date="2026-06-30",
+    )
+
+    assert stats["success_count"] == 3
+    assert stats["read_tasks"] == 3
+    assert stats["error_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_overview_rates_use_success_count_as_denominator(
+    monkeypatch,
+):
+    service = QueryService()
+    monkeypatch.setattr(query_service, "get_db_connection", object)
+    service._fetch_overview_task_count = AsyncMock(return_value=10)
+    service._fetch_overview_branch_tenant_counts = AsyncMock(
+        return_value=(1, 2),
+    )
+    service._fetch_overview_execution_counts = AsyncMock(
+        return_value={
+            "total_executions": 10,
+            "success_count": 8,
+            "running_count": 1,
+            "error_count": 1,
+        },
+    )
+    service._fetch_overview_read_tasks = AsyncMock(return_value=4)
+    service._fetch_overview_report_behavior_counts = AsyncMock(
+        return_value={"report_count": 4, "insight_count": 0, "phone_count": 0},
+    )
+    service._fetch_overview_new_cron_tasks = AsyncMock(return_value=0)
+
+    result = await service.get_overview_stats(
+        "2026-06-01",
+        "2026-06-15",
+    )
+
+    assert result.read_tasks == 4
+    assert result.read_rate == 50.0
+    assert result.report_count == 4
+    assert result.report_rate == 50.0
 
 
 @pytest.mark.asyncio
@@ -352,7 +436,7 @@ async def test_branch_scoped_queries_exclude_other_roster_branches(
         **{
             name: arguments[name]
             for name in inspect.signature(method).parameters
-        }
+        },
     )
     if isinstance(result, dict):
         assert not any(result.values())
