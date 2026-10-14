@@ -6,11 +6,12 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from scheduler.app.database import get_db_connection
 from scheduler.app.models.cron import ExecutionSyncRequest
+from .dispatch_intent_service import _matches_expected_dispatch_row
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,118 @@ def _extract_dispatch_identity_columns(
 class ExecutionSyncService:
     """Minimal execution persistence used by Scheduler feedback APIs."""
 
+    async def record_dispatch_execution(
+        self,
+        request: ExecutionSyncRequest,
+    ) -> Optional[int]:
+        """Replace only the latest result, serialized by the intent row."""
+        identity = _extract_dispatch_identity_columns(request.meta)
+        if not all(identity):
+            raise RuntimeError("missing dispatch execution identity")
+        async with get_db_connection().acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cursor:
+                    await self._validate_locked_intent(
+                        cursor, request, identity
+                    )
+                    execution_id = await self._replace_dispatch_result(
+                        cursor,
+                        request,
+                        identity,
+                    )
+                await conn.commit()
+                return execution_id
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    async def _validate_locked_intent(
+        self,
+        cursor: Any,
+        request: ExecutionSyncRequest,
+        identity: tuple[Optional[int], str, Optional[int]],
+    ) -> None:
+        await cursor.execute(
+            "SELECT batch_id, job_id, tenant_id, source_id, attempt_count "
+            "FROM swe_cron_dispatch_intents WHERE id=%s FOR UPDATE",
+            (identity[0],),
+        )
+        values = await cursor.fetchone()
+        if values is None:
+            raise RuntimeError("dispatch intent not found")
+        row = dict(
+            zip(
+                (
+                    "batch_id",
+                    "job_id",
+                    "tenant_id",
+                    "source_id",
+                    "attempt_count",
+                ),
+                values,
+            )
+        )
+        dispatch = json.loads(request.meta)["cron_dispatch"]
+        matches = _matches_expected_dispatch_row(
+            row,
+            expected_batch_id=identity[1],
+            expected_job_id=str(dispatch.get("job_id") or request.job_id),
+            expected_tenant_id=str(
+                dispatch.get("tenant_id") or request.tenant_id
+            ),
+            expected_source_id=str(
+                dispatch.get("source_id", request.source_id)
+            ),
+        )
+        envelope_matches = (
+            row["job_id"] == request.job_id
+            and row["tenant_id"] == request.tenant_id
+        )
+        if not matches or not envelope_matches:
+            raise RuntimeError("dispatch execution identity mismatch")
+        if int(row["attempt_count"] or 0) != identity[2]:
+            raise RuntimeError("dispatch execution attempt mismatch")
+
+    async def _replace_dispatch_result(
+        self,
+        cursor: Any,
+        request: ExecutionSyncRequest,
+        identity: tuple[Optional[int], str, Optional[int]],
+    ) -> Optional[int]:
+        await cursor.execute(
+            "SELECT id, dispatch_attempt FROM swe_cron_executions "
+            "WHERE dispatch_intent_id=%s AND dispatch_batch_id=%s "
+            "AND job_id=%s AND tenant_id=%s "
+            "ORDER BY dispatch_attempt DESC, id DESC LIMIT 1 FOR UPDATE",
+            (*identity[:2], request.job_id, request.tenant_id),
+        )
+        previous = await cursor.fetchone()
+        if previous is not None:
+            execution_id, attempt = previous
+            if attempt == identity[2]:
+                return int(execution_id)
+            if attempt is not None and attempt > identity[2]:
+                raise RuntimeError("newer dispatch execution already exists")
+            await cursor.execute(
+                "UPDATE swe_cron_executions SET is_final=0 WHERE id=%s",
+                (execution_id,),
+            )
+        return await self._insert_execution(cursor, request)
+
     async def record_execution(
         self,
         request: ExecutionSyncRequest,
     ) -> Optional[int]:
-        db = get_db_connection()
+        async with get_db_connection().acquire() as conn:
+            async with conn.cursor() as cursor:
+                return await self._insert_execution(cursor, request)
+
+    async def _insert_execution(
+        self,
+        cursor: Any,
+        request: ExecutionSyncRequest,
+    ) -> Optional[int]:
         now = _get_beijing_now()
         input_snapshot = _truncate_string(
             request.input_snapshot,
@@ -100,57 +208,55 @@ class ExecutionSyncService:
         ) = _extract_dispatch_identity_columns(request.meta)
         meta = _truncate_string(request.meta, META_MAX_LENGTH)
 
-        async with db.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    INSERT INTO swe_cron_executions (
-                        job_id, job_name, tenant_id,
-                        scheduled_time, actual_time, end_time, duration_ms,
-                        status, error_message,
-                        instance_id, executor_leader, is_manual,
-                        trace_id, session_id,
-                        input_snapshot, output_preview, meta,
-                        dispatch_intent_id, dispatch_batch_id,
-                        dispatch_attempt,
-                        notification_status, notification_due_at,
-                        notification_timezone, is_read, read_at, created_at
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s
-                    )
-                    """,
-                    (
-                        request.job_id,
-                        request.job_name,
-                        request.tenant_id,
-                        request.scheduled_time,
-                        request.actual_time,
-                        request.end_time,
-                        request.duration_ms,
-                        request.status,
-                        error_message,
-                        request.instance_id,
-                        request.executor_leader,
-                        request.is_manual,
-                        request.trace_id,
-                        request.session_id,
-                        input_snapshot,
-                        output_preview,
-                        meta,
-                        dispatch_intent_id,
-                        dispatch_batch_id,
-                        dispatch_attempt,
-                        request.notification_status,
-                        _to_beijing_naive(request.notification_due_at),
-                        request.notification_timezone,
-                        request.is_read,
-                        _to_beijing_naive(request.read_at),
-                        now,
-                    ),
-                )
-                execution_id = getattr(cur, "lastrowid", None)
+        await cursor.execute(
+            """
+            INSERT INTO swe_cron_executions (
+                job_id, job_name, tenant_id,
+                scheduled_time, actual_time, end_time, duration_ms,
+                status, error_message,
+                instance_id, executor_leader, is_manual,
+                trace_id, session_id,
+                input_snapshot, output_preview, meta,
+                dispatch_intent_id, dispatch_batch_id,
+                dispatch_attempt,
+                notification_status, notification_due_at,
+                notification_timezone, is_read, read_at, created_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s
+            )
+            """,
+            (
+                request.job_id,
+                request.job_name,
+                request.tenant_id,
+                request.scheduled_time,
+                request.actual_time,
+                request.end_time,
+                request.duration_ms,
+                request.status,
+                error_message,
+                request.instance_id,
+                request.executor_leader,
+                request.is_manual,
+                request.trace_id,
+                request.session_id,
+                input_snapshot,
+                output_preview,
+                meta,
+                dispatch_intent_id,
+                dispatch_batch_id,
+                dispatch_attempt,
+                request.notification_status,
+                _to_beijing_naive(request.notification_due_at),
+                request.notification_timezone,
+                request.is_read,
+                _to_beijing_naive(request.read_at),
+                now,
+            ),
+        )
+        execution_id = getattr(cursor, "lastrowid", None)
 
         logger.info(
             "Scheduler recorded execution: job_id=%s execution_id=%s status=%s",
