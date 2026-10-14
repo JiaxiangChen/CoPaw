@@ -182,9 +182,7 @@ async function requestHandler(
     };
   }
   if (path.startsWith("/wealth/name-list")) {
-    const skillIds = new URL(path, "http://test").searchParams.getAll(
-      "skill_id",
-    );
+    const skillIds = JSON.parse(String(options.body)).skill_id as string[];
     return { items: skillIds.includes(LOAN) ? NAME_LIST_FIXTURE : [] };
   }
   if (path === "/wealth/plans" && method === "GET") {
@@ -425,11 +423,7 @@ describe("WealthWorkbench store", () => {
     const calls = mockRequest.mock.calls.filter(([path]) =>
       String(path).startsWith("/wealth/name-list"),
     );
-    expect(
-      new URL(String(calls[0][0]), "http://test").searchParams.getAll(
-        "skill_id",
-      ),
-    ).toEqual([FINANCE]);
+    expect(JSON.parse(String(calls[0][1]?.body)).skill_id).toEqual([FINANCE]);
   });
 
   it("经营视角只查询所选场景，其他模块和角标使用全部当天技能", async () => {
@@ -452,9 +446,7 @@ describe("WealthWorkbench store", () => {
     const skillArrays = () =>
       mockRequest.mock.calls
         .filter(([path]) => String(path).startsWith("/wealth/name-list"))
-        .map(([path]) =>
-          new URL(String(path), "http://test").searchParams.getAll("skill_id"),
-        );
+        .map(([, options]) => JSON.parse(String(options?.body)).skill_id);
     expect(skillArrays()).toEqual([[FINANCE], [LOAN, FINANCE]]);
     mockRequest.mockClear();
     await state.loadTodayCustomers("customer");
@@ -722,13 +714,12 @@ describe("WealthWorkbench store", () => {
     const nameListCalls = () =>
       mockRequest.mock.calls
         .filter(([p]) => String(p).startsWith("/wealth/name-list"))
-        .map(([p]) => String(p));
+        .map(([, options]) => JSON.parse(String(options?.body)));
 
     await useWealthStore.getState().loadTodayCustomers("business");
-    const bizCall =
-      nameListCalls().find((path) => path.includes("skill_id=")) ?? "";
-    expect(bizCall).toContain("sap_id=10086");
-    expect(bizCall).toContain(`skill_id=${LOAN}`);
+    const bizCall = nameListCalls()[0];
+    expect(bizCall.sap_id).toBe("10086");
+    expect(bizCall.skill_id).toEqual([LOAN]);
     const bizCustomers = useWealthStore.getState().customers;
     expect(bizCustomers).toHaveLength(2);
     expect(useWealthStore.getState().todayCustomerCount).toBe(2);
@@ -741,11 +732,9 @@ describe("WealthWorkbench store", () => {
     });
 
     await useWealthStore.getState().loadTodayCustomers("customer");
-    const custCall = nameListCalls().slice(-1)[0] ?? "";
-    expect(custCall).toContain("sap_id=10086");
-    expect(
-      new URL(custCall, "http://test").searchParams.getAll("skill_id"),
-    ).toEqual([LOAN]);
+    const custCall = nameListCalls().slice(-1)[0];
+    expect(custCall.sap_id).toBe("10086");
+    expect(custCall.skill_id).toEqual([LOAN]);
     const custCustomers = useWealthStore.getState().customers;
     expect(custCustomers).toHaveLength(2);
     expect(useWealthStore.getState().todayCustomerCount).toBe(
@@ -769,18 +758,15 @@ describe("WealthWorkbench store", () => {
     });
     mockRequest.mockClear();
     await useWealthStore.getState().loadTodayCustomerCount();
-    expect(mockRequest).toHaveBeenCalledWith(
-      expect.stringMatching(/\/wealth\/name-list\?.*sap_id=10086/),
+    expect(mockRequest).toHaveBeenCalledWith("/wealth/name-list", {
+      method: "POST",
+      body: JSON.stringify({ skill_id: [LOAN], sap_id: "10086", touched: 2 }),
+    });
+    const paths = mockRequest.mock.calls.map(([, options]) =>
+      JSON.parse(String(options?.body)),
     );
-    const paths = mockRequest.mock.calls.map(([path]) => String(path));
-    expect(
-      paths.every((path) =>
-        new URL(path, "http://test").searchParams
-          .getAll("skill_id")
-          .includes(LOAN),
-      ),
-    ).toBe(true);
-    expect(paths.some((path) => path.includes("touched=2"))).toBe(true);
+    expect(paths.every((body) => body.skill_id.includes(LOAN))).toBe(true);
+    expect(paths.some((body) => body.touched === 2)).toBe(true);
     expect(useWealthStore.getState().todayCustomerCount).toBe(2);
     expect(useWealthStore.getState().customers).toBe(customers);
     expect(useWealthStore.getState().todayCustomerView).toBe("business");
@@ -836,9 +822,9 @@ describe("WealthWorkbench store", () => {
     expect(mockRequest).toHaveBeenCalledTimes(1);
     finishPlans({ items: [latest] });
     await refresh;
-    expect(String(mockRequest.mock.calls[1]?.[0])).toContain(
-      `skill_id=${LOAN}`,
-    );
+    expect(
+      JSON.parse(String(mockRequest.mock.calls[1]?.[1]?.body)).skill_id,
+    ).toEqual([LOAN]);
     expect(useWealthStore.getState().customers[0].task).toBe(
       "新发布的信贷任务",
     );
@@ -854,10 +840,7 @@ describe("WealthWorkbench store", () => {
     expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");
     expect(String(mockRequest.mock.calls[1][0])).toContain("/wealth/name-list");
     expect(
-      new URL(
-        String(mockRequest.mock.calls[1][0]),
-        "http://test",
-      ).searchParams.getAll("skill_id"),
+      JSON.parse(String(mockRequest.mock.calls[1][1]?.body)).skill_id,
     ).toEqual([LOAN]);
     expect(useWealthStore.getState().customersLoading).toBe(false);
   });
@@ -878,7 +861,7 @@ describe("WealthWorkbench store", () => {
     const nameListCalls = () =>
       mockRequest.mock.calls
         .filter(([p]) => String(p).startsWith("/wealth/name-list"))
-        .map(([p]) => String(p));
+        .map(([, options]) => JSON.parse(String(options?.body)));
 
     mockRequest.mockResolvedValueOnce({
       items: [{ ...NAME_LIST_FIXTURE[0], touched: 0 }],
@@ -891,8 +874,8 @@ describe("WealthWorkbench store", () => {
 
     const calls = nameListCalls();
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toContain("touched=0");
-    expect(calls[1]).toContain("touched=1");
+    expect(calls[0].touched).toBe(0);
+    expect(calls[1].touched).toBe(1);
     expect(useWealthStore.getState().pendingCustomers).toHaveLength(1);
     expect(useWealthStore.getState().pendingCustomers[0].touched).toBe(0);
     const done = useWealthStore.getState().doneCustomers;
@@ -910,21 +893,13 @@ describe("WealthWorkbench store", () => {
     await useWealthStore.getState().refreshTaskLists();
     const paths = mockRequest.mock.calls.map(([path]) => String(path));
     expect(paths[0]).toBe("/wealth/plans");
-    const lists = paths
-      .filter((path) => path.startsWith("/wealth/name-list"))
-      .map((path) => new URL(path, "http://test"));
+    const lists = mockRequest.mock.calls
+      .filter(([path]) => String(path).startsWith("/wealth/name-list"))
+      .map(([, options]) => JSON.parse(String(options?.body)));
     expect(lists).toHaveLength(3);
-    expect(lists.map((url) => url.searchParams.get("touched"))).toEqual([
-      "2",
-      "0",
-      "1",
-    ]);
-    expect(
-      lists.every((url) => url.searchParams.get("sap_id") === "10086"),
-    ).toBe(true);
-    expect(
-      lists.every((url) => url.searchParams.getAll("skill_id").includes(LOAN)),
-    ).toBe(true);
+    expect(lists.map((body) => body.touched)).toEqual([2, 0, 1]);
+    expect(lists.every((body) => body.sap_id === "10086")).toBe(true);
+    expect(lists.every((body) => body.skill_id.includes(LOAN))).toBe(true);
     expect(useWealthStore.getState().taskListsRefreshing).toBe(false);
   });
 
