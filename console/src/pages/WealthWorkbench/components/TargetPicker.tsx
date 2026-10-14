@@ -95,9 +95,10 @@ export function TargetPicker() {
     setBranchError(false);
     setKeyword("");
     resetTargetBranch();
+    // 当前级人员与下级机构独立加载，可停留在任意一级选择人员。
+    void loadTargets(branch);
     if (branch.isLeaf) {
       setBranchOpen(false);
-      await loadTargets(branch);
       return;
     }
     if (branch.children?.length) {
@@ -120,7 +121,6 @@ export function TargetPicker() {
         isLeaf: children.length === 0,
       }),
     );
-    if (!children.length) await loadTargets(branch);
   };
 
   const visible = useMemo(() => {
@@ -216,7 +216,11 @@ export function TargetPicker() {
 
       {branchError && (
         <div role="alert" className={styles.field}>
-          <span>支行查询失败，请重试</span>
+          <span>
+            {branchPath.length
+              ? "下级支行查询失败，请重试"
+              : "支行查询失败，请重试"}
+          </span>
           <button
             type="button"
             className={styles.btn}
@@ -236,11 +240,7 @@ export function TargetPicker() {
 
       <div className={styles.targetList} role="group" aria-label="分发目标列表">
         {isMiddle && !targetBranch ? (
-          <div className={styles.empty}>
-            {branchPath.length
-              ? "请继续选择子支行，末级支行确认后加载分发人员"
-              : "请先选择支行，再选择分发人员"}
-          </div>
+          <div className={styles.empty}>请先选择支行，再选择分发人员</div>
         ) : !targetsLoaded ? (
           <div className={styles.empty}>正在加载用户列表…</div>
         ) : visible.length ? (

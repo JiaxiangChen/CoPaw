@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { request } from "../../../api/request";
@@ -50,7 +51,10 @@ describe("中台按支行累计分发", () => {
       mOrgLvl: 70,
       leaf: false,
     };
-    if (nested) mockRequest.mockResolvedValueOnce(branches);
+    if (nested)
+      mockRequest
+        .mockResolvedValueOnce(branches)
+        .mockResolvedValueOnce(people("parent", "上级人员"));
     mockRequest
       .mockResolvedValueOnce([special])
       .mockResolvedValueOnce(people("0001", "张三"));
@@ -66,7 +70,7 @@ describe("中台按支行累计分发", () => {
       await screen.findByRole("menuitemcheckbox", { name: /特殊机构/ }),
     );
     await screen.findByRole("button", { name: /张三/ });
-    expect(mockRequest).toHaveBeenCalledTimes(nested ? 3 : 2);
+    expect(mockRequest).toHaveBeenCalledTimes(nested ? 4 : 2);
     expect(mockRequest).toHaveBeenLastCalledWith(
       "/user-info/positions/by-branch",
       {
@@ -103,7 +107,7 @@ describe("中台按支行累计分发", () => {
     expect(useWealthStore.getState().branchTargetSapIds).toEqual([]);
     expect(useWealthStore.getState().targetsLoaded).toBe(false);
   });
-  it("逐层查询下级，空数组确认末级后才查询人员", async () => {
+  it("每选一级都查询人员，有下级也可停留在当前级", async () => {
     const child = {
       mOrgCode: "1021",
       mOrgName: "一级子支行",
@@ -118,10 +122,12 @@ describe("中台按支行累计分发", () => {
     };
     mockRequest
       .mockResolvedValueOnce(branches)
+      .mockResolvedValueOnce(people("parent", "父级经理"))
       .mockResolvedValueOnce([child])
+      .mockResolvedValueOnce(people("child", "子级经理"))
       .mockResolvedValueOnce([last])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(people("0001", "张三"));
+      .mockResolvedValueOnce(people("0001", "张三"))
+      .mockResolvedValueOnce([]);
     render(<TargetPicker />);
     const select = screen.getByRole("combobox", { name: "选择支行" });
     await waitFor(() => expect(select).toBeEnabled());
@@ -129,20 +135,25 @@ describe("中台按支行累计分发", () => {
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
     );
+    fireEvent.click(await screen.findByRole("button", { name: /父级经理/ }));
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /一级子支行/ }),
     );
+    await screen.findByRole("button", { name: /子级经理/ });
     expect(
-      mockRequest.mock.calls.every(
-        ([url]) => url === "/user-info/branches/by-branch",
+      within(screen.getByRole("group", { name: "分发目标列表" })).queryByText(
+        "父级经理",
       ),
-    ).toBe(true);
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "移除父级经理" }),
+    ).toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /末级子支行/ }),
     );
     await screen.findByRole("button", { name: /张三/ });
     expect(mockRequest).toHaveBeenNthCalledWith(
-      2,
+      3,
       "/user-info/branches/by-branch",
       {
         method: "POST",
@@ -154,7 +165,7 @@ describe("中台按支行累计分发", () => {
       },
     );
     expect(mockRequest).toHaveBeenNthCalledWith(
-      3,
+      5,
       "/user-info/branches/by-branch",
       {
         method: "POST",
@@ -166,7 +177,7 @@ describe("中台按支行累计分发", () => {
       },
     );
     expect(mockRequest).toHaveBeenNthCalledWith(
-      5,
+      6,
       "/user-info/positions/by-branch",
       {
         method: "POST",
@@ -179,11 +190,17 @@ describe("中台按支行累计分发", () => {
     );
   });
 
-  it("子支行请求失败时不当作末级，可重试", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("下级查询未完成也可选当前级人员，回到缓存上级重新查人员", async () => {
+    let finishChildren!: (value: unknown) => void;
     mockRequest
       .mockResolvedValueOnce(branches)
-      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(people("0001", "张三"))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishChildren = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(people("0002", "李四"))
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(people("0001", "张三"));
     render(<TargetPicker />);
@@ -193,8 +210,50 @@ describe("中台按支行累计分发", () => {
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
     );
+    fireEvent.click(await screen.findByRole("button", { name: /张三/ }));
+    finishChildren([
+      { mOrgCode: "1021", mOrgName: "子支行", mOrgLvl: 60, leaf: false },
+    ]);
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /子支行/ }),
+    );
+    await screen.findByRole("button", { name: /李四/ });
+    fireEvent.mouseDown(select);
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
+    );
+    await waitFor(() =>
+      expect(useWealthStore.getState().branchTargetSapIds).toEqual(["0001"]),
+    );
+    expect(useWealthStore.getState().targetSapIds).toEqual(["0001"]);
+    expect(mockRequest).toHaveBeenCalledTimes(6);
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      "/user-info/positions/by-branch",
+      {
+        method: "POST",
+        body: JSON.stringify({ bbkOrgId: "755", mOrgCode: "102", mOrgLvl: 50 }),
+      },
+    );
+  });
+
+  it("子支行请求失败仍显示当前级人员，可重试下级查询", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockRequest
+      .mockResolvedValueOnce(branches)
+      .mockResolvedValueOnce(people("0001", "张三"))
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(people("0001", "张三"))
+      .mockResolvedValueOnce([]);
+    render(<TargetPicker />);
+    const select = screen.getByRole("combobox", { name: "选择支行" });
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.mouseDown(select);
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
+    );
     await screen.findByRole("alert");
-    expect(mockRequest).toHaveBeenCalledTimes(2);
+    await screen.findByRole("button", { name: /张三/ });
+    expect(mockRequest).toHaveBeenCalledTimes(3);
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
     await screen.findByRole("button", { name: /张三/ });
     warn.mockRestore();
@@ -204,13 +263,14 @@ describe("中台按支行累计分发", () => {
     let finishOld!: (value: unknown) => void;
     mockRequest
       .mockResolvedValueOnce(branches)
+      .mockResolvedValueOnce(people("0001", "张三"))
       .mockReturnValueOnce(
         new Promise((resolve) => {
           finishOld = resolve;
         }),
       )
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(people("0002", "李四"));
+      .mockResolvedValueOnce(people("0002", "李四"))
+      .mockResolvedValueOnce([]);
     render(<TargetPicker />);
     const select = screen.getByRole("combobox", { name: "选择支行" });
     await waitFor(() => expect(select).toBeEnabled());
@@ -218,7 +278,7 @@ describe("中台按支行累计分发", () => {
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /深圳深湾中心/ }),
     );
-    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(3));
     fireEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: /另一支行/ }),
     );
@@ -278,10 +338,10 @@ describe("中台按支行累计分发", () => {
   it("先查支行，按返回层级查人员，跨支行保留选择和姓名", async () => {
     mockRequest
       .mockResolvedValueOnce(branches)
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(people("0001", "张三"))
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(people("0002", "李四"));
+      .mockResolvedValueOnce(people("0002", "李四"))
+      .mockResolvedValueOnce([]);
     render(<TargetPicker />);
     expect(
       screen.getByText("请先选择支行，再选择分发人员"),
@@ -305,7 +365,7 @@ describe("中台按支行累计分发", () => {
     fireEvent.click(await screen.findByText("深圳深湾中心（102）"));
     fireEvent.click(await screen.findByRole("button", { name: /张三/ }));
     expect(mockRequest).toHaveBeenNthCalledWith(
-      3,
+      2,
       "/user-info/positions/by-branch",
       {
         method: "POST",
