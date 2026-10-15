@@ -12,6 +12,7 @@ import {
   calendarDate,
   calendarRange,
   planFrequency,
+  planPublishLabel,
   planScheduledOn,
   todayKey,
 } from "../utils";
@@ -207,7 +208,7 @@ export function Calendar({
                         <div className={styles.calendarEventTooltip}>
                           <div>规划名称：{p.name}</div>
                           <div>经营场景：{sceneNames}</div>
-                          <div>{p.status} · 点击查看详情</div>
+                          <div>{planPublishLabel(p)} · 点击查看详情</div>
                         </div>
                       }
                     >
@@ -250,7 +251,7 @@ export function Calendar({
                             <br />
                             已生成 {stat?.tasks ?? "--"} 项任务
                             <br />
-                            {p.status}
+                            {planPublishLabel(p)}
                           </small>
                         )}
                       </button>

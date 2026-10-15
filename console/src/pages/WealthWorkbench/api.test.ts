@@ -239,6 +239,7 @@ describe("WealthWorkbench api", () => {
   });
 
   it("规划统计直连同源路径，按 planId 映射乱序返回且不走后端", async () => {
+    document.cookie = "token=skill-stats-token; path=/";
     vi.mocked(buildAuthHeaders).mockReturnValue({
       "X-Bbk-Id": "100",
       "X-User-Id": "rm-1",
@@ -273,10 +274,12 @@ describe("WealthWorkbench api", () => {
         method: "POST",
         credentials: "include",
         signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-header-cookie": "session=value",
-        },
+      });
+      expect(options?.headers).toEqual({
+        "Content-Type": "application/json",
+        Authorization: "skill-stats-token",
+        "x-header-cookie": "session=value",
+        Cookie: "session=value",
       });
       expect(JSON.parse(String(options?.body))).toEqual({
         planIds: ["p1", "p2"],
@@ -287,6 +290,7 @@ describe("WealthWorkbench api", () => {
       await expect(api.fetchSkillStats([])).resolves.toEqual({});
       expect(directFetch).not.toHaveBeenCalled();
     } finally {
+      document.cookie = "token=; Max-Age=0; path=/";
       directFetch.mockRestore();
     }
   });

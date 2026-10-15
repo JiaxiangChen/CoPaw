@@ -17,6 +17,7 @@ import {
   cycleRange,
   dateKey,
   planFrequency,
+  planPublishLabel,
   planScheduledOn,
   scheduleLabel,
   todayKey,
@@ -209,7 +210,8 @@ export default function Board() {
                   <th>目标客户</th>
                   <th>已生成任务</th>
                   {/* <th>任务执行率</th> */}
-                  <th>状态</th>
+                  <th>发布状态</th>
+                  <th>分发结果</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -263,11 +265,25 @@ export default function Board() {
                       </td> */}
                       <td>
                         <span
-                          className={cx(styles.status, statusClass(p.status))}
+                          className={cx(
+                            styles.status,
+                            statusClass(planPublishLabel(p)),
+                          )}
                         >
                           <i className={styles.dot}></i>
-                          {p.status}
+                          {planPublishLabel(p)}
                         </span>
+                      </td>
+                      <td>
+                        {p.publishStatus === "published" ? (
+                          <span
+                            className={cx(styles.status, statusClass(p.status))}
+                          >
+                            {p.status}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td>
                         {p.editable !== false ? (
@@ -296,7 +312,7 @@ export default function Board() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10}>
+                    <td colSpan={11}>
                       <div className={styles.empty}>
                         当日暂无符合筛选条件的工作任务
                       </div>
@@ -589,10 +605,13 @@ export default function Board() {
                     <div className={styles.metric}>
                       <small>状态</small>
                       <span
-                        className={cx(styles.status, statusClass(p.status))}
+                        className={cx(
+                          styles.status,
+                          statusClass(planPublishLabel(p)),
+                        )}
                       >
                         <i className={styles.dot}></i>
-                        {p.status}
+                        {planPublishLabel(p)}
                       </span>
                     </div>
                     <div className={styles.actions}>
