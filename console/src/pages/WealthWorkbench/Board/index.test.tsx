@@ -13,7 +13,7 @@ import { useWealthStore } from "../store";
 import { fetchSkillStats } from "../api";
 import type { SkillStat } from "../types";
 import type { WealthRole } from "../permissions";
-import { sceneStatKey, todayKey } from "../utils";
+import { todayKey } from "../utils";
 import Board from "./index";
 
 vi.mock("../api", async (importOriginal) => {
@@ -86,8 +86,8 @@ describe("Board", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 
-  it.each(["success", "zero", "unavailable"] as const)(
-    "%s 时日历与列表复用技能统计，加载中显示占位",
+  it.each(["success", "zero", "missing", "unavailable"] as const)(
+    "%s 时日历与列表复用规划统计，加载中显示占位",
     async (state) => {
       const day = todayKey();
       let resolveStats!: (value: Record<string, SkillStat> | null) => void;
@@ -139,24 +139,12 @@ describe("Board", () => {
       const stats =
         state === "unavailable"
           ? null
-          : state === "zero"
+          : state === "missing"
           ? {}
           : {
-              [sceneStatKey({
-                skillId: "skill-1",
-                startDate: day,
-                endDate: day,
-              })]: {
-                targetCustomerCount: 12,
-                generatedTaskCount: 3,
-              },
-              [sceneStatKey({
-                skillId: "skill-2",
-                startDate: day,
-                endDate: day,
-              })]: {
-                targetCustomerCount: 8,
-                generatedTaskCount: 4,
+              "stats-plan": {
+                targetCustomerCount: state === "zero" ? 0 : 20,
+                generatedTaskCount: state === "zero" ? 0 : 7,
               },
             };
       await act(async () => resolveStats(stats));
@@ -167,7 +155,7 @@ describe("Board", () => {
       expect(event).toHaveTextContent(`已生成 ${tasks} 项任务`);
       fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
       const row = within(screen.getByRole("article"));
-      if (state === "unavailable") {
+      if (state === "unavailable" || state === "missing") {
         expect(row.getAllByText("--", { selector: "strong" })).toHaveLength(2);
       } else {
         expect(row.getByText(`${customers} 人`)).toBeInTheDocument();

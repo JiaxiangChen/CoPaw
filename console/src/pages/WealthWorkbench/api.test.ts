@@ -7,8 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { request } from "../../api/request";
+import { buildAuthHeaders } from "../../api/authHeaders";
 
 vi.mock("../../api/request", () => ({ request: vi.fn() }));
+
+vi.mock("../../api/authHeaders", () => ({ buildAuthHeaders: vi.fn() }));
 
 const mockRequest = vi.mocked(request);
 
@@ -235,40 +238,114 @@ describe("WealthWorkbench api", () => {
     await expect(api.fetchAvailableSceneCount()).resolves.toBeNull();
   });
 
-  it("fetchSkillStats 按场景统计键映射结果；失败返回 null", async () => {
-    mockRequest.mockResolvedValueOnce({
-      items: [
-        { skillId: "s1", targetCustomerCount: 125, generatedTaskCount: 30 },
-        { skillId: "s2", targetCustomerCount: 89, generatedTaskCount: 17 },
-      ],
+  it("规划统计直连同源路径，按 planId 映射乱序返回且不走后端", async () => {
+    vi.mocked(buildAuthHeaders).mockReturnValue({
+      "X-Bbk-Id": "100",
+      "X-User-Id": "rm-1",
+      "X-Position-Id": "RB0101",
+      "x-header-cookie": "session=value",
     });
-    const queries = [
-      { skillId: "s1", startDate: "2026-09-01", endDate: "2026-09-30" },
-      { skillId: "s2", startDate: "2026-09-05", endDate: "2026-09-15" },
-    ];
-    const stats = await api.fetchSkillStats(queries);
-    expect(stats).toEqual({
-      "s1|2026-09-01|2026-09-30": {
-        targetCustomerCount: 125,
-        generatedTaskCount: 30,
-      },
-      "s2|2026-09-05|2026-09-15": {
-        targetCustomerCount: 89,
-        generatedTaskCount: 17,
-      },
-    });
-    const [path, options] = mockRequest.mock.calls[0] ?? [];
-    expect(String(path)).toBe("/wealth/skill-stats");
-    expect(JSON.parse(String((options as RequestInit).body))).toEqual({
-      skills: queries,
-    });
+    const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "200",
+          data: {
+            items: [
+              { planId: "p2", targetCustomerCount: 89, targetTaskCount: 17 },
+              { planId: "p1", targetCustomerCount: 125, targetTaskCount: 30 },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const controller = new AbortController();
+      expect(
+        await api.fetchSkillStats(["p1", "p2", "p1"], controller.signal),
+      ).toEqual({
+        p1: { targetCustomerCount: 125, generatedTaskCount: 30 },
+        p2: { targetCustomerCount: 89, generatedTaskCount: 17 },
+      });
+      const [path, options] = directFetch.mock.calls[0];
+      expect(path).toBe("/api/agent/workspace/skill-stats");
+      expect(options).toMatchObject({
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "x-header-cookie": "session=value",
+        },
+      });
+      expect(JSON.parse(String(options?.body))).toEqual({
+        planIds: ["p1", "p2"],
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
 
-    mockRequest.mockRejectedValueOnce(new Error("boom"));
-    await expect(api.fetchSkillStats(queries)).resolves.toBeNull();
-
-    // 空查询不发请求
-    await expect(api.fetchSkillStats([])).resolves.toEqual({});
+      directFetch.mockClear();
+      await expect(api.fetchSkillStats([])).resolves.toEqual({});
+      expect(directFetch).not.toHaveBeenCalled();
+    } finally {
+      directFetch.mockRestore();
+    }
   });
+
+  it.each(["RB0101", "RB1101", "RB0301"])(
+    "%s 统计请求体只传 planIds，保留零值",
+    async (positionId) => {
+      vi.mocked(buildAuthHeaders).mockReturnValue({
+        "X-Bbk-Id": "100",
+        "X-User-Id": "manager",
+        "X-Position-Id": positionId,
+      });
+      const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            data: {
+              items: [
+                { planId: "p1", targetCustomerCount: 0, targetTaskCount: 0 },
+              ],
+            },
+          }),
+        ),
+      );
+      try {
+        await expect(api.fetchSkillStats(["p1"])).resolves.toEqual({
+          p1: { targetCustomerCount: 0, generatedTaskCount: 0 },
+        });
+        expect(JSON.parse(String(directFetch.mock.calls[0][1]?.body))).toEqual({
+          planIds: ["p1"],
+        });
+      } finally {
+        directFetch.mockRestore();
+      }
+    },
+  );
+
+  it.each(["http", "business", "network", "aborted"])(
+    "统计 %s 失败返回 null",
+    async (failure) => {
+      vi.mocked(buildAuthHeaders).mockReturnValue({
+        "X-Position-Id": "RB0101",
+      });
+      const directFetch = vi.spyOn(globalThis, "fetch");
+      if (failure === "network" || failure === "aborted")
+        directFetch.mockRejectedValueOnce(new Error(failure));
+      else
+        directFetch.mockResolvedValueOnce(
+          new Response(JSON.stringify({ code: 500 }), {
+            status: failure === "http" ? 502 : 200,
+          }),
+        );
+      try {
+        await expect(api.fetchSkillStats(["p1"])).resolves.toBeNull();
+      } finally {
+        directFetch.mockRestore();
+      }
+    },
+  );
 
   it.each(["business", "customer"] as const)(
     "今日任务 %s 保留原始 touched，包括未知或缺失状态",
