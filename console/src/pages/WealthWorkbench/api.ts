@@ -6,6 +6,8 @@ import { parseCron, serializeCron } from "@/utils/parseCron";
 import { request } from "../../api/request";
 import { buildAuthHeaders } from "../../api/authHeaders";
 import { getWPlusCookie } from "../../utils/cookie-utils";
+import { getIframeContext } from "../../stores/iframeStore";
+import { DEFAULT_BBK_ID } from "../../constants/identity";
 // import { Base64 } from "js-base64";
 import { SCENE_CATEGORIES } from "./mock/data";
 import { DEFAULT_SCHEDULE } from "./utils";
@@ -265,7 +267,7 @@ export async function fetchSkillStats(
 }
 
 // ---------------------------------------------------------------------------
-// 客户名单查询：/wealth/name-list（外部接口代理）
+// 客户名单查询：同源 /api/agent/workspace/name-list，由前端 Nginx 转发
 // ---------------------------------------------------------------------------
 
 interface NameListSkillView {
@@ -336,28 +338,63 @@ interface NameListResponse extends Partial<CustomerCounts> {
   allFields?: NameListField[];
 }
 
+interface ExternalNameListResponse {
+  code: string | number;
+  data?: Partial<CustomerCounts> & {
+    list?: NameListItemView[];
+    skillFieldList?: NameListSkillFields[];
+    allFields?: NameListField[];
+  };
+}
+
 /**
- * 查询客户名单。两个视角都传 sapId（当前登录客户经理）：
- * skillIds 必传：经营视角传当前场景，其他口径传当天任务树的全部技能。
- * touched 透传外部接口的触达状态过滤：0 未触达 / 1 已触达 / 2 全部；缺省不过滤。
- * 接口不可达时返回空列表，由页面展示空态，不做假数据兜底。
+ * 客户名单直接通过同源 Nginx 查询，不依赖 Cookie 或 CoPaw 鉴权。
+ * 经营视角传当前场景，其余口径传当天任务树全部技能；空范围不查询。
  */
 export async function fetchNameList(
   skillIds: string[],
   sapId?: string,
   touched?: number,
 ): Promise<NameListResponse> {
-  const ids = [...new Set(skillIds.filter(Boolean))];
+  const ids = [...new Set(skillIds.map((id) => id.trim()).filter(Boolean))];
   if (!ids.length) return { items: [] };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
   try {
-    const resp = await request<NameListResponse>("/wealth/name-list", {
+    const context = getIframeContext();
+    const resp = await fetch("/api/agent/workspace/name-list", {
       method: "POST",
-      body: JSON.stringify({ skill_id: ids, sap_id: sapId, touched }),
+      credentials: "omit",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        skillIds: ids,
+        bbkId: context.bbk || DEFAULT_BBK_ID,
+        platformSource: "WP",
+        pageSource: "WP_AGENT_WORKSPACE_TASK_LIST",
+        ...(touched !== undefined ? { touched } : {}),
+        ...(sapId ? { sapId } : {}),
+        ...(context.orgCode ? { subBbkId: context.orgCode } : {}),
+        ...(context.positionId ? { posId: context.positionId } : {}),
+      }),
+      signal: controller.signal,
     });
-    return resp;
+    if (!resp.ok) throw new Error(`客户名单请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as ExternalNameListResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`客户名单接口返回失败：${payload.code}`);
+    }
+    const data = payload.data;
+    return {
+      ...customerCounts(data),
+      items: (data?.list ?? []).filter((item) => Boolean(item?.custUid)),
+      skillFieldList: data?.skillFieldList ?? [],
+      allFields: data?.allFields ?? [],
+    };
   } catch (error) {
     console.warn("[Wealth] 客户名单接口不可用，返回空列表", error);
     return { items: [] };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
