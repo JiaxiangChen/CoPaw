@@ -1044,6 +1044,14 @@ _Avoid_: per-recipient endpoint copy, Skill activation, execution model override
 **Scheduled Job Enablement**:
 The permission for a particular **Scheduled Job** to execute. Disabling a broadcast source job, manually or through unread-result protection, does not itself pause batch dispatch for its other recipients.
 
+**Scheduled Job Snapshot Import**:
+A manually requested, repeatable observation of existing Scheduled Job definitions and recoverable state. Importing a snapshot does not transfer task management ownership or change the existing query and execution paths.
+_Avoid_: continuous dual write, scheduling cutover, automatic runtime recovery
+
+**Recoverable Scheduled Job State**:
+State supported by persisted task metadata or an actual state entry already present in a running SWE instance. Missing memory is reported as missing, not treated as an empty state or proof that a task does not exist.
+_Avoid_: default empty state, cluster-complete live state, execution liveness guarantee
+
 **Batch Dispatch Mode**:
 The choice to dispatch a broadcast source job and its recipients through the **Cron Scheduling Service** instead of their ordinary timers. This choice is distinct from **Batch Dispatch Run State**.
 
