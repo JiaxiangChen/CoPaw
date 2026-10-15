@@ -6,7 +6,7 @@ import type { CronParts } from "@/utils/parseCron";
 import type { WealthRole } from "./permissions";
 import type { Draft, Plan, PlanItem } from "./types";
 
-/** 规划主状态只反映发布生命周期；分发结果在详情中单独展示。 */
+/** 规划展示状态只反映发布生命周期，不展示后端聚合的分发结果。 */
 export function planPublishLabel(plan: Plan): string {
   switch (plan.publishStatus) {
     case "publishing":

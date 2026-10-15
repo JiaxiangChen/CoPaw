@@ -85,7 +85,7 @@ beforeEach(() => {
 });
 
 describe("WealthWorkbench api", () => {
-  it("名单直接 fetch 外部契约，保留上下文和统计，不携带 Cookie 或鉴权头", async () => {
+  it("名单直接 fetch 外部契约，保留上下文和统计，使用默认同源凭证策略", async () => {
     useIframeStore.setState({
       bbk: "755",
       orgCode: "755480",
@@ -112,9 +112,9 @@ describe("WealthWorkbench api", () => {
     const result = await api.fetchNameList([" a ", "b", "a", " "], "10086", 1);
     const [path, options] = vi.mocked(fetch).mock.calls[0];
     expect(path).toBe("/api/agent/workspace/name-list");
+    expect(options).not.toHaveProperty("credentials");
     expect(options).toMatchObject({
       method: "POST",
-      credentials: "omit",
       headers: { "Content-Type": "application/json" },
     });
     expect(JSON.parse(String(options?.body))).toEqual({
@@ -228,7 +228,6 @@ describe("WealthWorkbench api", () => {
       "/api/agent/workspace/name-list",
       expect.objectContaining({
         method: "POST",
-        credentials: "omit",
         headers: { "Content-Type": "application/json" },
       }),
     );

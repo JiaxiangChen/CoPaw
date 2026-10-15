@@ -39,7 +39,7 @@ describe("Board", () => {
     ["published", "分发失败", "发布成功"],
     ["published", "已自动下发", "发布成功"],
   ])(
-    "%s / %s：列表只展示发布状态，详情单独展示分发结果",
+    "%s / %s：列表与详情只展示发布状态",
     async (publishStatus, status, label) => {
       const day = todayKey();
       useWealthStore.setState({
@@ -97,12 +97,11 @@ describe("Board", () => {
         screen.getByRole("columnheader", { name: "发布状态" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole("columnheader", { name: "分发结果" }),
-      ).toBeInTheDocument();
+        screen.queryByRole("columnheader", { name: "分发结果" }),
+      ).not.toBeInTheDocument();
       expect(screen.getByText(label)).toBeInTheDocument();
-      if (publishStatus === "published")
-        expect(screen.getByText(status)).toBeInTheDocument();
-      else expect(screen.getByText("—")).toBeInTheDocument();
+      if (status !== label)
+        expect(screen.queryByText(status)).not.toBeInTheDocument();
       await act(async () => {});
     },
   );

@@ -211,7 +211,6 @@ export default function Board() {
                   <th>已生成任务</th>
                   {/* <th>任务执行率</th> */}
                   <th>发布状态</th>
-                  <th>分发结果</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -275,17 +274,6 @@ export default function Board() {
                         </span>
                       </td>
                       <td>
-                        {p.publishStatus === "published" ? (
-                          <span
-                            className={cx(styles.status, statusClass(p.status))}
-                          >
-                            {p.status}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td>
                         {p.editable !== false ? (
                           <div className={styles.actions}>
                             <button
@@ -312,7 +300,7 @@ export default function Board() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={11}>
+                    <td colSpan={10}>
                       <div className={styles.empty}>
                         当日暂无符合筛选条件的工作任务
                       </div>
