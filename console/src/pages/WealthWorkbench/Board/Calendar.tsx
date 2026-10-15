@@ -4,13 +4,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import cx from "classnames";
+import { Tooltip } from "antd";
 import styles from "../index.module.less";
 import type { Plan } from "../types";
 import {
   addCalendarDays,
   calendarDate,
   calendarRange,
-  planItemScheduledOn,
   planFrequency,
   planScheduledOn,
   todayKey,
@@ -18,14 +18,6 @@ import {
 import { Icon } from "../components/Icon";
 
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-
-function scheduledSceneName(plan: Plan, day: string): string {
-  const sceneNames = (plan.items ?? [])
-    .filter((item) => planItemScheduledOn(plan, item, day))
-    .map((item) => item.sceneName)
-    .filter(Boolean);
-  return sceneNames.join(" / ") || "未命名技能";
-}
 
 export function Calendar({
   sources,
@@ -201,33 +193,68 @@ export function Calendar({
                 </div>
                 {shown.map((p) => {
                   const stat = planStat(p);
-                  const sceneName = scheduledSceneName(p, day);
+                  const sceneNames =
+                    (p.items ?? [])
+                      .map((item) => item.sceneName)
+                      .filter(Boolean)
+                      .join("，") || "未配置";
                   return (
-                    <button
+                    <Tooltip
                       key={p.id}
-                      className={cx(
-                        styles.calendarEvent,
-                        p.source !== "分行关注" && styles.purple,
-                      )}
-                      title={`${sceneName} · ${p.status} · 点击查看详情`}
-                      onClick={() => onShowDetails(day, p.id)}
+                      placement="topLeft"
+                      trigger={["hover", "focus"]}
+                      title={
+                        <div className={styles.calendarEventTooltip}>
+                          <div>规划名称：{p.name}</div>
+                          <div>经营场景：{sceneNames}</div>
+                          <div>{p.status} · 点击查看详情</div>
+                        </div>
+                      }
                     >
-                      <span className={styles.calendarEventTitle}>
-                        <strong>{sceneName}</strong>
-                        <span className={styles.calendarFrequency}>
-                          {planFrequency(p)}
+                      <button
+                        className={cx(
+                          styles.calendarEvent,
+                          p.source !== "分行关注" && styles.purple,
+                        )}
+                        aria-label={`${p.name}，${
+                          p.items?.length ?? 0
+                        } 个技能，点击查看详情`}
+                        onClick={() => onShowDetails(day, p.id)}
+                      >
+                        <span className={styles.calendarEventTitle}>
+                          {dimension === "month" ? (
+                            <span className={styles.calendarPlanIdentity}>
+                              <strong>{p.name}</strong>
+                              <span
+                                className={styles.calendarSkillCount}
+                                aria-label={`${p.items?.length ?? 0} 个技能`}
+                              >
+                                {p.items?.length ?? 0}
+                              </span>
+                            </span>
+                          ) : (
+                            <strong>{p.name}</strong>
+                          )}
+                          <span className={styles.calendarFrequency}>
+                            {planFrequency(p)}
+                          </span>
                         </span>
-                      </span>
-                      {dimension === "week" && (
-                        <small>
-                          {p.source} · {stat?.customers ?? "--"} 位目标客户
-                          <br />
-                          已生成 {stat?.tasks ?? "--"} 项任务
-                          <br />
-                          {p.status}
-                        </small>
-                      )}
-                    </button>
+                        {dimension === "week" && (
+                          <span className={styles.calendarEventScenes}>
+                            经营场景：{sceneNames}
+                          </span>
+                        )}
+                        {dimension === "week" && (
+                          <small>
+                            {p.source} · {stat?.customers ?? "--"} 位目标客户
+                            <br />
+                            已生成 {stat?.tasks ?? "--"} 项任务
+                            <br />
+                            {p.status}
+                          </small>
+                        )}
+                      </button>
+                    </Tooltip>
                   );
                 })}
                 {dimension === "month" && items.length > 3 && (

@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Plan, PlanItem } from "../types";
 import { Calendar } from "./Calendar";
@@ -40,8 +46,8 @@ describe("Calendar", () => {
   afterEach(cleanup);
 
   it.each(["week", "month"] as const)(
-    "%s 日历标题显示当天执行的技能名称，保留详情入口",
-    (dimension) => {
+    "%s 日历按维度展示标题与经营场景，保留当天详情入口",
+    async (dimension) => {
       const onShowDetails = vi.fn();
       render(
         <Calendar
@@ -57,13 +63,35 @@ describe("Calendar", () => {
         />,
       );
 
-      const events = [
-        screen.getByTitle("高净值客户经营 · 已自动下发 · 点击查看详情"),
-        screen.getByTitle("理财到期提醒 · 已自动下发 · 点击查看详情"),
-      ];
-      expect(screen.queryByText(PLAN.name)).toBeNull();
-      expect(screen.getByText("高净值客户经营")).toBeInTheDocument();
-      expect(screen.getByText("理财到期提醒")).toBeInTheDocument();
+      const events = screen.getAllByRole("button", {
+        name: `${PLAN.name}，2 个技能，点击查看详情`,
+      });
+      expect(events).toHaveLength(2);
+      expect(screen.getAllByText(PLAN.name)).toHaveLength(2);
+      for (const event of events) {
+        expect(event.querySelector("strong")).toHaveTextContent(PLAN.name);
+        expect(event).not.toHaveAttribute("title");
+      }
+      if (dimension === "week") {
+        expect(
+          screen.getAllByText("经营场景：高净值客户经营，理财到期提醒"),
+        ).toHaveLength(2);
+        expect(screen.queryByLabelText("2 个技能")).toBeNull();
+      } else {
+        expect(screen.getAllByLabelText("2 个技能")).toHaveLength(2);
+        for (const count of screen.getAllByLabelText("2 个技能")) {
+          expect(count).toHaveTextContent("2");
+        }
+        expect(screen.queryByText(/^经营场景：/)).toBeNull();
+      }
+      fireEvent.mouseEnter(events[0]);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(
+        within(tooltip).getByText(`规划名称：${PLAN.name}`),
+      ).toBeInTheDocument();
+      expect(
+        within(tooltip).getByText("经营场景：高净值客户经营，理财到期提醒"),
+      ).toBeInTheDocument();
       fireEvent.click(events[0]);
       expect(onShowDetails).toHaveBeenCalledWith("2026-09-14", PLAN.id);
       fireEvent.click(events[1]);

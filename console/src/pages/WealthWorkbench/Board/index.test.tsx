@@ -131,9 +131,9 @@ describe("Board", () => {
           <Board />
         </MemoryRouter>,
       );
-      const event = screen.getByTitle(
-        "skill-1 / skill-2 · 已自动下发 · 点击查看详情",
-      );
+      const event = screen.getByRole("button", {
+        name: "统计一致性规划，2 个技能，点击查看详情",
+      });
       expect(event).toHaveTextContent("-- 位目标客户");
       expect(event).toHaveTextContent("已生成 -- 项任务");
       const stats =
