@@ -161,7 +161,7 @@ def candidate(
 
 def rows(db):
     return next(iter(db.tables["swe_cron_jobs_v2"].values())), next(
-        iter(db.tables["swe_cron_job_states"].values())
+        iter(db.tables["swe_cron_job_states"].values()),
     )
 
 
@@ -191,6 +191,61 @@ async def test_two_rows_rollback_together():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "definition_patch,state_patch,expected",
+    [
+        (
+            {"management_owner": "scheduler", "deleted_at": "deleted"},
+            {},
+            "scheduler_owned",
+        ),
+        ({"deleted_at": "deleted", "spec_json": "{}"}, {}, "target_deleted"),
+        (
+            {"spec_json": "{}", "source_definition_version": 9},
+            {},
+            "unowned_snapshot",
+        ),
+        (
+            {
+                "source_observed_at": datetime(2099, 1, 1),
+                "source_definition_version": 9,
+            },
+            {},
+            "stale_snapshot",
+        ),
+        (
+            {"source_definition_version": 9},
+            {"state_source": "execution"},
+            "stale_file_version",
+        ),
+        (
+            {},
+            {
+                "state_source": "execution",
+                "state_observed_at": datetime(2099, 1, 1),
+            },
+            "target_managed",
+        ),
+    ],
+)
+async def test_conflict_priority_survives_split(
+    definition_patch,
+    state_patch,
+    expected,
+):
+    db = FakeDatabase()
+    repo = MigrationRepository(db)
+    value = candidate()
+    await repo.import_snapshot(value)
+    definition, state = rows(db)
+    definition.update(definition_patch)
+    state.update(state_patch)
+    before = copy.deepcopy(db.tables)
+    assert (await repo.inspect(value, "preview")).reason == expected
+    assert db.tables == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "mutation",
     ["owner", "deleted", "live_state", "managed_state", "unowned_source"],
 )
@@ -211,7 +266,7 @@ async def test_protected_targets_are_not_overwritten(mutation):
         definition["spec_json"] = "{}"
     before = copy.deepcopy(db.tables)
     result = await repo.import_snapshot(
-        candidate(name="changed", observed=datetime(2026, 10, 15, 10))
+        candidate(name="changed", observed=datetime(2026, 10, 15, 10)),
     )
     assert result.status == "conflict"
     assert db.tables == before
@@ -226,7 +281,7 @@ async def test_file_only_rerun_preserves_memory_but_accepts_explicit_zero():
         candidate(
             observed=datetime(2026, 10, 15, 10),
             state={"unread_execution_count": 0, "state_source": "file_meta"},
-        )
+        ),
     )
     assert result.status == "updated"
     assert rows(db)[1]["last_status"] == "success"
@@ -245,14 +300,15 @@ async def test_old_snapshot_or_lower_file_version_is_rejected():
                 observed=value.observed_at - timedelta(seconds=1),
                 name="old",
                 version=3,
-            )
+            ),
         )
     ).status == "conflict"
     assert (
         await repo.import_snapshot(
             candidate(
-                observed=value.observed_at + timedelta(seconds=1), version=2
-            )
+                observed=value.observed_at + timedelta(seconds=1),
+                version=2,
+            ),
         )
     ).status == "conflict"
 
@@ -268,7 +324,7 @@ async def test_new_snapshot_updates_definition_and_only_present_state():
                 observed=datetime(2026, 10, 15, 10),
                 name="new",
                 state={"state_source": "unknown"},
-            )
+            ),
         )
     ).status == "updated"
     definition, state = rows(db)
@@ -320,7 +376,8 @@ async def test_concurrent_import_has_one_identity():
     db = FakeDatabase()
     repo = MigrationRepository(db)
     results = await asyncio.gather(
-        repo.import_snapshot(candidate()), repo.import_snapshot(candidate())
+        repo.import_snapshot(candidate()),
+        repo.import_snapshot(candidate()),
     )
     assert sorted(r.status for r in results) == ["inserted", "unchanged"]
 
@@ -359,7 +416,7 @@ async def test_file_version_advance_alone_does_not_change_job_definition_version
     repo = MigrationRepository(db)
     await repo.import_snapshot(candidate(version=1))
     await repo.import_snapshot(
-        candidate(version=2, observed=datetime(2026, 10, 15, 10))
+        candidate(version=2, observed=datetime(2026, 10, 15, 10)),
     )
     assert rows(db)[0]["definition_version"] == 1
 
@@ -375,7 +432,7 @@ async def test_database_audit_query_is_filtered_and_keyset_paginated():
     second.definition["job_id"] = "job-2"
     await repo.import_snapshot(second)
     values, more = await repo.snapshot_rows(
-        MigrationRequest(limit=1, tenant_ids=["tenant"])
+        MigrationRequest(limit=1, tenant_ids=["tenant"]),
     )
     assert len(values) == 1 and more
     after = tuple(

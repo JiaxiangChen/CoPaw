@@ -91,7 +91,10 @@ class _SourceFile:
 
 def canonical_json(value: Any) -> str:
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
 
 
@@ -142,7 +145,7 @@ def _profile_workspace(value: Any, tenant: Path) -> Path:
         from ...config.utils import _normalize_working_dir_bound_paths
 
         normalized = _normalize_working_dir_bound_paths(
-            {"workspace_dir": value}
+            {"workspace_dir": value},
         )
         path = Path(normalized["workspace_dir"]).expanduser()
         if not path.is_absolute():
@@ -163,7 +166,7 @@ def _workspace_sources(tenant: Path, root: Path) -> list[_SourceFile]:
                 workspaces.relative_to(root).as_posix(),
                 tenant.name,
                 "default",
-            )
+            ),
         ]
     sources = []
     config_signature = _config_signature(tenant)
@@ -180,7 +183,7 @@ def _workspace_sources(tenant: Path, root: Path) -> list[_SourceFile]:
                     agent.name,
                     None,
                     config_signature,
-                )
+                ),
             )
     return sources
 
@@ -210,7 +213,7 @@ def _discover(root: Path) -> list[_SourceFile]:
     files: list[_SourceFile] = []
     if (root / "jobs.json").exists():
         files.append(
-            _SourceFile(root / "jobs.json", "jobs.json", "", "default")
+            _SourceFile(root / "jobs.json", "jobs.json", "", "default"),
         )
     for tenant in sorted(root.iterdir()):
         if (
@@ -230,7 +233,7 @@ def _discover(root: Path) -> list[_SourceFile]:
                     tenant.name,
                     "default",
                     "invalid_or_unsafe_file",
-                )
+                ),
             )
             continue
         legacy = tenant / "jobs.json"
@@ -243,7 +246,7 @@ def _discover(root: Path) -> list[_SourceFile]:
                     "default",
                     None,
                     _config_signature(tenant),
-                )
+                ),
             )
         files.extend(_workspace_sources(tenant, root))
         if len(files) > MAX_SOURCE_FILES:
@@ -254,8 +257,8 @@ def _discover(root: Path) -> list[_SourceFile]:
 def _manifest(files: list[_SourceFile]) -> str:
     return _hash(
         canonical_json(
-            [(f.key, f.agent_id, f.issue, f.config_signature) for f in files]
-        )
+            [(f.key, f.agent_id, f.issue, f.config_signature) for f in files],
+        ),
     )
 
 
@@ -271,9 +274,11 @@ def capture_loaded_states(
             continue
         snapshots[key] = {
             job_id: copy.deepcopy(
-                state.model_dump(exclude_unset=True)
-                if hasattr(state, "model_dump")
-                else state
+                (
+                    state.model_dump(exclude_unset=True)
+                    if hasattr(state, "model_dump")
+                    else state
+                ),
             )
             for job_id, state in list(states.items())
             if job_id not in SYSTEM_IDS
@@ -295,35 +300,16 @@ def _redact(value: Any) -> Any:
 def _secret_field(key: str) -> bool:
     key = key.lower().replace("_", "-")
     return key in SECRET_KEYS or key.endswith(
-        ("-token", "-password", "-secret", "-api-key", "-authorization")
+        ("-token", "-password", "-secret", "-api-key", "-authorization"),
     )
 
 
 def _identity(
-    raw: dict[str, Any], source: _SourceFile
+    raw: dict[str, Any],
+    source: _SourceFile,
 ) -> tuple[str, str, str]:
-    tenant, origin = raw.get("tenant_id"), raw.get("source_id")
-    if not tenant or not origin:
-        stored_scope = raw.get("scope_id") or source.storage_id
-        if isinstance(stored_scope, str):
-            stored_scope = stored_scope.removeprefix("scope.v1.")
-        decoded = decode_canonical_scope_id(stored_scope)
-        if (tenant and tenant != decoded.tenant_id) or (
-            origin and origin != decoded.source_id
-        ):
-            raise ValueError("conflicting_identity")
-        tenant, origin = (
-            tenant or decoded.tenant_id,
-            origin or decoded.source_id,
-        )
-    for value in (tenant, origin, source.agent_id, raw.get("id")):
-        if (
-            not isinstance(value, str)
-            or len(value) > 128
-            or value != value.strip()
-            or not is_valid_identity_value(value)
-        ):
-            raise ValueError("invalid_identity")
+    tenant, origin = _resolve_business_identity(raw, source.storage_id)
+    _validate_identity_values((tenant, origin, source.agent_id, raw.get("id")))
     scope = encode_canonical_scope_id(tenant, origin).scope_id
     if source.storage_id not in ("", tenant, scope, f"scope.v1.{scope}"):
         raise ValueError("conflicting_storage_identity")
@@ -335,6 +321,38 @@ def _identity(
     if len(scope) > 512:
         raise ValueError("scope_too_long")
     return tenant, origin, scope
+
+
+def _resolve_business_identity(
+    raw: dict[str, Any],
+    storage_id: str,
+) -> tuple[str, str]:
+    tenant, origin = raw.get("tenant_id"), raw.get("source_id")
+    if not tenant or not origin:
+        stored_scope = raw.get("scope_id") or storage_id
+        if isinstance(stored_scope, str):
+            stored_scope = stored_scope.removeprefix("scope.v1.")
+        decoded = decode_canonical_scope_id(stored_scope)
+        if (tenant and tenant != decoded.tenant_id) or (
+            origin and origin != decoded.source_id
+        ):
+            raise ValueError("conflicting_identity")
+        tenant, origin = (
+            tenant or decoded.tenant_id,
+            origin or decoded.source_id,
+        )
+    return tenant, origin
+
+
+def _validate_identity_values(values: tuple) -> None:
+    for value in values:
+        if (
+            not isinstance(value, str)
+            or len(value) > 128
+            or value != value.strip()
+            or not is_valid_identity_value(value)
+        ):
+            raise ValueError("invalid_identity")
 
 
 def _utc(value: Any, field: str, warnings: list[str]) -> datetime | None:
@@ -487,7 +505,7 @@ def _candidate(
     meta = model.meta
     warnings: list[str] = []
     memory = loaded.get(f"{source.storage_id}:{source.agent_id}", {}).get(
-        model.id
+        model.id,
     )
     if memory is None:
         memory = loaded.get(f"{scope}:{source.agent_id}", {}).get(model.id)
@@ -495,6 +513,31 @@ def _candidate(
     if not available:
         warnings.append("memory_state_missing")
     state = _state_patch(meta, memory, warnings)
+    version = _file_version(snapshot)
+    definition = _snapshot_definition(model, source, spec, version, warnings)
+    if not meta.get("broadcast_dispatch_intents_enabled"):
+        state["dispatch_state"] = "ordinary"
+    elif not meta.get("broadcast_source_job_id"):
+        warnings.append("batch_control_unknown")
+    state["state_source"] = (
+        "memory_snapshot"
+        if available
+        else ("file_meta" if state else "unknown")
+    )
+    _validate_definition(definition)
+    return SnapshotCandidate(
+        definition,
+        state,
+        observed,
+        source.key,
+        fingerprint,
+        version,
+        available,
+        warnings,
+    )
+
+
+def _file_version(snapshot: dict) -> int:
     version = snapshot.get("definition_version", 0)
     if (
         isinstance(version, bool)
@@ -502,17 +545,28 @@ def _candidate(
         or not 0 <= version <= 9223372036854775807
     ):
         raise ValueError("invalid_file_version")
+    return version
+
+
+def _snapshot_definition(
+    model: CronJobSpec,
+    source: _SourceFile,
+    spec: dict,
+    version: int,
+    warnings: list[str],
+) -> dict:
+    meta = model.meta
     original = meta.get("broadcast_original_cron") or meta.get(
-        "batch_dispatch_parent_cron"
+        "batch_dispatch_parent_cron",
     )
     if not original and meta.get("broadcast_offset_minutes"):
         warnings.append("original_cron_unknown")
     definition = {
-        "tenant_id": tenant,
-        "source_id": origin,
+        "tenant_id": spec["tenant_id"],
+        "source_id": spec["source_id"],
         "agent_id": source.agent_id,
         "job_id": model.id,
-        "scope_id": scope,
+        "scope_id": spec["scope_id"],
         "name": model.name,
         "task_type": model.task_type,
         "enabled": model.enabled,
@@ -527,15 +581,10 @@ def _candidate(
         "source_definition_version": version,
     }
     _relations_and_offsets(definition, meta, warnings)
-    if not meta.get("broadcast_dispatch_intents_enabled"):
-        state["dispatch_state"] = "ordinary"
-    elif not meta.get("broadcast_source_job_id"):
-        warnings.append("batch_control_unknown")
-    state["state_source"] = (
-        "memory_snapshot"
-        if available
-        else ("file_meta" if state else "unknown")
-    )
+    return definition
+
+
+def _validate_definition(definition: dict) -> None:
     for key, maximum in (
         ("name", 255),
         ("cron_expr", 128),
@@ -554,20 +603,12 @@ def _candidate(
             or len(definition[key]) > maximum
         ):
             raise ValueError("definition_field_out_of_range")
-    return SnapshotCandidate(
-        definition,
-        state,
-        observed,
-        source.key,
-        fingerprint,
-        version,
-        available,
-        warnings,
-    )
 
 
 def _relations_and_offsets(
-    definition: dict, meta: dict, warnings: list[str]
+    definition: dict,
+    meta: dict,
+    warnings: list[str],
 ) -> None:
     if meta.get("broadcast_source_job_id"):
         definition["parent_job_id"] = meta["broadcast_source_job_id"]
@@ -617,20 +658,21 @@ def _cursor(payload: dict) -> str:
 
 
 def _position(
-    request: MigrationRequest, files: list[_SourceFile]
+    request: MigrationRequest,
+    files: list[_SourceFile],
 ) -> tuple[int, int, str | None]:
     if not request.cursor:
         return 0, 0, None
     try:
         envelope = json.loads(
-            base64.b64decode(request.cursor, altchars=b"-_", validate=True)
+            base64.b64decode(request.cursor, altchars=b"-_", validate=True),
         )
         data = envelope["data"]
         if envelope["checksum"] != _hash(canonical_json(data)):
             raise ValueError("checksum")
         filters = request.model_dump(exclude={"cursor", "limit"})
         if data["version"] != 1 or data["filters"] != _hash(
-            canonical_json(filters)
+            canonical_json(filters),
         ):
             raise ValueError("filters")
         if data["manifest"] != _manifest(files):
@@ -692,7 +734,12 @@ def _source_item(
         return SourceItem(source.key, job_id, reason="independent_system_task")
     try:
         candidate = _candidate(
-            raw, source, data, loaded, fingerprint, observed
+            raw,
+            source,
+            data,
+            loaded,
+            fingerprint,
+            observed,
         )
         return (
             SourceItem(source.key, job_id, candidate)
@@ -701,6 +748,14 @@ def _source_item(
         )
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
         return SourceItem(source.key, job_id, reason="invalid_job")
+
+
+def _is_duplicate_job(raw: Any, duplicates: set[str]) -> bool:
+    return (
+        isinstance(raw, dict)
+        and isinstance(raw.get("id"), str)
+        and raw["id"] in duplicates
+    )
 
 
 def read_source_page(
@@ -712,7 +767,7 @@ def read_source_page(
     """Inspect a bounded page. Cursor checks detect changes, not authorize access."""
     root = root.expanduser().resolve()
     observed_at = observed_at or datetime.now(timezone.utc).replace(
-        tzinfo=None
+        tzinfo=None,
     )
     try:
         files = _discover(root)
@@ -733,8 +788,9 @@ def read_source_page(
         except (OSError, ValueError, UnicodeError, RecursionError):
             page.items.append(
                 SourceItem(
-                    source.key, reason=source.issue or "invalid_or_unsafe_file"
-                )
+                    source.key,
+                    reason=source.issue or "invalid_or_unsafe_file",
+                ),
             )
             file_index, offset, expected_fingerprint = file_index + 1, 0, None
             inspected += 1
@@ -750,13 +806,9 @@ def read_source_page(
             offset += 1
             inspected += 1
             page.scanned_jobs += 1
-            if (
-                isinstance(raw, dict)
-                and isinstance(raw.get("id"), str)
-                and raw["id"] in duplicates
-            ):
+            if _is_duplicate_job(raw, duplicates):
                 page.items.append(
-                    SourceItem(source.key, reason="duplicate_job_identity")
+                    SourceItem(source.key, reason="duplicate_job_identity"),
                 )
                 continue
             item = _source_item(
@@ -780,14 +832,14 @@ def read_source_page(
                 "version": 1,
                 "filters": _hash(
                     canonical_json(
-                        request.model_dump(exclude={"cursor", "limit"})
-                    )
+                        request.model_dump(exclude={"cursor", "limit"}),
+                    ),
                 ),
                 "manifest": _manifest(files),
                 "file": files[file_index].key,
                 "offset": offset,
                 "fingerprint": expected_fingerprint,
-            }
+            },
         )
     return page
 
@@ -797,7 +849,9 @@ def inventory_fingerprint(root: Path) -> str:
 
 
 def database_cursor(
-    manifest: str, request: MigrationRequest, after: tuple | None
+    manifest: str,
+    request: MigrationRequest,
+    after: tuple | None,
 ) -> str:
     """Separate continuation for read-only checks of database-only snapshots."""
     return "db:" + _cursor(
@@ -806,15 +860,18 @@ def database_cursor(
             "kind": "database",
             "manifest": manifest,
             "filters": _hash(
-                canonical_json(request.model_dump(exclude={"cursor", "limit"}))
+                canonical_json(
+                    request.model_dump(exclude={"cursor", "limit"}),
+                ),
             ),
             "after": after,
-        }
+        },
     )
 
 
 def database_position(
-    root: Path, request: MigrationRequest
+    root: Path,
+    request: MigrationRequest,
 ) -> tuple[tuple | None, str]:
     manifest = inventory_fingerprint(root)
     token = request.cursor
@@ -822,7 +879,7 @@ def database_position(
         raise MigrationSourceError("invalid_or_changed_cursor")
     try:
         envelope = json.loads(
-            base64.b64decode(token[3:], altchars=b"-_", validate=True)
+            base64.b64decode(token[3:], altchars=b"-_", validate=True),
         )
         data = envelope["data"]
         if (
@@ -832,7 +889,7 @@ def database_position(
         ):
             raise ValueError("cursor")
         if data["manifest"] != manifest or data["filters"] != _hash(
-            canonical_json(request.model_dump(exclude={"cursor", "limit"}))
+            canonical_json(request.model_dump(exclude={"cursor", "limit"})),
         ):
             raise ValueError("changed")
         after = data["after"]
@@ -884,7 +941,9 @@ def _safe_source_key(key: Any) -> TypeGuard[str]:
 
 
 def audit_snapshot_sources(
-    root: Path, rows: list[dict], manifest: str
+    root: Path,
+    rows: list[dict],
+    manifest: str,
 ) -> list[dict]:
     """Only resolve provenance against the actual allowlisted source inventory."""
     files = _discover(root.expanduser().resolve())
@@ -910,12 +969,12 @@ def audit_snapshot_sources(
         )
         if not _safe_source_key(key):
             reports.append(
-                {"row": row, "source_key": "", "reason": "unowned_snapshot"}
+                {"row": row, "source_key": "", "reason": "unowned_snapshot"},
             )
             continue
         if key not in allowed:
             reports.append(
-                {"row": row, "source_key": key, "reason": "source_missing"}
+                {"row": row, "source_key": key, "reason": "source_missing"},
             )
             continue
         if key not in cache:
@@ -923,10 +982,10 @@ def audit_snapshot_sources(
         known_identities = cache[key]
         if known_identities is None:
             reports.append(
-                {"row": row, "source_key": key, "reason": "source_unreadable"}
+                {"row": row, "source_key": key, "reason": "source_unreadable"},
             )
         elif identity not in known_identities:
             reports.append(
-                {"row": row, "source_key": key, "reason": "source_missing"}
+                {"row": row, "source_key": key, "reason": "source_missing"},
             )
     return reports

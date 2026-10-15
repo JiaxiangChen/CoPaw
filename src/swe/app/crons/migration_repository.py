@@ -107,7 +107,7 @@ def _time(value: Any) -> datetime | None:
 def _equal(name: str, left: Any, right: Any) -> bool:
     if name == "spec_json":
         return _spec_without_provenance(left) == _spec_without_provenance(
-            right
+            right,
         )
     if name.endswith("_json"):
         return _json_value(left) == _json_value(right)
@@ -172,15 +172,18 @@ class MigrationRepository:
                     f"`{column}`" for column in sorted(columns)
                 )
                 await self.db.execute(
-                    f"SELECT {selected} FROM `{table}` WHERE 1 = 0"
+                    f"SELECT {selected} FROM `{table}` WHERE 1 = 0",
                 )
         except Exception as exc:
             raise MigrationTargetUnavailable(
-                "migration_target_schema_unavailable"
+                "migration_target_schema_unavailable",
             ) from exc
 
     async def _read(
-        self, candidate: SnapshotCandidate, *, lock: bool = False
+        self,
+        candidate: SnapshotCandidate,
+        *,
+        lock: bool = False,
     ) -> tuple:
         suffix = " FOR UPDATE" if lock else ""
         rows = []
@@ -189,7 +192,7 @@ class MigrationRepository:
                 await self.db.fetch_one(
                     f"SELECT * FROM `{table}` WHERE {IDENTITY_WHERE}{suffix}",
                     candidate.identity,
-                )
+                ),
             )
         return tuple(rows)
 
@@ -201,6 +204,16 @@ class MigrationRepository:
     ) -> str | None:
         if definition is None:
             return "orphan_state" if state is not None else None
+        return self._definition_conflict(
+            candidate,
+            definition,
+        ) or self._state_conflict(candidate, state)
+
+    @staticmethod
+    def _definition_conflict(
+        candidate: SnapshotCandidate,
+        definition: dict,
+    ) -> str | None:
         if definition.get("management_owner") != "legacy":
             return "scheduler_owned"
         if definition.get("deleted_at") is not None:
@@ -210,7 +223,7 @@ class MigrationRepository:
             spec.get(PROVENANCE_KEY) if isinstance(spec, dict) else None
         )
         if not isinstance(provenance, dict) or not definition.get(
-            "imported_at"
+            "imported_at",
         ):
             return "unowned_snapshot"
         if provenance.get("source_key") != candidate.source_key:
@@ -219,10 +232,19 @@ class MigrationRepository:
         if old_time and candidate.observed_at < old_time:
             return "stale_snapshot"
         if candidate.file_version < int(
-            definition.get("source_definition_version") or 0
+            definition.get("source_definition_version") or 0,
         ):
             return "stale_file_version"
-        if state is not None and (
+        return None
+
+    @staticmethod
+    def _state_conflict(
+        candidate: SnapshotCandidate,
+        state: dict | None,
+    ) -> str | None:
+        if state is None:
+            return None
+        if (
             state.get("state_source")
             not in (None, "unknown", "file_meta", "memory_snapshot")
             or state.get("management_status") not in (None, "imported")
@@ -231,13 +253,15 @@ class MigrationRepository:
             or state.get("runtime_updated_at") is not None
         ):
             return "target_managed"
-        state_time = _time((state or {}).get("state_observed_at"))
+        state_time = _time(state.get("state_observed_at"))
         if state_time and candidate.observed_at < state_time:
             return "stale_state_snapshot"
         return None
 
     def _state_values(
-        self, candidate: SnapshotCandidate, current: dict | None
+        self,
+        candidate: SnapshotCandidate,
+        current: dict | None,
     ) -> dict:
         values = dict(candidate.state_patch)
         # A file-only refresh does not relabel previously recovered live-memory fields.
@@ -272,7 +296,8 @@ class MigrationRepository:
         return sorted(differences)
 
     async def resolve_batch_control(
-        self, candidate: SnapshotCandidate
+        self,
+        candidate: SnapshotCandidate,
     ) -> None:
         """Optionally read the existing independent parent gate; never repair it."""
         meta = candidate.definition["spec_json"].get("meta", {})
@@ -305,7 +330,9 @@ class MigrationRepository:
             ]
 
     async def inspect(
-        self, candidate: SnapshotCandidate, mode: Literal["preview", "verify"]
+        self,
+        candidate: SnapshotCandidate,
+        mode: Literal["preview", "verify"],
     ) -> MigrationOutcome:
         definition, state = await self._read(candidate)
         reason = self._conflict(candidate, definition, state)
@@ -327,7 +354,9 @@ class MigrationRepository:
         )
 
     async def snapshot_rows(
-        self, request: MigrationRequest, after: tuple | None = None
+        self,
+        request: MigrationRequest,
+        after: tuple | None = None,
     ) -> tuple[list[dict], bool]:
         """Read legacy import rows for bounded, non-destructive orphan detection."""
         clauses = [
@@ -344,12 +373,12 @@ class MigrationRepository:
         ):
             if values:
                 clauses.append(
-                    f"`{column}` IN ({', '.join('%s' for _ in values)})"
+                    f"`{column}` IN ({', '.join('%s' for _ in values)})",
                 )
                 params.extend(values)
         if after is not None:
             clauses.append(
-                "(`tenant_id`, `source_id`, `agent_id`, `job_id`) > (%s, %s, %s, %s)"
+                "(`tenant_id`, `source_id`, `agent_id`, `job_id`) > (%s, %s, %s, %s)",
             )
             params.extend(after)
         rows = await self.db.fetch_all(
@@ -359,10 +388,11 @@ class MigrationRepository:
         return rows[: request.limit], len(rows) > request.limit
 
     async def import_snapshot(
-        self, candidate: SnapshotCandidate
+        self,
+        candidate: SnapshotCandidate,
     ) -> MigrationOutcome:
         if not set(candidate.definition).issubset(
-            DEFINITION_FIELDS
+            DEFINITION_FIELDS,
         ) or not set(candidate.state_patch).issubset(STATE_FIELDS):
             raise ValueError("unexpected_snapshot_field")
         for attempt in range(3):
