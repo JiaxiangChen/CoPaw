@@ -1033,6 +1033,14 @@ _Avoid_: one-shot plan flag, global plan switch
 A recurring task definition owned by a tenant and executed by the runtime at configured times. One **Scheduled Job** can have many **Scheduled Runs**.
 _Avoid_: cron config, timer task
 
+**Scheduler-managed Scheduled Job**:
+A Scheduled Job created under the Cron Scheduling Service's management responsibility, including its distributed child jobs. This ownership is distinct from creation date or the presence of an imported snapshot.
+_Avoid_: all recently created jobs, imported legacy snapshot as takeover
+
+**Legacy Scheduled Job**:
+A Scheduled Job still managed through the original SWE lifecycle. Copying its definition or recoverable state does not change that ownership.
+_Avoid_: oldest job by date, any job absent from a new query
+
 **Workflow Scheduled Job**:
 A **Scheduled Job** whose run obtains a result from one published Skill-associated workflow binding without invoking an Agent. It uses the same task Chat and execution history as other Scheduled Jobs.
 _Avoid_: Agent tool call, MCP workflow, external timer
@@ -1042,7 +1050,7 @@ The shared, published association between a Skill and the workflow invocation ru
 _Avoid_: per-recipient endpoint copy, Skill activation, execution model override
 
 **Scheduled Job Enablement**:
-The permission for a particular **Scheduled Job** to execute. Disabling a broadcast source job, manually or through unread-result protection, does not itself pause batch dispatch for its other recipients.
+The permission for a particular **Scheduled Job** to execute. Disabling it prevents its not-yet-started runs from starting but does not cancel runs already underway; disabling a broadcast source job does not itself pause batch dispatch for its other recipients.
 
 **Scheduled Job Snapshot Import**:
 A manually requested, repeatable observation of existing Scheduled Job definitions and recoverable state. Importing a snapshot does not transfer task management ownership or change the existing query and execution paths.

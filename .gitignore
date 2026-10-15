@@ -162,3 +162,8 @@ bbk_map.md
 /.devagent
 /.understand-anything/
 /deploy/
+
+# Local-only pre-commit complexity tooling
+/scripts/check_python_complexity.py
+/tests/unit/scripts/test_python_complexity.py
+/docs/superpowers/plans/2026-10-15-fix-cron-complexity-and-commit-gate.md
