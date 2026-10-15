@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSkillStats } from "../api";
 import type { Plan, SkillStat } from "../types";
-import { collectSkillStatQueries, sceneStatKey } from "../utils";
 import { withBoardRequestTimeout } from "./requestTimeout";
 
 const STATS_CACHE_TTL_MS = 30_000;
@@ -40,9 +39,7 @@ export function usePlanStats(
     [accountId],
   );
   const key = JSON.stringify(
-    collectSkillStatQueries(visiblePlans).sort((a, b) =>
-      sceneStatKey(a).localeCompare(sceneStatKey(b)),
-    ),
+    [...new Set(visiblePlans.map((p) => p.id))].sort(),
   );
   const selection = useMemo(
     () => ({ visiblePlans, checkedAt: Date.now() }),

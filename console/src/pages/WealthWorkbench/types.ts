@@ -92,14 +92,7 @@ export interface Draft {
   items: PlanItem[];
 }
 
-/** 技能统计查询项（/wealth/skill-stats 入参）：技能 + 起止日期 yyyy-MM-dd */
-export interface SkillStatQuery {
-  skillId: string;
-  startDate: string;
-  endDate: string;
-}
-
-/** 技能统计结果：目标客户数 / 已生成任务数 */
+/** 规划统计展示模型：targetTaskCount 映射为 generatedTaskCount。 */
 export interface SkillStat {
   targetCustomerCount: number;
   generatedTaskCount: number;

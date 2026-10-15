@@ -5,9 +5,10 @@
 import { parseCron, serializeCron } from "@/utils/parseCron";
 import { request } from "../../api/request";
 import { buildAuthHeaders } from "../../api/authHeaders";
+import { getWPlusCookie } from "../../utils/cookie-utils";
 // import { Base64 } from "js-base64";
 import { SCENE_CATEGORIES } from "./mock/data";
-import { DEFAULT_SCHEDULE, sceneStatKey } from "./utils";
+import { DEFAULT_SCHEDULE } from "./utils";
 import type {
   Account,
   Customer,
@@ -17,7 +18,6 @@ import type {
   PlanItem,
   Scene,
   SkillStat,
-  SkillStatQuery,
 } from "./types";
 
 /** 模拟网络延迟（毫秒），让离线 mock 的异步行为贴近真实接口 */
@@ -211,53 +211,53 @@ export async function fetchAvailableSceneCount(): Promise<number | null> {
 }
 
 // ---------------------------------------------------------------------------
-// 技能统计：/wealth/skill-stats（外部接口代理）
+// 规划统计：同源直连，由 Nginx 转发到外部服务
 // ---------------------------------------------------------------------------
 
 interface SkillStatItemView {
-  skillId: string;
+  planId: string;
   targetCustomerCount: number;
-  generatedTaskCount: number;
+  targetTaskCount: number;
 }
 
 interface SkillStatsResponse {
-  items: SkillStatItemView[];
+  code: number | string;
+  data?: { items?: SkillStatItemView[] };
 }
 
 /**
- * 看板「目标客户 / 已生成任务」统计：按技能 + 区间批量查询。
- * 返回以 sceneStatKey 为键的结果表；接口不可达返回 null，由看板保持 "--" 占位。
+ * 按规划 ID 批量查询，返回以 planId 为键的结果表。
+ * 不经过 CoPaw 后端；请求失败返回 null，由看板保持 "--" 占位。
  */
 export async function fetchSkillStats(
-  queries: SkillStatQuery[],
+  planIds: string[],
   signal?: AbortSignal,
 ): Promise<Record<string, SkillStat> | null> {
-  if (!queries.length) return {};
+  if (!planIds.length) return {};
   try {
-    const resp = await request<SkillStatsResponse>("/wealth/skill-stats", {
+    const headers = buildAuthHeaders();
+    const resp = await fetch("/api/agent/workspace/skill-stats", {
       method: "POST",
-      body: JSON.stringify({ skills: queries }),
+      credentials: "include",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ planIds: [...new Set(planIds)] }),
       signal,
     });
-    // 外部按请求顺序返回且我们入参字段齐全（不会跳项），按下标对齐；
-    // skillId 不一致时退化为按 skillId 查找兜底
-    const bySkill = new Map(resp.items.map((i) => [i.skillId, i]));
+    if (!resp.ok) throw new Error(`规划统计请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as SkillStatsResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`规划统计接口返回失败：${payload.code}`);
+    }
     const byKey: Record<string, SkillStat> = {};
-    queries.forEach((q, index) => {
-      const hit =
-        resp.items[index]?.skillId === q.skillId
-          ? resp.items[index]
-          : bySkill.get(q.skillId);
-      if (hit) {
-        byKey[sceneStatKey(q)] = {
-          targetCustomerCount: hit.targetCustomerCount,
-          generatedTaskCount: hit.generatedTaskCount,
-        };
-      }
-    });
+    for (const item of payload.data?.items ?? []) {
+      byKey[item.planId] = {
+        targetCustomerCount: item.targetCustomerCount,
+        generatedTaskCount: item.targetTaskCount,
+      };
+    }
     return byKey;
   } catch (error) {
-    console.warn("[Wealth] 技能统计接口不可用", error);
+    console.warn("[Wealth] 规划统计接口不可用", error);
     return null;
   }
 }
@@ -613,11 +613,12 @@ export async function fetchSchemeSignature(
 ): Promise<string> {
   const auth = buildAuthHeaders();
   console.log("auth", auth);
-  const resp = await fetch(`${signBaseUrl()}/expert/get-sign`, {
+  const resp = await fetch(`/expert/get-sign`, {
     method: "POST",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      Authorization: getWPlusCookie("token") ?? "",
       "x-header-cookie": auth["x-header-cookie"] ?? "",
       Cookie: auth["x-header-cookie"] ?? "",
     },

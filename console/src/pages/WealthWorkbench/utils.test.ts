@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import type { Plan, PlanItem } from "./types";
 import {
   buildTaskTree,
-  collectSkillStatQueries,
   cycleRange,
   DEFAULT_SCHEDULE,
   filterSceneConflictPlans,
@@ -286,33 +285,6 @@ describe("filterSceneConflictPlans", () => {
       middle,
       president,
       ownRm,
-    ]);
-  });
-});
-
-describe("collectSkillStatQueries", () => {
-  it("按「技能 + 区间」去重收集，缺起止日期的场景跳过", () => {
-    const planA = makePlan({
-      id: "p1",
-      items: [
-        makeItem({ id: "s1", start: "2026-09-01", end: "2026-09-30" }),
-        makeItem({ id: "s1", start: "2026-09-01", end: "2026-09-30" }), // 重复
-        makeItem({ id: "s2", start: "2026-09-01", end: "2026-09-30" }),
-      ],
-    });
-    const planB = makePlan({
-      id: "p2",
-      items: [
-        makeItem({ id: "s1", start: "2026-10-01", end: "2026-10-31" }), // 同技能不同区间
-        makeItem({ id: "s3" }), // 有起止（makeItem 默认带），改缺日期
-      ],
-    });
-    planB.items![1] = { ...planB.items![1], start: undefined, end: undefined };
-
-    expect(collectSkillStatQueries([planA, planB])).toEqual([
-      { skillId: "s1", startDate: "2026-09-01", endDate: "2026-09-30" },
-      { skillId: "s2", startDate: "2026-09-01", endDate: "2026-09-30" },
-      { skillId: "s1", startDate: "2026-10-01", endDate: "2026-10-31" },
     ]);
   });
 });
