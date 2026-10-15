@@ -32,6 +32,81 @@ describe("Board", () => {
     useWealthStore.setState({ accountId: "rm", plans: [], plansLoaded: false });
   });
 
+  it.each([
+    ["publishing", "发布中", "发布中"],
+    ["publish_failed", "发布失败", "发布失败"],
+    ["published", "分发中", "发布成功"],
+    ["published", "分发失败", "发布成功"],
+    ["published", "已自动下发", "发布成功"],
+  ])(
+    "%s / %s：列表只展示发布状态，详情单独展示分发结果",
+    async (publishStatus, status, label) => {
+      const day = todayKey();
+      useWealthStore.setState({
+        plansLoaded: true,
+        plans: [
+          {
+            id: "status-plan",
+            name: "状态测试规划",
+            source: "我的关注",
+            desc: "测试",
+            customers: 0,
+            tasks: 0,
+            rate: 0,
+            publishStatus,
+            status,
+            period: "今日",
+            start: day,
+            end: day,
+            items: [
+              {
+                id: "status-skill",
+                sceneName: "测试场景",
+                categoryLabel: "理财",
+                categoryCode: "finance",
+                mcpRelations: [],
+                direction: "客户经营",
+                cycle: "今日",
+                start: day,
+                end: day,
+                schedule: { type: "daily", hour: 9, minute: 0 },
+              },
+            ],
+          },
+        ],
+      });
+      const view = render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "状态测试规划，1 个技能，点击查看详情",
+        }),
+      );
+      const detail = useWealthStore.getState().dialog!.body;
+      fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
+      const list = within(screen.getByRole("article"));
+      expect(list.getByText(label)).toBeInTheDocument();
+      if (status !== label)
+        expect(list.queryByText(status)).not.toBeInTheDocument();
+      view.unmount();
+      render(<>{detail}</>);
+      expect(
+        screen.getByRole("columnheader", { name: "发布状态" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("columnheader", { name: "分发结果" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
+      if (publishStatus === "published")
+        expect(screen.getByText(status)).toBeInTheDocument();
+      else expect(screen.getByText("—")).toBeInTheDocument();
+      await act(async () => {});
+    },
+  );
+
   it("自定义日期按闭区间交集筛选，与来源筛选组合并保留上次选择", async () => {
     const month = todayKey().slice(0, 7);
     useWealthStore.setState({

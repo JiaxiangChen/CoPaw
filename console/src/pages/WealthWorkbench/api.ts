@@ -235,11 +235,13 @@ export async function fetchSkillStats(
 ): Promise<Record<string, SkillStat> | null> {
   if (!planIds.length) return {};
   try {
-    const headers = buildAuthHeaders();
+    const auth = buildAuthHeaders();
     const resp = await fetch("/api/agent/workspace/skill-stats", {
       method: "POST",
-      credentials: "include",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: getWPlusCookie("token") ?? "",
+      },
       body: JSON.stringify({ planIds: [...new Set(planIds)] }),
       signal,
     });

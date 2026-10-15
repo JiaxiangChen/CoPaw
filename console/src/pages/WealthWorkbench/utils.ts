@@ -6,6 +6,20 @@ import type { CronParts } from "@/utils/parseCron";
 import type { WealthRole } from "./permissions";
 import type { Draft, Plan, PlanItem } from "./types";
 
+/** 规划主状态只反映发布生命周期；分发结果在详情中单独展示。 */
+export function planPublishLabel(plan: Plan): string {
+  switch (plan.publishStatus) {
+    case "publishing":
+      return "发布中";
+    case "published":
+      return "发布成功";
+    case "publish_failed":
+      return "发布失败";
+    default:
+      return "状态未知";
+  }
+}
+
 export function calendarDate(value: string): Date {
   return new Date(value + "T12:00:00");
 }
