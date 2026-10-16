@@ -272,7 +272,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台看板与列表标题
 
-- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。分发结果仅在工作任务详情的独立列展示，发布未成功时显示 `—`。`Plan.status` 仍保留后端 `board_status` 聚合结果，继续供分发结果、自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
+- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留后端 `board_status` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
 
 - 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，周视图卡片标题使用规划名，下方显示“经营场景：”并汇总该规划的 `PlanItem.sceneName`，多项场景用中文逗号连接，最多两行，超出省略。月视图标题同样使用规划名，名称后用纯数字表示该规划关联的全部技能数量，不新增场景正文；两种视图统一使用 Ant Design Tooltip，悬停或键盘聚焦时分行展示完整规划名、经营场景与状态，长名称自动换行；移除原生 `title`，避免重复提示。
 - 列表的“规划周期”按所选日期范围与规划 `start/end` 的闭区间交集筛选，不按 `Plan.period` 类型筛选。“自定义”显示日期范围选择器，默认本月，切换快捷周期后保留此前选定的范围；来源分类和概览统计使用同一筛选结果，日历仍使用自身的周/月区间。
@@ -289,7 +289,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
 - 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 七日内已触达 / 待处理”，使用各自名单响应的后端统计，搜索和筛选不重算汇总；已完成页不展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。触达日期与人数由外部接口计算。
 - Console 直接请求 `POST /api/agent/workspace/name-list`，由前端 Nginx 转发；前端把外部 `data.list`、统计及字段配置转换为 `items`、四项计数、`skillFieldList`、`allFields`。
-- 今日任务、待触达和已完成分别查询客户名单，均传 `sapId` 与 `skillIds` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端使用原生 `fetch` 直接 POST 同源 `/api/agent/workspace/name-list`，由部署方前端 Nginx 转发外部服务，不再经过 Python 名单代理或统一 `request()`。JSON 直接传 `skillIds: ["a", "b"]`、`sapId`、`touched`，并从 iframe 上下文补充 `bbkId`、可选 `subBbkId/posId` 及固定 `platformSource/pageSource`；`credentials: "omit"`，仅附加 JSON Content-Type，不传 Cookie 或鉴权头。前端读取外部 `code` 与 `data.list`，转换为页面 `items`；HTTP/业务失败、网络异常或四十五秒超时返回空名单。原后端代理保留兼容，但工作台不再调用。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
+- 今日任务、待触达和已完成分别查询客户名单，均传 `sapId` 与 `skillIds` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端使用原生 `fetch` 直接 POST 同源 `/api/agent/workspace/name-list`，由部署方前端 Nginx 转发外部服务，不再经过 Python 名单代理或统一 `request()`。JSON 直接传 `skillIds: ["a", "b"]`、`sapId`、`touched`，并从 iframe 上下文补充 `bbkId`、可选 `subBbkId/posId` 及固定 `platformSource/pageSource`；不显式设置 `credentials`，沿用 fetch 默认的同源 Cookie 行为；仅显式附加 JSON Content-Type，不手动设置 Cookie 或鉴权头。前端读取外部 `code` 与 `data.list`，转换为页面 `items`；HTTP/业务失败、网络异常或四十五秒超时返回空名单。原后端代理保留兼容，但工作台不再调用。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。

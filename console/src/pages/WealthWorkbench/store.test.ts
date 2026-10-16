@@ -788,7 +788,6 @@ describe("WealthWorkbench store", () => {
       "/api/agent/workspace/name-list",
       expect.objectContaining({
         method: "POST",
-        credentials: "omit",
       }),
     );
     const paths = mockRequest.mock.calls.map(([, options]) =>

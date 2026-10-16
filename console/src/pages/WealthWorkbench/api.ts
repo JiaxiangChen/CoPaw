@@ -348,7 +348,7 @@ interface ExternalNameListResponse {
 }
 
 /**
- * 客户名单直接通过同源 Nginx 查询，不依赖 Cookie 或 CoPaw 鉴权。
+ * 客户名单直接通过同源 Nginx 查询，使用 fetch 默认的同源凭证策略。
  * 经营视角传当前场景，其余口径传当天任务树全部技能；空范围不查询。
  */
 export async function fetchNameList(
@@ -359,12 +359,11 @@ export async function fetchNameList(
   const ids = [...new Set(skillIds.map((id) => id.trim()).filter(Boolean))];
   if (!ids.length) return { items: [] };
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const context = getIframeContext();
     const resp = await fetch("/api/agent/workspace/name-list", {
       method: "POST",
-      credentials: "omit",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         skillIds: ids,
