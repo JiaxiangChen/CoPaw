@@ -4,7 +4,21 @@
  */
 import type { CronParts } from "@/utils/parseCron";
 import type { WealthRole } from "./permissions";
-import type { Draft, Plan, PlanItem, SkillStatQuery } from "./types";
+import type { Draft, Plan, PlanItem } from "./types";
+
+/** 规划展示状态只反映发布生命周期，不展示后端聚合的分发结果。 */
+export function planPublishLabel(plan: Plan): string {
+  switch (plan.publishStatus) {
+    case "publishing":
+      return "发布中";
+    case "published":
+      return "发布成功";
+    case "publish_failed":
+      return "发布失败";
+    default:
+      return "状态未知";
+  }
+}
 
 export function calendarDate(value: string): Date {
   return new Date(value + "T12:00:00");
@@ -289,33 +303,4 @@ export function findSceneConflicts(
       );
       return owner ? [{ scene, planName: owner.name }] : [];
     });
-}
-
-/** 场景统计键：技能 + 区间唯一确定一份统计结果 */
-export function sceneStatKey(q: SkillStatQuery): string {
-  return `${q.skillId}|${q.startDate}|${q.endDate}`;
-}
-
-/**
- * 收集看板规划列表的技能统计查询：按「技能 + 起止日期」去重；
- * 缺起止日期的场景无法统计，跳过。
- */
-export function collectSkillStatQueries(plans: Plan[]): SkillStatQuery[] {
-  const seen = new Set<string>();
-  const queries: SkillStatQuery[] = [];
-  for (const p of plans) {
-    for (const item of p.items ?? []) {
-      if (!item.start || !item.end) continue;
-      const query: SkillStatQuery = {
-        skillId: item.id,
-        startDate: item.start,
-        endDate: item.end,
-      };
-      const key = sceneStatKey(query);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      queries.push(query);
-    }
-  }
-  return queries;
 }

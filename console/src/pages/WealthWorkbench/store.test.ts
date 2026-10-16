@@ -3,7 +3,7 @@
  * request 层用内存夹具 mock（规划接口已不做假数据回退）；
  * 场景接口按 category 返回 SceneSkillItem 夹具，账户/草稿走真实实现。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetMockDb } from "./api";
 import { request } from "../../api/request";
 import { useIframeStore } from "../../stores/iframeStore";
@@ -18,7 +18,29 @@ import type { Customer, Plan, PlanItem } from "./types";
 
 vi.mock("../../api/request", () => ({ request: vi.fn() }));
 
-const mockRequest = vi.mocked(request);
+// 统一记录两种传输，验证规划请求与原生名单请求的执行顺序。
+const mockRequest =
+  vi.fn<(path: string, options?: RequestInit) => Promise<unknown>>();
+
+afterEach(() => vi.unstubAllGlobals());
+
+function mockTransports() {
+  vi.mocked(request).mockImplementation(
+    (path, options) => mockRequest(path, options) as never,
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, options?: RequestInit) => {
+      const result = (await mockRequest(path, options)) as {
+        items?: unknown[];
+      };
+      const { items, ...fields } = result;
+      return new Response(
+        JSON.stringify({ code: 200, data: { ...fields, list: items ?? [] } }),
+      );
+    }),
+  );
+}
 
 const INSURANCE = "skill-wealth-insurance-1";
 const INSURANCE_2 = "skill-wealth-insurance-2";
@@ -181,8 +203,8 @@ async function requestHandler(
         : SCENE_FIXTURES,
     };
   }
-  if (path.startsWith("/wealth/name-list")) {
-    const skillIds = JSON.parse(String(options.body)).skill_id as string[];
+  if (path.startsWith("/api/agent/workspace/name-list")) {
+    const skillIds = JSON.parse(String(options.body)).skillIds as string[];
     return { items: skillIds.includes(LOAN) ? NAME_LIST_FIXTURE : [] };
   }
   if (path === "/wealth/plans" && method === "GET") {
@@ -279,6 +301,8 @@ function makeTodayPlanView(): FixturePlanView {
 
 async function initStore() {
   resetMockDb();
+  mockRequest.mockReset();
+  mockTransports();
   planViews = fixturePlanViews();
   mockRequest.mockImplementation(requestHandler as never);
   // 显式声明测试身份为客户经理（RB0101），不依赖 FALLBACK_ROLE 兜底
@@ -421,9 +445,9 @@ describe("WealthWorkbench store", () => {
     mockRequest.mockClear();
     await useWealthStore.getState().refreshTaskLists();
     const calls = mockRequest.mock.calls.filter(([path]) =>
-      String(path).startsWith("/wealth/name-list"),
+      String(path).startsWith("/api/agent/workspace/name-list"),
     );
-    expect(JSON.parse(String(calls[0][1]?.body)).skill_id).toEqual([FINANCE]);
+    expect(JSON.parse(String(calls[0][1]?.body)).skillIds).toEqual([FINANCE]);
   });
 
   it("经营视角只查询所选场景，其他模块和角标使用全部当天技能", async () => {
@@ -445,8 +469,10 @@ describe("WealthWorkbench store", () => {
     await state.loadTodayCustomers("business", FINANCE);
     const skillArrays = () =>
       mockRequest.mock.calls
-        .filter(([path]) => String(path).startsWith("/wealth/name-list"))
-        .map(([, options]) => JSON.parse(String(options?.body)).skill_id);
+        .filter(([path]) =>
+          String(path).startsWith("/api/agent/workspace/name-list"),
+        )
+        .map(([, options]) => JSON.parse(String(options?.body)).skillIds);
     expect(skillArrays()).toEqual([[FINANCE], [LOAN, FINANCE]]);
     mockRequest.mockClear();
     await state.loadTodayCustomers("customer");
@@ -713,13 +739,13 @@ describe("WealthWorkbench store", () => {
     useWealthStore.setState({ plans: [makeTodayPlan()] });
     const nameListCalls = () =>
       mockRequest.mock.calls
-        .filter(([p]) => String(p).startsWith("/wealth/name-list"))
+        .filter(([p]) => String(p).startsWith("/api/agent/workspace/name-list"))
         .map(([, options]) => JSON.parse(String(options?.body)));
 
     await useWealthStore.getState().loadTodayCustomers("business");
     const bizCall = nameListCalls()[0];
-    expect(bizCall.sap_id).toBe("10086");
-    expect(bizCall.skill_id).toEqual([LOAN]);
+    expect(bizCall.sapId).toBe("10086");
+    expect(bizCall.skillIds).toEqual([LOAN]);
     const bizCustomers = useWealthStore.getState().customers;
     expect(bizCustomers).toHaveLength(2);
     expect(useWealthStore.getState().todayCustomerCount).toBe(2);
@@ -733,8 +759,8 @@ describe("WealthWorkbench store", () => {
 
     await useWealthStore.getState().loadTodayCustomers("customer");
     const custCall = nameListCalls().slice(-1)[0];
-    expect(custCall.sap_id).toBe("10086");
-    expect(custCall.skill_id).toEqual([LOAN]);
+    expect(custCall.sapId).toBe("10086");
+    expect(custCall.skillIds).toEqual([LOAN]);
     const custCustomers = useWealthStore.getState().customers;
     expect(custCustomers).toHaveLength(2);
     expect(useWealthStore.getState().todayCustomerCount).toBe(
@@ -758,14 +784,16 @@ describe("WealthWorkbench store", () => {
     });
     mockRequest.mockClear();
     await useWealthStore.getState().loadTodayCustomerCount();
-    expect(mockRequest).toHaveBeenCalledWith("/wealth/name-list", {
-      method: "POST",
-      body: JSON.stringify({ skill_id: [LOAN], sap_id: "10086", touched: 2 }),
-    });
+    expect(mockRequest).toHaveBeenCalledWith(
+      "/api/agent/workspace/name-list",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
     const paths = mockRequest.mock.calls.map(([, options]) =>
       JSON.parse(String(options?.body)),
     );
-    expect(paths.every((body) => body.skill_id.includes(LOAN))).toBe(true);
+    expect(paths.every((body) => body.skillIds.includes(LOAN))).toBe(true);
     expect(paths.some((body) => body.touched === 2)).toBe(true);
     expect(useWealthStore.getState().todayCustomerCount).toBe(2);
     expect(useWealthStore.getState().customers).toBe(customers);
@@ -823,7 +851,7 @@ describe("WealthWorkbench store", () => {
     finishPlans({ items: [latest] });
     await refresh;
     expect(
-      JSON.parse(String(mockRequest.mock.calls[1]?.[1]?.body)).skill_id,
+      JSON.parse(String(mockRequest.mock.calls[1]?.[1]?.body)).skillIds,
     ).toEqual([LOAN]);
     expect(useWealthStore.getState().customers[0].task).toBe(
       "新发布的信贷任务",
@@ -838,9 +866,11 @@ describe("WealthWorkbench store", () => {
     await useWealthStore.getState().refreshTodayCustomers("customer");
     expect(mockRequest.mock.calls).toHaveLength(2);
     expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");
-    expect(String(mockRequest.mock.calls[1][0])).toContain("/wealth/name-list");
+    expect(String(mockRequest.mock.calls[1][0])).toContain(
+      "/api/agent/workspace/name-list",
+    );
     expect(
-      JSON.parse(String(mockRequest.mock.calls[1][1]?.body)).skill_id,
+      JSON.parse(String(mockRequest.mock.calls[1][1]?.body)).skillIds,
     ).toEqual([LOAN]);
     expect(useWealthStore.getState().customersLoading).toBe(false);
   });
@@ -860,7 +890,7 @@ describe("WealthWorkbench store", () => {
     useWealthStore.setState({ plans: [makeTodayPlan()] });
     const nameListCalls = () =>
       mockRequest.mock.calls
-        .filter(([p]) => String(p).startsWith("/wealth/name-list"))
+        .filter(([p]) => String(p).startsWith("/api/agent/workspace/name-list"))
         .map(([, options]) => JSON.parse(String(options?.body)));
 
     mockRequest.mockResolvedValueOnce({
@@ -894,12 +924,14 @@ describe("WealthWorkbench store", () => {
     const paths = mockRequest.mock.calls.map(([path]) => String(path));
     expect(paths[0]).toBe("/wealth/plans");
     const lists = mockRequest.mock.calls
-      .filter(([path]) => String(path).startsWith("/wealth/name-list"))
+      .filter(([path]) =>
+        String(path).startsWith("/api/agent/workspace/name-list"),
+      )
       .map(([, options]) => JSON.parse(String(options?.body)));
     expect(lists).toHaveLength(3);
     expect(lists.map((body) => body.touched)).toEqual([2, 0, 1]);
-    expect(lists.every((body) => body.sap_id === "10086")).toBe(true);
-    expect(lists.every((body) => body.skill_id.includes(LOAN))).toBe(true);
+    expect(lists.every((body) => body.sapId === "10086")).toBe(true);
+    expect(lists.every((body) => body.skillIds.includes(LOAN))).toBe(true);
     expect(useWealthStore.getState().taskListsRefreshing).toBe(false);
   });
 

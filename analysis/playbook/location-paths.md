@@ -280,22 +280,24 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台看板与列表标题
 
+- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留后端 `board_status` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
+
 - 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，周视图卡片标题使用规划名，下方显示“经营场景：”并汇总该规划的 `PlanItem.sceneName`，多项场景用中文逗号连接，最多两行，超出省略。月视图标题同样使用规划名，名称后用纯数字表示该规划关联的全部技能数量，不新增场景正文；两种视图统一使用 Ant Design Tooltip，悬停或键盘聚焦时分行展示完整规划名、经营场景与状态，长名称自动换行；移除原生 `title`，避免重复提示。
 - 列表的“规划周期”按所选日期范围与规划 `start/end` 的闭区间交集筛选，不按 `Plan.period` 类型筛选。“自定义”显示日期范围选择器，默认本月，切换快捷周期后保留此前选定的范围；来源分类和概览统计使用同一筛选结果，日历仍使用自身的周/月区间。
 - 日历按各场景排程筛选当天执行的技能，点击卡片仍传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
-- 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样按技能及完整执行周期查询 `/wealth/skill-stats` 并汇总；未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
+- 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样由前端直接查询 `/api/agent/workspace/skill-stats`，请求 `planIds` 为规划 ID 数组，由 Nginx 转发；按返回项 `planId` 读取 `targetCustomerCount` 和 `targetTaskCount`，不再按场景或日期区间求和。未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
 
 - 周/月切换仅本地筛选规划，不按周重新请求 `/wealth/plans`。统计由 `Board/usePlanStats.ts` 按账户、去重排序后的技能及完整有效期参数缓存；相同在途请求合并，规划状态轮询不会清空缓存。成功与失败响应缓存 30 秒，到期后在下一次周期/筛选变化或规划轮询时后台更新；页面静止时不定时刷新。后台更新保留已有数字，失败提示暂显示上次数据；无已有数据时显示 `--`；加载/后台更新仅通过刷新图标旋转和禁用反馈，失败仍提示统计不可用或暂显示上次数据。发布/分发从进行中结束时使统计失效并主动查询，若请求在途则返回后串行补查；切换账户清空缓存，过期响应不覆盖当前周期。回归入口为 `Board/usePlanStats.test.ts`。
 - 看板仅在存在发布中/分发中规划时自动查询：`Board/useBoardRefresh.ts` 在上一轮完成后等待 5 秒再查询，每次连续处理周期最多 3 分钟；到期静默暂停，手动“刷新看板”不会重新启动自动轮询。看板的规划与统计单次请求均由 `Board/requestTimeout.ts` 限制为 15 秒：超时取消底层请求并释放等待，保留已有数据；离开看板会立即取消在途规划请求；被取消的规划请求即使晚返回也不更新 store。自动与手动规划刷新共用在途请求，刷新入口使用图标按钮（无障碍名称“刷新看板”），在规划或统计请求期间旋转并禁用；手动成功刷新会绕过统计有效期更新当前统计。看板刷新使用严格读取，接口失败保留规划，不额外展示暂停或规划刷新失败文案，其他读取仍保持原有容错行为。回归入口：`Board/useBoardRefresh.test.ts`。
 
 ## 财富任务名单动态字段
 
-- 侧栏“今日任务”红色数字角标与客户视角口径一致：`fetchTodayCustomers(..., "customer")` 查询 `/wealth/name-list`，传当前用户 sapId、当天工作任务树全部去重技能 ID 数组与 touched=2，统计该范围内聚合名单总人数（包含已接触客户），为 0 时隐藏。store 独立保存 `todayCustomerCount`，避免经营视角按技能查询影响总数；侧栏首次加载及今日名单刷新时更新。待触达和已完成角标分别来自对应客户名单长度。入口为 `components/Sidebar.tsx` 和 `store.ts`，回归入口为 `components/Sidebar.test.tsx` 和 `store.test.ts`。
+- 侧栏“今日任务”红色数字角标与客户视角口径一致：`fetchTodayCustomers(..., "customer")` 查询 `/api/agent/workspace/name-list`，传当前用户 sapId、当天工作任务树全部去重技能 ID 数组与 touched=2，统计该范围内聚合名单总人数（包含已接触客户），为 0 时隐藏。store 独立保存 `todayCustomerCount`，避免经营视角按技能查询影响总数；侧栏首次加载及今日名单刷新时更新。待触达和已完成角标分别来自对应客户名单长度。入口为 `components/Sidebar.tsx` 和 `store.ts`，回归入口为 `components/Sidebar.test.tsx` 和 `store.test.ts`。
 
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
-- 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 待处理”，按各自当前筛选名单计算；已完成页不再展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。待触达和已完成沿用名单映射的 `done` 判断，正常已完成名单待处理为 0。“今日已触达”文案沿用三页统一表达，不新增完成日期过滤。
-- 外部接口为 `POST /api/agent/workspace/name-list`；Console 使用 `POST /api/wealth/name-list`，代理返回 `items`、`skillFieldList`、`allFields`。
-- 今日任务、待触达和已完成分别查询客户名单，均传 `sap_id` 与 `skill_id` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端 POST 使用 JSON 请求体 `{"skill_id":["a","b"],"sap_id":"10086","touched":2}`，技能数组不再占用 URL，后端转发为外部 JSON 的 `skillIds: ["a", "b"]`；缺少技能参数返回 422，仅空值返回 400，防止查询范围扩大。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
+- 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 七日内已触达 / 待处理”，使用各自名单响应的后端统计，搜索和筛选不重算汇总；已完成页不展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。触达日期与人数由外部接口计算。
+- Console 直接请求 `POST /api/agent/workspace/name-list`，由前端 Nginx 转发；前端把外部 `data.list`、统计及字段配置转换为 `items`、四项计数、`skillFieldList`、`allFields`。
+- 今日任务、待触达和已完成分别查询客户名单，均传 `sapId` 与 `skillIds` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端使用原生 `fetch` 直接 POST 同源 `/api/agent/workspace/name-list`，由部署方前端 Nginx 转发外部服务，不再经过 Python 名单代理或统一 `request()`。JSON 直接传 `skillIds: ["a", "b"]`、`sapId`、`touched`，并从 iframe 上下文补充 `bbkId`、可选 `subBbkId/posId` 及固定 `platformSource/pageSource`；不显式设置 `credentials`，沿用 fetch 默认的同源 Cookie 行为；仅显式附加 JSON Content-Type，不手动设置 Cookie 或鉴权头。前端读取外部 `code` 与 `data.list`，转换为页面 `items`；HTTP/业务失败、网络异常或四十五秒超时返回空名单。原后端代理保留兼容，但工作台不再调用。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。
@@ -333,6 +335,6 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 - 浏览器标签页切回引发的自动刷新由 `taskListsRefreshing` 标记。任务页在此期间保留现有名单、分类和统计，不清空为加载占位；最新名单返回后更新。首次进入页面、切换任务视角和手动刷新仍使用原加载提示。入口为 `Tasks/index.tsx`，回归入口为 `Tasks/loading.test.tsx`，覆盖今日任务、待触达和已完成三页。
 
-工作台任务页顶部汇总随客户名单响应读取 `targetCusCount`、`todayTouchCount`、`sevenDayTouchCount`、`unTouchedCount`（外部响应 `data` 下，由代理透传到响应顶层）。今日任务经营视角使用所选当天技能的统计，其余视角/模块使用当天全部技能；搜索、标签和接触状态筛选只过滤表格，不重算后端汇总。各模块独立保存名单及统计并同步更新；首次加载显示 `--`，后台刷新保留旧值，缺失统计显示 `--`，当天无场景时显示 0 且不查询名单。列表分页条数仍按当前筛选结果展示。
+工作台任务页顶部汇总随客户名单响应读取 `targetCusCount`、`todayTouchCount`、`sevenDayTouchCount`、`unTouchedCount`（外部响应 `data` 下，由前端适配到响应顶层）。今日任务经营视角使用所选当天技能的统计，其余视角/模块使用当天全部技能；搜索、标签和接触状态筛选只过滤表格，不重算后端汇总。各模块独立保存名单及统计并同步更新；首次加载显示 `--`，后台刷新保留旧值，缺失统计显示 `--`，当天无场景时显示 0 且不查询名单。列表分页条数仍按当前筛选结果展示。
 
 今日任务经营视角原始客户名单为空且查询完成时，在当前任务标题旁展示执行时间；使用 `plans.items[].scenes[].cron_expr` 经 `mapSceneItem` 解析的排程，由任务树节点透传 `schedule` 并复用 `scheduleLabel`。日/周排程显示具体时分，小时排程显示“每小时整点”，自定义排程显示原表达式。搜索或接触状态筛选导致的空列表不触发展示；客户视角、待触达、已完成不显示。`plans` 不返回实际执行状态，空名单不能严格证明任务尚未执行。

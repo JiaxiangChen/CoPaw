@@ -781,7 +781,7 @@
 
 ## 财富规划看板「已生成任务」数量不准确
 
-- **口径**：单个规划按各场景对应日期区间查询外部 `skill-stats`，累加响应中的 `generatedTaskCount`；规划概览再累加当前周期内各规划的结果。
-- **角色参数**：客户经理（`RB0101`）调用外部统计接口时必须附带本人 `sapId`；行长和分行中台不传 `sapId`，沿用机构范围统计。
-- **第一落点**：检查 `src/swe/app/wealth_plans/router.py` 的 `_fetch_external_skill_stats()` 是否按角色组装外部请求体，以及前端看板是否仍按 `skillId + startDate + endDate` 汇总。
-- **不可用处理**：外部统计接口不可用时返回空结果，前端显示 `--`，不要回退为规划分发记录或本地估算值。
+- **口径**：前端直接 POST 同源 `/api/agent/workspace/skill-stats`，请求体的 `planIds` 为当前范围内去重的规划 ID 数组，不再传 `skills` 或日期区间。按返回项 `planId` 关联规划，`targetCustomerCount` 展示目标客户，`targetTaskCount` 映射为展示模型的 `generatedTaskCount`；规划概览累加当前周期内各规划的结果，不再按场景累加。
+- **请求参数**：所有角色的统计请求体都只传 `planIds`，不传 `bbkId` 或 `sapId`；登录态与上下文仍通过统一请求头携带。
+- **第一落点**：检查 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSkillStats()` 与 `Board/usePlanStats.ts`；该请求不经过 CoPaw 后端，需要 Nginx 将上述路径转发到外部服务。保留外部响应封装 `code: 200, data: { items: [...] }`，请求携带登录态及机构上下文。
+- **不可用处理**：请求失败或该规划未返回统计时显示 `--`，真实零值显示 `0`；后台更新失败保留已有成功数据。不要回退为规划分发记录或本地估算值。

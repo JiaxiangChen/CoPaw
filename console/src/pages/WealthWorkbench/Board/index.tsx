@@ -17,8 +17,8 @@ import {
   cycleRange,
   dateKey,
   planFrequency,
+  planPublishLabel,
   planScheduledOn,
-  sceneStatKey,
   scheduleLabel,
   todayKey,
 } from "../utils";
@@ -116,7 +116,7 @@ export default function Board() {
     refreshPlans,
   );
 
-  // 目标客户 / 已生成任务：按「技能 + 区间」批量查询技能统计接口；
+  // 目标客户 / 已生成任务：按规划 ID 批量查询统计接口；
   // 接口不可达时 planStat 返回 null，对应位置保持 "--" 占位
   const { sceneStats, statsLoading, statsUpdating, statsFailed } = usePlanStats(
     all,
@@ -127,25 +127,12 @@ export default function Board() {
 
   const boardRefreshing = refreshing || statsLoading || statsUpdating;
 
-  /** 单个规划的统计汇总：各场景目标客户/已生成任务求和 */
+  /** 直接使用接口返回的规划统计，不再按场景累加。 */
   const planStat = (p: Plan): { customers: number; tasks: number } | null => {
-    if (sceneStats == null) return null;
-    let customers = 0;
-    let tasks = 0;
-    for (const item of p.items ?? []) {
-      if (!item.start || !item.end) continue;
-      const hit =
-        sceneStats[
-          sceneStatKey({
-            skillId: item.id,
-            startDate: item.start,
-            endDate: item.end,
-          })
-        ];
-      customers += hit?.targetCustomerCount ?? 0;
-      tasks += hit?.generatedTaskCount ?? 0;
-    }
-    return { customers, tasks };
+    const hit = sceneStats?.[p.id];
+    return hit
+      ? { customers: hit.targetCustomerCount, tasks: hit.generatedTaskCount }
+      : null;
   };
 
   const customersText = (p: Plan) => {
@@ -157,7 +144,7 @@ export default function Board() {
     return stat == null ? "--" : `${stat.tasks} 个`;
   };
   const generatedTotal =
-    sceneStats == null
+    sceneStats == null || all.some((p) => planStat(p) == null)
       ? null
       : all.reduce((sum, p) => sum + (planStat(p)?.tasks ?? 0), 0);
 
@@ -223,7 +210,7 @@ export default function Board() {
                   <th>目标客户</th>
                   <th>已生成任务</th>
                   {/* <th>任务执行率</th> */}
-                  <th>状态</th>
+                  <th>发布状态</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -277,10 +264,13 @@ export default function Board() {
                       </td> */}
                       <td>
                         <span
-                          className={cx(styles.status, statusClass(p.status))}
+                          className={cx(
+                            styles.status,
+                            statusClass(planPublishLabel(p)),
+                          )}
                         >
                           <i className={styles.dot}></i>
-                          {p.status}
+                          {planPublishLabel(p)}
                         </span>
                       </td>
                       <td>
@@ -603,10 +593,13 @@ export default function Board() {
                     <div className={styles.metric}>
                       <small>状态</small>
                       <span
-                        className={cx(styles.status, statusClass(p.status))}
+                        className={cx(
+                          styles.status,
+                          statusClass(planPublishLabel(p)),
+                        )}
                       >
                         <i className={styles.dot}></i>
-                        {p.status}
+                        {planPublishLabel(p)}
                       </span>
                     </div>
                     <div className={styles.actions}>

@@ -13,7 +13,7 @@ import { useWealthStore } from "../store";
 import { fetchSkillStats } from "../api";
 import type { SkillStat } from "../types";
 import type { WealthRole } from "../permissions";
-import { sceneStatKey, todayKey } from "../utils";
+import { todayKey } from "../utils";
 import Board from "./index";
 
 vi.mock("../api", async (importOriginal) => {
@@ -31,6 +31,80 @@ describe("Board", () => {
     vi.mocked(fetchSkillStats).mockResolvedValue({});
     useWealthStore.setState({ accountId: "rm", plans: [], plansLoaded: false });
   });
+
+  it.each([
+    ["publishing", "发布中", "发布中"],
+    ["publish_failed", "发布失败", "发布失败"],
+    ["published", "分发中", "发布成功"],
+    ["published", "分发失败", "发布成功"],
+    ["published", "已自动下发", "发布成功"],
+  ])(
+    "%s / %s：列表与详情只展示发布状态",
+    async (publishStatus, status, label) => {
+      const day = todayKey();
+      useWealthStore.setState({
+        plansLoaded: true,
+        plans: [
+          {
+            id: "status-plan",
+            name: "状态测试规划",
+            source: "我的关注",
+            desc: "测试",
+            customers: 0,
+            tasks: 0,
+            rate: 0,
+            publishStatus,
+            status,
+            period: "今日",
+            start: day,
+            end: day,
+            items: [
+              {
+                id: "status-skill",
+                sceneName: "测试场景",
+                categoryLabel: "理财",
+                categoryCode: "finance",
+                mcpRelations: [],
+                direction: "客户经营",
+                cycle: "今日",
+                start: day,
+                end: day,
+                schedule: { type: "daily", hour: 9, minute: 0 },
+              },
+            ],
+          },
+        ],
+      });
+      const view = render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "状态测试规划，1 个技能，点击查看详情",
+        }),
+      );
+      const detail = useWealthStore.getState().dialog!.body;
+      fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
+      const list = within(screen.getByRole("article"));
+      expect(list.getByText(label)).toBeInTheDocument();
+      if (status !== label)
+        expect(list.queryByText(status)).not.toBeInTheDocument();
+      view.unmount();
+      render(<>{detail}</>);
+      expect(
+        screen.getByRole("columnheader", { name: "发布状态" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("columnheader", { name: "分发结果" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
+      if (status !== label)
+        expect(screen.queryByText(status)).not.toBeInTheDocument();
+      await act(async () => {});
+    },
+  );
 
   it("自定义日期按闭区间交集筛选，与来源筛选组合并保留上次选择", async () => {
     const month = todayKey().slice(0, 7);
@@ -86,8 +160,8 @@ describe("Board", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 
-  it.each(["success", "zero", "unavailable"] as const)(
-    "%s 时日历与列表复用技能统计，加载中显示占位",
+  it.each(["success", "zero", "missing", "unavailable"] as const)(
+    "%s 时日历与列表复用规划统计，加载中显示占位",
     async (state) => {
       const day = todayKey();
       let resolveStats!: (value: Record<string, SkillStat> | null) => void;
@@ -139,24 +213,12 @@ describe("Board", () => {
       const stats =
         state === "unavailable"
           ? null
-          : state === "zero"
+          : state === "missing"
           ? {}
           : {
-              [sceneStatKey({
-                skillId: "skill-1",
-                startDate: day,
-                endDate: day,
-              })]: {
-                targetCustomerCount: 12,
-                generatedTaskCount: 3,
-              },
-              [sceneStatKey({
-                skillId: "skill-2",
-                startDate: day,
-                endDate: day,
-              })]: {
-                targetCustomerCount: 8,
-                generatedTaskCount: 4,
+              "stats-plan": {
+                targetCustomerCount: state === "zero" ? 0 : 20,
+                generatedTaskCount: state === "zero" ? 0 : 7,
               },
             };
       await act(async () => resolveStats(stats));
@@ -167,7 +229,7 @@ describe("Board", () => {
       expect(event).toHaveTextContent(`已生成 ${tasks} 项任务`);
       fireEvent.click(screen.getByRole("button", { name: "列表模式" }));
       const row = within(screen.getByRole("article"));
-      if (state === "unavailable") {
+      if (state === "unavailable" || state === "missing") {
         expect(row.getAllByText("--", { selector: "strong" })).toHaveLength(2);
       } else {
         expect(row.getByText(`${customers} 人`)).toBeInTheDocument();

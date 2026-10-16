@@ -5,9 +5,12 @@
 import { parseCron, serializeCron } from "@/utils/parseCron";
 import { request } from "../../api/request";
 import { buildAuthHeaders } from "../../api/authHeaders";
+import { getWPlusCookie } from "../../utils/cookie-utils";
+import { getIframeContext } from "../../stores/iframeStore";
+import { DEFAULT_BBK_ID } from "../../constants/identity";
 // import { Base64 } from "js-base64";
 import { SCENE_CATEGORIES } from "./mock/data";
-import { DEFAULT_SCHEDULE, sceneStatKey } from "./utils";
+import { DEFAULT_SCHEDULE } from "./utils";
 import type {
   Account,
   Customer,
@@ -17,7 +20,6 @@ import type {
   PlanItem,
   Scene,
   SkillStat,
-  SkillStatQuery,
 } from "./types";
 
 /** 模拟网络延迟（毫秒），让离线 mock 的异步行为贴近真实接口 */
@@ -211,59 +213,61 @@ export async function fetchAvailableSceneCount(): Promise<number | null> {
 }
 
 // ---------------------------------------------------------------------------
-// 技能统计：/wealth/skill-stats（外部接口代理）
+// 规划统计：同源直连，由 Nginx 转发到外部服务
 // ---------------------------------------------------------------------------
 
 interface SkillStatItemView {
-  skillId: string;
+  planId: string;
   targetCustomerCount: number;
-  generatedTaskCount: number;
+  targetTaskCount: number;
 }
 
 interface SkillStatsResponse {
-  items: SkillStatItemView[];
+  code: number | string;
+  data?: { items?: SkillStatItemView[] };
 }
 
 /**
- * 看板「目标客户 / 已生成任务」统计：按技能 + 区间批量查询。
- * 返回以 sceneStatKey 为键的结果表；接口不可达返回 null，由看板保持 "--" 占位。
+ * 按规划 ID 批量查询，返回以 planId 为键的结果表。
+ * 不经过 CoPaw 后端；请求失败返回 null，由看板保持 "--" 占位。
  */
 export async function fetchSkillStats(
-  queries: SkillStatQuery[],
+  planIds: string[],
   signal?: AbortSignal,
 ): Promise<Record<string, SkillStat> | null> {
-  if (!queries.length) return {};
+  if (!planIds.length) return {};
   try {
-    const resp = await request<SkillStatsResponse>("/wealth/skill-stats", {
+    const auth = buildAuthHeaders();
+    const resp = await fetch("/api/agent/workspace/skill-stats", {
       method: "POST",
-      body: JSON.stringify({ skills: queries }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: getWPlusCookie("token") ?? "",
+      },
+      body: JSON.stringify({ planIds: [...new Set(planIds)] }),
       signal,
     });
-    // 外部按请求顺序返回且我们入参字段齐全（不会跳项），按下标对齐；
-    // skillId 不一致时退化为按 skillId 查找兜底
-    const bySkill = new Map(resp.items.map((i) => [i.skillId, i]));
+    if (!resp.ok) throw new Error(`规划统计请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as SkillStatsResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`规划统计接口返回失败：${payload.code}`);
+    }
     const byKey: Record<string, SkillStat> = {};
-    queries.forEach((q, index) => {
-      const hit =
-        resp.items[index]?.skillId === q.skillId
-          ? resp.items[index]
-          : bySkill.get(q.skillId);
-      if (hit) {
-        byKey[sceneStatKey(q)] = {
-          targetCustomerCount: hit.targetCustomerCount,
-          generatedTaskCount: hit.generatedTaskCount,
-        };
-      }
-    });
+    for (const item of payload.data?.items ?? []) {
+      byKey[item.planId] = {
+        targetCustomerCount: item.targetCustomerCount,
+        generatedTaskCount: item.targetTaskCount,
+      };
+    }
     return byKey;
   } catch (error) {
-    console.warn("[Wealth] 技能统计接口不可用", error);
+    console.warn("[Wealth] 规划统计接口不可用", error);
     return null;
   }
 }
 
 // ---------------------------------------------------------------------------
-// 客户名单查询：/wealth/name-list（外部接口代理）
+// 客户名单查询：同源 /api/agent/workspace/name-list，由前端 Nginx 转发
 // ---------------------------------------------------------------------------
 
 interface NameListSkillView {
@@ -334,28 +338,62 @@ interface NameListResponse extends Partial<CustomerCounts> {
   allFields?: NameListField[];
 }
 
+interface ExternalNameListResponse {
+  code: string | number;
+  data?: Partial<CustomerCounts> & {
+    list?: NameListItemView[];
+    skillFieldList?: NameListSkillFields[];
+    allFields?: NameListField[];
+  };
+}
+
 /**
- * 查询客户名单。两个视角都传 sapId（当前登录客户经理）：
- * skillIds 必传：经营视角传当前场景，其他口径传当天任务树的全部技能。
- * touched 透传外部接口的触达状态过滤：0 未触达 / 1 已触达 / 2 全部；缺省不过滤。
- * 接口不可达时返回空列表，由页面展示空态，不做假数据兜底。
+ * 客户名单直接通过同源 Nginx 查询，使用 fetch 默认的同源凭证策略。
+ * 经营视角传当前场景，其余口径传当天任务树全部技能；空范围不查询。
  */
 export async function fetchNameList(
   skillIds: string[],
   sapId?: string,
   touched?: number,
 ): Promise<NameListResponse> {
-  const ids = [...new Set(skillIds.filter(Boolean))];
+  const ids = [...new Set(skillIds.map((id) => id.trim()).filter(Boolean))];
   if (!ids.length) return { items: [] };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    const resp = await request<NameListResponse>("/wealth/name-list", {
+    const context = getIframeContext();
+    const resp = await fetch("/api/agent/workspace/name-list", {
       method: "POST",
-      body: JSON.stringify({ skill_id: ids, sap_id: sapId, touched }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        skillIds: ids,
+        bbkId: context.bbk || DEFAULT_BBK_ID,
+        platformSource: "WP",
+        pageSource: "WP_AGENT_WORKSPACE_TASK_LIST",
+        ...(touched !== undefined ? { touched } : {}),
+        ...(sapId ? { sapId } : {}),
+        ...(context.orgCode ? { subBbkId: context.orgCode } : {}),
+        ...(context.positionId ? { posId: context.positionId } : {}),
+      }),
+      signal: controller.signal,
     });
-    return resp;
+    if (!resp.ok) throw new Error(`客户名单请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as ExternalNameListResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`客户名单接口返回失败：${payload.code}`);
+    }
+    const data = payload.data;
+    return {
+      ...customerCounts(data),
+      items: (data?.list ?? []).filter((item) => Boolean(item?.custUid)),
+      skillFieldList: data?.skillFieldList ?? [],
+      allFields: data?.allFields ?? [],
+    };
   } catch (error) {
     console.warn("[Wealth] 客户名单接口不可用，返回空列表", error);
     return { items: [] };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -613,11 +651,12 @@ export async function fetchSchemeSignature(
 ): Promise<string> {
   const auth = buildAuthHeaders();
   console.log("auth", auth);
-  const resp = await fetch(`${signBaseUrl()}/expert/get-sign`, {
+  const resp = await fetch(`/expert/get-sign`, {
     method: "POST",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      Authorization: getWPlusCookie("token") ?? "",
       "x-header-cookie": auth["x-header-cookie"] ?? "",
       Cookie: auth["x-header-cookie"] ?? "",
     },

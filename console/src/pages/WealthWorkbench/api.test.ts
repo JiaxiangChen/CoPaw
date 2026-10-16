@@ -4,13 +4,42 @@
  * （错误传播用例见 api.http-errors.test.ts）。
  * 本文件覆盖客户名单映射与草稿等内存行为。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { request } from "../../api/request";
+import { buildAuthHeaders } from "../../api/authHeaders";
+import { useIframeStore } from "../../stores/iframeStore";
 
 vi.mock("../../api/request", () => ({ request: vi.fn() }));
 
-const mockRequest = vi.mocked(request);
+vi.mock("../../api/authHeaders", () => ({ buildAuthHeaders: vi.fn() }));
+
+// 统一记录两种传输，验证规划请求与原生名单请求的执行顺序。
+const mockRequest =
+  vi.fn<(path: string, options?: RequestInit) => Promise<unknown>>();
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+function mockTransports() {
+  vi.mocked(request).mockImplementation(
+    (path, options) => mockRequest(path, options) as never,
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, options?: RequestInit) => {
+      const result = (await mockRequest(path, options)) as {
+        items?: unknown[];
+      };
+      const { items, ...fields } = result;
+      return new Response(
+        JSON.stringify({ code: 200, data: { ...fields, list: items ?? [] } }),
+      );
+    }),
+  );
+}
 
 const TASK = {
   skillId: "skill-loan-1",
@@ -39,9 +68,13 @@ const NAME_LIST_FIXTURE = [
 beforeEach(() => {
   api.resetMockDb();
   mockRequest.mockReset();
+  useIframeStore.setState({ bbk: null, orgCode: null, positionId: null });
+  mockTransports();
+  vi.mocked(request).mockClear();
+  vi.mocked(buildAuthHeaders).mockClear();
   mockRequest.mockImplementation(async (path: unknown) => {
     const p = String(path);
-    if (p.startsWith("/wealth/name-list")) {
+    if (p.startsWith("/api/agent/workspace/name-list")) {
       return { items: NAME_LIST_FIXTURE };
     }
     if (p.startsWith("/wealth/plans")) {
@@ -52,6 +85,100 @@ beforeEach(() => {
 });
 
 describe("WealthWorkbench api", () => {
+  it("名单直接 fetch 外部契约，保留上下文和统计，使用默认同源凭证策略", async () => {
+    useIframeStore.setState({
+      bbk: "755",
+      orgCode: "755480",
+      positionId: "RB0101",
+    });
+    const counts = {
+      targetCusCount: 100,
+      todayTouchCount: 0,
+      sevenDayTouchCount: 25,
+      unTouchedCount: 80,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "200",
+          data: {
+            list: [...NAME_LIST_FIXTURE, { custNm: "缺少客户ID" }, null],
+            ...counts,
+            allFields: [{ filedName: "age", filedNameCn: "年龄" }],
+          },
+        }),
+      ),
+    );
+    const result = await api.fetchNameList([" a ", "b", "a", " "], "10086", 1);
+    const [path, options] = vi.mocked(fetch).mock.calls[0];
+    expect(path).toBe("/api/agent/workspace/name-list");
+    expect(options).not.toHaveProperty("credentials");
+    expect(options).toMatchObject({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(JSON.parse(String(options?.body))).toEqual({
+      skillIds: ["a", "b"],
+      sapId: "10086",
+      touched: 1,
+      bbkId: "755",
+      subBbkId: "755480",
+      posId: "RB0101",
+      platformSource: "WP",
+      pageSource: "WP_AGENT_WORKSPACE_TASK_LIST",
+    });
+    expect(result).toMatchObject({
+      items: NAME_LIST_FIXTURE,
+      ...counts,
+      allFields: [{ filedName: "age", filedNameCn: "年龄" }],
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(buildAuthHeaders).not.toHaveBeenCalled();
+  });
+
+  it.each(["http", "business", "network", "json"])(
+    "名单 %s 失败返回空列表",
+    async (failure) => {
+      if (failure === "network")
+        vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
+      else
+        vi.mocked(fetch).mockResolvedValueOnce(
+          new Response(
+            failure === "json"
+              ? "invalid json"
+              : JSON.stringify({
+                  code: 500,
+                  data: { list: NAME_LIST_FIXTURE },
+                }),
+            { status: failure === "http" ? 502 : 200 },
+          ),
+        );
+      await expect(api.fetchNameList([TASK.skillId])).resolves.toEqual({
+        items: [],
+      });
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("名单查询四十五秒超时后中止，失败返回空列表", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockImplementationOnce(
+      (_path, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+    const pending = api.fetchNameList([TASK.skillId]);
+    await vi.advanceTimersByTimeAsync(44999);
+    expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await expect(pending).resolves.toEqual({ items: [] });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each(["business", "customer", "pending", "done"] as const)(
     "%s 名单保留后端统计，不根据名单长度或 touched 计算",
     async (view) => {
@@ -95,15 +222,22 @@ describe("WealthWorkbench api", () => {
     expect(mockRequest).not.toHaveBeenCalled();
   });
 
-  it("fetchNameList 传递去重后的 skill_id 数组，空数组不发起请求", async () => {
+  it("fetchNameList 传递去重后的 skillIds 数组，空数组不发起请求", async () => {
     await api.fetchNameList(["skill-a", "skill-b", "skill-a"], "10086", 0);
-    expect(mockRequest).toHaveBeenCalledWith("/wealth/name-list", {
-      method: "POST",
-      body: JSON.stringify({
-        skill_id: ["skill-a", "skill-b"],
-        sap_id: "10086",
-        touched: 0,
+    expect(mockRequest).toHaveBeenCalledWith(
+      "/api/agent/workspace/name-list",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
       }),
+    );
+    expect(JSON.parse(String(mockRequest.mock.calls[0][1]?.body))).toEqual({
+      skillIds: ["skill-a", "skill-b"],
+      bbkId: "",
+      platformSource: "WP",
+      pageSource: "WP_AGENT_WORKSPACE_TASK_LIST",
+      touched: 0,
+      sapId: "10086",
     });
     mockRequest.mockClear();
     await expect(api.fetchNameList([], "10086", 2)).resolves.toEqual({
@@ -198,23 +332,26 @@ describe("WealthWorkbench api", () => {
     await api.fetchNameList(ids, "10086", 2);
     expect(mockRequest).toHaveBeenCalledTimes(1);
     const [path, options] = mockRequest.mock.calls[0];
-    expect(path).toBe("/wealth/name-list");
+    expect(path).toBe("/api/agent/workspace/name-list");
     expect(options?.method).toBe("POST");
-    expect(JSON.parse(String(options?.body)).skill_id).toEqual(ids);
+    expect(JSON.parse(String(options?.body)).skillIds).toEqual(ids);
   });
 
   it("fetchNameList 透传 skillId 与 sapId；接口失败返回空列表", async () => {
     const list = await api.fetchNameList(["skill-loan-1"], "10086");
     expect(list.items).toHaveLength(2);
     expect(JSON.parse(String(mockRequest.mock.calls[0]?.[1]?.body))).toEqual({
-      skill_id: ["skill-loan-1"],
-      sap_id: "10086",
+      skillIds: ["skill-loan-1"],
+      sapId: "10086",
+      bbkId: "",
+      platformSource: "WP",
+      pageSource: "WP_AGENT_WORKSPACE_TASK_LIST",
     });
 
     await api.fetchNameList(["skill-loan-1"]);
     expect(
       JSON.parse(String(mockRequest.mock.calls[1]?.[1]?.body)),
-    ).not.toHaveProperty("sap_id");
+    ).not.toHaveProperty("sapId");
 
     mockRequest.mockRejectedValueOnce(new Error("boom"));
     await expect(api.fetchNameList(["skill-loan-1"])).resolves.toEqual({
@@ -235,40 +372,118 @@ describe("WealthWorkbench api", () => {
     await expect(api.fetchAvailableSceneCount()).resolves.toBeNull();
   });
 
-  it("fetchSkillStats 按场景统计键映射结果；失败返回 null", async () => {
-    mockRequest.mockResolvedValueOnce({
-      items: [
-        { skillId: "s1", targetCustomerCount: 125, generatedTaskCount: 30 },
-        { skillId: "s2", targetCustomerCount: 89, generatedTaskCount: 17 },
-      ],
+  it("规划统计直连同源路径，按 planId 映射乱序返回且不走后端", async () => {
+    document.cookie = "token=skill-stats-token; path=/";
+    vi.mocked(buildAuthHeaders).mockReturnValue({
+      "X-Bbk-Id": "100",
+      "X-User-Id": "rm-1",
+      "X-Position-Id": "RB0101",
+      "x-header-cookie": "session=value",
     });
-    const queries = [
-      { skillId: "s1", startDate: "2026-09-01", endDate: "2026-09-30" },
-      { skillId: "s2", startDate: "2026-09-05", endDate: "2026-09-15" },
-    ];
-    const stats = await api.fetchSkillStats(queries);
-    expect(stats).toEqual({
-      "s1|2026-09-01|2026-09-30": {
-        targetCustomerCount: 125,
-        generatedTaskCount: 30,
-      },
-      "s2|2026-09-05|2026-09-15": {
-        targetCustomerCount: 89,
-        generatedTaskCount: 17,
-      },
-    });
-    const [path, options] = mockRequest.mock.calls[0] ?? [];
-    expect(String(path)).toBe("/wealth/skill-stats");
-    expect(JSON.parse(String((options as RequestInit).body))).toEqual({
-      skills: queries,
-    });
+    const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "200",
+          data: {
+            items: [
+              { planId: "p2", targetCustomerCount: 89, targetTaskCount: 17 },
+              { planId: "p1", targetCustomerCount: 125, targetTaskCount: 30 },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    try {
+      const controller = new AbortController();
+      expect(
+        await api.fetchSkillStats(["p1", "p2", "p1"], controller.signal),
+      ).toEqual({
+        p1: { targetCustomerCount: 125, generatedTaskCount: 30 },
+        p2: { targetCustomerCount: 89, generatedTaskCount: 17 },
+      });
+      const [path, options] = directFetch.mock.calls[0];
+      expect(path).toBe("/api/agent/workspace/skill-stats");
+      expect(options).toMatchObject({
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+      });
+      expect(options?.headers).toEqual({
+        "Content-Type": "application/json",
+        Authorization: "skill-stats-token",
+        "x-header-cookie": "session=value",
+        Cookie: "session=value",
+      });
+      expect(JSON.parse(String(options?.body))).toEqual({
+        planIds: ["p1", "p2"],
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
 
-    mockRequest.mockRejectedValueOnce(new Error("boom"));
-    await expect(api.fetchSkillStats(queries)).resolves.toBeNull();
-
-    // 空查询不发请求
-    await expect(api.fetchSkillStats([])).resolves.toEqual({});
+      directFetch.mockClear();
+      await expect(api.fetchSkillStats([])).resolves.toEqual({});
+      expect(directFetch).not.toHaveBeenCalled();
+    } finally {
+      document.cookie = "token=; Max-Age=0; path=/";
+      directFetch.mockRestore();
+    }
   });
+
+  it.each(["RB0101", "RB1101", "RB0301"])(
+    "%s 统计请求体只传 planIds，保留零值",
+    async (positionId) => {
+      vi.mocked(buildAuthHeaders).mockReturnValue({
+        "X-Bbk-Id": "100",
+        "X-User-Id": "manager",
+        "X-Position-Id": positionId,
+      });
+      const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 200,
+            data: {
+              items: [
+                { planId: "p1", targetCustomerCount: 0, targetTaskCount: 0 },
+              ],
+            },
+          }),
+        ),
+      );
+      try {
+        await expect(api.fetchSkillStats(["p1"])).resolves.toEqual({
+          p1: { targetCustomerCount: 0, generatedTaskCount: 0 },
+        });
+        expect(JSON.parse(String(directFetch.mock.calls[0][1]?.body))).toEqual({
+          planIds: ["p1"],
+        });
+      } finally {
+        directFetch.mockRestore();
+      }
+    },
+  );
+
+  it.each(["http", "business", "network", "aborted"])(
+    "统计 %s 失败返回 null",
+    async (failure) => {
+      vi.mocked(buildAuthHeaders).mockReturnValue({
+        "X-Position-Id": "RB0101",
+      });
+      const directFetch = vi.spyOn(globalThis, "fetch");
+      if (failure === "network" || failure === "aborted")
+        directFetch.mockRejectedValueOnce(new Error(failure));
+      else
+        directFetch.mockResolvedValueOnce(
+          new Response(JSON.stringify({ code: 500 }), {
+            status: failure === "http" ? 502 : 200,
+          }),
+        );
+      try {
+        await expect(api.fetchSkillStats(["p1"])).resolves.toBeNull();
+      } finally {
+        directFetch.mockRestore();
+      }
+    },
+  );
 
   it.each(["business", "customer"] as const)(
     "今日任务 %s 保留原始 touched，包括未知或缺失状态",
@@ -321,18 +536,16 @@ describe("WealthWorkbench api", () => {
       done: false,
     });
     const nameListCalls = mockRequest.mock.calls.filter(([p]) =>
-      String(p).startsWith("/wealth/name-list"),
+      String(p).startsWith("/api/agent/workspace/name-list"),
     );
     expect(nameListCalls).toHaveLength(1);
-    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sap_id).toBe(
-      "10086",
-    );
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sapId).toBe("10086");
   });
 
   it("fetchTodayCustomers 客户视角：直接映射外部聚合名单并标注命中场景", async () => {
     mockRequest.mockImplementation(async (path: unknown) => {
       const p = String(path);
-      if (p.startsWith("/wealth/name-list")) {
+      if (p.startsWith("/api/agent/workspace/name-list")) {
         return {
           items: [
             {
@@ -362,15 +575,13 @@ describe("WealthWorkbench api", () => {
     );
 
     const nameListCalls = mockRequest.mock.calls.filter(([p]) =>
-      String(p).startsWith("/wealth/name-list"),
+      String(p).startsWith("/api/agent/workspace/name-list"),
     );
     expect(nameListCalls).toHaveLength(1);
-    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).skill_id).toEqual([
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).skillIds).toEqual([
       TASK.skillId,
     ]);
-    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sap_id).toBe(
-      "10086",
-    );
+    expect(JSON.parse(String(nameListCalls[0]?.[1]?.body)).sapId).toBe("10086");
     // 以 custUid 为页面 id；重点标签按规划创建角色映射，树外技能不产生标签
     expect(customers[0]).toMatchObject({
       id: "CUST001",
@@ -433,8 +644,8 @@ describe("WealthWorkbench api", () => {
     expect(calls[1].touched).toBe(1);
     // 两个口径都带当天技能数组和 sapId
     for (const c of calls) {
-      expect(c.skill_id).toEqual([TASK.skillId]);
-      expect(c.sap_id).toBe("10086");
+      expect(c.skillIds).toEqual([TASK.skillId]);
+      expect(c.sapId).toBe("10086");
     }
   });
 

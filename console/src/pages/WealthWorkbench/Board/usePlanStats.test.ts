@@ -54,13 +54,17 @@ describe("usePlanStats", () => {
     vi.useRealTimers();
   });
 
-  it("相同参数、重排和重复技能不重新查询，返回已有周期立即复用统计", async () => {
+  it("按规划 ID 查询，相同参数、重排和重复规划不重新查询", async () => {
     const plans = [plan("a"), plan("b")];
     const { result, rerender } = renderHook(
       ({ visible }) => usePlanStats(visible, plans, "rm"),
       { initialProps: { visible: plans } },
     );
     await waitFor(() => expect(result.current.statsLoading).toBe(false));
+    expect(fetchSkillStats).toHaveBeenCalledWith(
+      ["a", "b"],
+      expect.any(AbortSignal),
+    );
     rerender({ visible: [plans[1], plans[0], plans[0]] });
     expect(fetchSkillStats).toHaveBeenCalledTimes(1);
     expect(result.current.statsLoading).toBe(false);
