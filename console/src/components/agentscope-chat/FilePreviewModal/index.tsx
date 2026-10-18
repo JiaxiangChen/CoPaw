@@ -43,7 +43,9 @@ import type { FilePreviewPresentation } from "../FilePreviewPresentationContext"
 import styles from "./index.module.less";
 import { useHtmlAnnotations } from "../HtmlAnnotations/context";
 import { useHtmlAnnotationController } from "../HtmlAnnotations/useHtmlAnnotationController";
-import { cronJobApi } from "@/api/modules/cronjob";
+import { cronAccessKey } from "@/api/cronTaskContext";
+import { useCronAccessKey } from "@/hooks/useCronAccessKey";
+import { useCronReportRead } from "./useCronReportRead";
 
 let splitPreviewCount = 0;
 
@@ -122,6 +124,8 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   );
   const [canonicalHtml, setCanonicalHtml] = useState<string | null>(null);
   const [templateResult, setTemplateResult] = useState<RecordDataResponse>();
+  const [templateResultKey, setTemplateResultKey] = useState("");
+  const reportScopeKey = useCronAccessKey();
   // 客户多模板状态
   const [clawFilePlanList, setClawFilePlanList] = useState<ClawFilePlanItem[]>(
     [],
@@ -163,11 +167,6 @@ function FilePreviewModal(props: FilePreviewModalProps) {
     () => extractTemplateIdFromUrl(fileUrl) || "",
     [fileUrl],
   );
-  useEffect(() => {
-    if (templateResult?.CRON_JOB_ID){
-      cronJobApi.markTaskRead(templateResult.CRON_JOB_ID, true).catch(() => {});
-    }
-  }, [templateResult]);
   // 计算有效的 templateId 和 resultId（当 custUid 存在时使用 activeTemplate 的值）
   // 若 clawPlanFailed 为 true（接口失败或返回空），则回退到 URL 中的 templateId/resultId
   const effectiveTemplateId = custUid
@@ -180,6 +179,25 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   const effectiveResultId = custUid
     ? activeTemplate?.resultId ?? (clawPlanFailed ? resultId : "")
     : resultId;
+  const reportContentKey = JSON.stringify([
+    reportScopeKey,
+    effectiveResultId,
+    effectiveTemplateId,
+  ]);
+  const notifyReportReadFailure = useCallback((text: string) => {
+    message.warning(text);
+  }, []);
+  useCronReportRead({
+    open,
+    taskId:
+      templateResultKey === reportContentKey
+        ? templateResult?.CRON_JOB_ID
+        : null,
+    contentKey: `${reportContentKey}:${templateResult?.TRACE_ID || ""}`,
+    knownTaskId: trackingContext.cronTaskId,
+    knownOrigin: trackingContext.cronTaskOrigin,
+    onFailure: notifyReportReadFailure,
+  });
   // 是否展示空状态：custUid 存在且接口失败/返回空，且 URL 中没有 templateId 和 resultId
   const showClawPlanEmpty =
     custUid && clawPlanFailed && !templateId && !resultId;
@@ -211,6 +229,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   const fetchDynamicRenderData = useCallback(
     async (resultId: string, templateId: string, loadGeneration: number) => {
       if (previewLoadGenerationRef.current !== loadGeneration) return;
+      const loadScope = cronAccessKey();
 
       try {
         const templateIdNum = parseInt(templateId, 10);
@@ -257,7 +276,11 @@ function FilePreviewModal(props: FilePreviewModalProps) {
         const { TRACE_ID, CRON_JOB_ID, custUid, custName, ...data } =
           res.data as RecordDataResponse;
         const renderedHtml = await renderTemplate(templateIdNum, res.data);
-        if (previewLoadGenerationRef.current !== loadGeneration) return;
+        if (
+          previewLoadGenerationRef.current !== loadGeneration ||
+          cronAccessKey() !== loadScope
+        )
+          return;
         if (renderedHtml) {
           setTemplateResult({
             TRACE_ID,
@@ -266,6 +289,9 @@ function FilePreviewModal(props: FilePreviewModalProps) {
             custName,
             ...data,
           });
+          setTemplateResultKey(
+            JSON.stringify([loadScope, resultId, templateId]),
+          );
           setRenderedHtmlContent(renderedHtml);
           setCanonicalHtml(enableAnnotations ? renderedHtml : null);
         } else {
@@ -343,6 +369,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   // fetch 文件数据并创建 Blob URL 或动态渲染
   useEffect(() => {
     const loadGeneration = ++previewLoadGenerationRef.current;
+    setTemplateResultKey("");
     let cancelled = false;
     const invalidateLoad = () => {
       cancelled = true;
@@ -435,6 +462,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
     fetchDynamicRenderData,
     effectiveResultId,
     effectiveTemplateId,
+    reportScopeKey,
   ]);
 
   // 清理 Blob URL
@@ -516,13 +544,20 @@ function FilePreviewModal(props: FilePreviewModalProps) {
         event_type: "button_click" as const,
         template_id: templateInfo?.templateId ?? null,
         result_id: effectiveResultId,
-        page_source: pageSource || 'default',
-        platform_source: platformSource || 'default',
+        page_source: pageSource || "default",
+        platform_source: platformSource || "default",
         template_type: "sub" as const,
       };
       htmlPreviewEventsApi.recordClick(payload);
     }
-  }, [templateResult, templateInfo, htmlPreviewEventsApi, effectiveResultId, pageSource, platformSource]);
+  }, [
+    templateResult,
+    templateInfo,
+    htmlPreviewEventsApi,
+    effectiveResultId,
+    pageSource,
+    platformSource,
+  ]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -589,15 +624,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
             effectiveTemplateId,
           )
         ).data;
-        const { TRACE_ID, CRON_JOB_ID, custUid, custName, ...data } =
-          renderData as RecordDataResponse;
-        setTemplateResult({
-          TRACE_ID,
-          CRON_JOB_ID,
-          custUid,
-          custName,
-          ...data,
-        });
+        // 下载不是已确认展示，不借下载结果触发另一任务的自动标读。
         const renderedHtml = await renderTemplate(templateIdNum, renderData);
 
         if (renderedHtml) {

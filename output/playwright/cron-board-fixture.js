@@ -1,0 +1,51 @@
+async (page) => {
+  const root = "http://127.0.0.1:5179";
+  await page.addInitScript(() => {
+    window.__env__ = { baseUrl: "http://127.0.0.1:5179" };
+    sessionStorage.setItem("swe-iframe-context", JSON.stringify({ state: { userId: "preview-manager", source: "preview-bank", manager: true, isSuperManager: false, initialized: true }, version: 0 }));
+  });
+  const now = new Date().toISOString();
+  const batch = { batch_id: "e5ae0bf7-454b-5adc-8d39-6c223859840d", tenant_id: "preview-manager", source_id: "preview-bank", agent_id: "default", job_id: "report-daily", job_name: "每日客户经营报告", member_count: 20, done_count: 13, failed_count: 1, active_count: 3, waiting_count: 4, status: "running", completion_rate: .65, logical_fire_at: now, physical_fire_at: now, created_at: now };
+  const member = { member_id: "member-uuid", execution_id: "60b49b95-53aa-5506-b683-0e75da566e4d", tenant_id: "preview-user", source_id: "preview-bank", agent_id: "default", job_id: "report-child", job_name: "客户经营报告", business_attempt: 2, member_role: "child", member_order: 1, status: "error", settled_status: "error", error_code: "cron_execution_failed", settled_error_code: null, provider_id: "shared-provider", model_id: "shared-model", definition_version: 3, current_definition_version: 3, dispatch_attempt: 1, actor_id: "preview-manager", management_status: "ready", dispatch_state: "batch_enabled", bbk_id: "755", not_before_at: now, accepted_at: now, started_at: now, finished_at: now, settled_at: now, dispatch_priority: { user_rank: 1, branch_rank: 2 }, viewer_heat_score: 5 };
+  const candidate = { ...member, member_version: 2, execution_version: 8, failure_type: "model_rate_limit", transport_only: false, execution_definition_version: 3 };
+  const capacity = { id: 1, worker_id: "shared-worker", source_id: "preview-bank", provider_id: "shared-provider", model_id: "shared-model", strategy_id: "baseline", previous_workers: 3, baseline_workers: 4, min_workers: 1, max_workers: 8, effective_workers: 4, pending_count: 12, claimed_count: 1, running_count: 3, success_count: 20, failure_count: 1, error_rate: .048, matched_rule: null, avg_latency_ms: 2000, decision_reason: "baseline", created_at: now };
+  const workers = { source_id: "preview-bank", policies: [{ source_id: "preview-bank", provider_id: "shared-provider", model_id: "shared-model", enabled: true, default_strategy_id: "baseline", strategy_schedule: null, strategy: { min_workers: 1, baseline_workers: 4, max_workers: 8, adjust_interval_seconds: 30, feedback_window_seconds: 60, error_rate_rules: [] } }], current_capacity: [capacity], capacity_events: [capacity], capacity_events_next_cursor: null };
+  const requests = [];
+  await page.route(root + "/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    requests.push(path);
+    let body = [];
+    if (path === "/api/auth/status") body = { enabled: false };
+    else if (path.endsWith("/workers")) body = workers;
+    else if (path.endsWith("/failures")) body = { counts: [{ failure_type: "model_rate_limit", label: "模型限流", count: 1 }], items: path.includes("managed-dispatch") ? [candidate] : [{ id: 1, tenant_id: "preview-user", attempt_count: 1, failure_type: "model_rate_limit", error_message: "模型限流" }], matched_count: 1, has_more: false };
+    else if (path === "/api/monitor/cron/managed-dispatch/batches") body = { items: [batch], total: 1, page: 1, page_size: 4, stats: { total_batches: 1, total_members: 20, done_members: 13, failed_members: 1, running_batches: 1 } };
+    else if (path.startsWith("/api/monitor/cron/managed-dispatch/batches/")) body = { batch, members: [member], member_total: 20, member_page: 1, member_page_size: 50, events: [{ event_id: "fact", event_type: "retry_accepted", execution_id: member.execution_id, member_id: member.member_id, actor_id: "preview-manager", occurred_at: now, details: { reason: "cron_retry_queued" } }], event_total: 1, event_page: 1, event_page_size: 50 };
+    else if (path === "/api/monitor/cron/dispatch/batches") body = { source_id: "preview-bank", items: [{ ...batch, parent_job_id: batch.job_id, parent_job_name: batch.job_name, scheduled_fire_at: now, callback_received_at: now, total_count: 20, completed_count: 12, failed_count: 1 }], total: 1, stats: { total_batches: 1, total_intents: 20, completed_intents: 12, failed_intents: 1, pending_intents: 7, running_batches: 1, failed_batches: 0 } };
+    else if (path.startsWith("/api/monitor/cron/dispatch/batches/")) body = { batch: { ...batch, parent_job_id: batch.job_id, parent_job_name: batch.job_name, total_count: 20, completed_count: 12, failed_count: 1, scheduled_fire_at: now, callback_received_at: now }, intents: [], intent_total: 20, intent_filtered_total: 20, events: [], event_total: 0 };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  await page.setViewportSize({ width: 1600, height: 1600 });
+  await page.goto(root + "/monitor/cron-batch-dispatch-new");
+  await page.evaluate(async () => { const module = await import("/src/stores/iframeStore.ts"); module.useIframeStore.getState().setContext({ userId: "preview-manager", source: "preview-bank", manager: true }); });
+  await page.getByRole("heading", { name: "批调度看板（新）", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "失败类型与重试" }).click();
+  await page.getByText("模型限流：1", { exact: true }).waitFor();
+  await page.locator('.ant-spin-blur').waitFor({state:'hidden'});
+  await page.waitForFunction(() => [...document.querySelectorAll('.ant-spin-container')].every((node) => getComputedStyle(node, '::after').opacity === '0'));
+  await page.screenshot({ path: "D:/Projects/CoPaw/output/playwright/cron-batch-board-new.png", fullPage: true });
+  await page.getByRole("tab", { name: "执行成员 (20)" }).click();
+  await page.getByText("第 2 次业务尝试", { exact: false }).waitFor();
+  await page.getByRole('button', {name:'查看 shared-provider / shared-model 的 Worker 调整过程'}).click();
+  await page.screenshot({ path: "D:/Projects/CoPaw/output/playwright/cron-batch-board-members.png", fullPage: true });
+  const newRequests = [...requests];
+  requests.length = 0;
+  await page.goto(root + "/monitor/cron-batch-dispatch");
+  await page.evaluate(async () => { const module = await import("/src/stores/iframeStore.ts"); module.useIframeStore.getState().setContext({ userId: "preview-manager", source: "preview-bank", manager: true }); });
+  await page.getByRole("heading", { name: "批调度监控", exact: true }).waitFor();
+  await page.getByRole("tab", { name: "失败类型与重试" }).click();
+  await page.getByText("模型限流：1", { exact: true }).waitFor();
+  await page.locator('.ant-spin-blur').waitFor({state:'hidden'});
+  await page.waitForFunction(() => [...document.querySelectorAll('.ant-spin-container')].every((node) => getComputedStyle(node, '::after').opacity === '0'));
+  await page.screenshot({ path: "D:/Projects/CoPaw/output/playwright/cron-batch-board-old.png", fullPage: true });
+  return { newRequests, oldRequests: requests, note: "边界 Mock 的真实浏览器检查，不是业务服务联调。" };
+}

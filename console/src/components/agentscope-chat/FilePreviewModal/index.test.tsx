@@ -13,6 +13,7 @@ import FilePreviewDrawer from "../FilePreviewDrawer";
 import FilePreviewModal from "./index";
 import { HtmlAnnotationProvider } from "../HtmlAnnotations/context";
 import HtmlAnnotationComposerSummary from "../HtmlAnnotations/ComposerSummary";
+import { cronAccessKey, currentCronContext } from "@/api/cronTaskContext";
 
 type AttachHtmlPreviewClickTracker =
   typeof import("./htmlPreviewClickTracking").attachHtmlPreviewClickTracker;
@@ -28,6 +29,10 @@ const renderTemplateMock = vi.hoisted(() => vi.fn());
 const renderStaticTemplateMock = vi.hoisted(() => vi.fn());
 const isStaticTemplateMock = vi.hoisted(() => vi.fn(() => false));
 const templateListMock = vi.hoisted(() => ({ current: [] }));
+const markTaskReferenceReadMock = vi.hoisted(() => vi.fn());
+vi.mock("@/api/modules/cronTaskActions", () => ({
+  markTaskReferenceRead: markTaskReferenceReadMock,
+}));
 
 vi.mock("@/api/modules/htmlPreviewEvents", () => ({
   htmlPreviewEventsApi: {
@@ -129,6 +134,7 @@ vi.mock("antd", () => ({
   message: {
     error: vi.fn(),
     success: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
@@ -164,6 +170,8 @@ function getLatestTrackerParams(): TrackerParams {
 }
 
 beforeEach(() => {
+  markTaskReferenceReadMock.mockReset();
+  markTaskReferenceReadMock.mockResolvedValue({});
   attachHtmlPreviewClickTrackerMock.mockClear();
   recordClickMock.mockClear();
   recordListSnapshotMock.mockClear();
@@ -184,6 +192,39 @@ afterEach(() => {
 });
 
 describe("FilePreviewModal HTML preview recording", () => {
+  it("新任务报告真正渲染完成后才按会话来源标读", async () => {
+    const origin = {
+      owner: "scheduler" as const,
+      context: currentCronContext(),
+      accessKey: cronAccessKey(),
+    };
+    getRecordDataMock.mockResolvedValue({
+      code: "200",
+      data: { TRACE_ID: "trace", CRON_JOB_ID: "new-task" },
+    });
+    render(
+      <HtmlPreviewTrackingProvider
+        value={{ cronTaskId: "new-task", cronTaskOrigin: origin }}
+      >
+        <FilePreviewModal
+          open
+          onClose={() => {}}
+          fileUrl="https://example.test/report[auto-preview].html?resultId=managed-result&templateId=1"
+          fileName="report.html"
+        />
+      </HtmlPreviewTrackingProvider>,
+    );
+    await waitFor(() => expect(renderTemplateMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(markTaskReferenceReadMock).toHaveBeenCalledWith(
+        "new-task",
+        origin,
+        true,
+        expect.any(String),
+      ),
+    );
+    expect(markTaskReferenceReadMock).toHaveBeenCalledTimes(1);
+  });
   it("reloads a changed HTML URL without letting an older response overwrite it", async () => {
     let resolveFirst!: (response: Response) => void;
     let resolveSecond!: (response: Response) => void;

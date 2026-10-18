@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CronJobSpecOutput } from "../../api/types";
+import { tagTask } from "@/api/modules/cronTaskSources";
 import {
   getTaskOpenTarget,
   getTaskNextRunTooltipText,
@@ -7,6 +8,7 @@ import {
   getTaskPauseStatusText,
   getTaskSidebarMeta,
   partitionTasksByPauseState,
+  uniqueTaskForId,
 } from "./taskJobs";
 
 function taskJob(
@@ -47,6 +49,39 @@ function taskJob(
 }
 
 describe("getTaskSidebarMeta", () => {
+  it("裸任务链接遇到新旧同 ID 不静默选择旧任务", () => {
+    const context = { actor_id: "u", tenant_id: "u", source_id: "s", agent_id: "a" };
+    const oldTask = tagTask(taskJob(), "legacy", context);
+    const newTask = tagTask(taskJob(), "scheduler", context);
+    expect(uniqueTaskForId([oldTask, newTask], "job-1")).toBeNull();
+    expect(uniqueTaskForId([newTask], "job-1")).toBe(newTask);
+  });
+  it("新版已启用任务允许独立编辑删除，停用任务不可执行，旧任务规则不变", () => {
+    const context = {
+      actor_id: "u",
+      tenant_id: "u",
+      source_id: "s",
+      agent_id: "a",
+    };
+    const job = tagTask(
+      { ...taskJob(), management_status: "ready" } as never,
+      "scheduler",
+      context,
+    );
+    expect(getTaskSidebarMeta(job)).toMatchObject({
+      canEdit: true,
+      canDelete: true,
+      canRun: true,
+    });
+    expect(getTaskSidebarMeta({ ...job, enabled: false })).toMatchObject({
+      canRun: false,
+      canResume: true,
+    });
+    expect(getTaskSidebarMeta(taskJob())).toMatchObject({
+      canEdit: false,
+      canDelete: false,
+    });
+  });
   it("allows stopping and executing active scheduled tasks without destructive actions", () => {
     const meta = getTaskSidebarMeta(taskJob());
 

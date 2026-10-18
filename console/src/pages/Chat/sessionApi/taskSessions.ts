@@ -5,7 +5,7 @@ interface SessionLike {
 
 export function filterStaleTaskSessions<T extends SessionLike>(
   sessions: T[],
-  activeTaskJobIds: ReadonlySet<string> | null,
+  activeTaskJobIds: ReadonlySet<string> | TaskPresence | null,
 ): T[] {
   if (activeTaskJobIds === null) {
     return [...sessions];
@@ -18,6 +18,26 @@ export function filterStaleTaskSessions<T extends SessionLike>(
     }
 
     const taskJobId = String(meta.task_job_id ?? "").trim();
-    return Boolean(taskJobId) && activeTaskJobIds.has(taskJobId);
+    if (!taskJobId) return false;
+    if ("has" in activeTaskJobIds) return activeTaskJobIds.has(taskJobId);
+    const owner = meta.management_owner;
+    if (owner === "scheduler")
+      return (
+        activeTaskJobIds.scheduler === null ||
+        activeTaskJobIds.scheduler.has(taskJobId)
+      );
+    if (owner === "legacy")
+      return (
+        activeTaskJobIds.legacy === null ||
+        activeTaskJobIds.legacy.has(taskJobId)
+      );
+    // 老会话没有归属标记；任一来源未确认时保守保留，不能用失败清单删会话。
+    return (
+      activeTaskJobIds.legacy === null ||
+      activeTaskJobIds.scheduler === null ||
+      activeTaskJobIds.legacy.has(taskJobId) ||
+      activeTaskJobIds.scheduler.has(taskJobId)
+    );
   });
 }
+import type { TaskPresence } from "@/api/types/cronTaskSource";

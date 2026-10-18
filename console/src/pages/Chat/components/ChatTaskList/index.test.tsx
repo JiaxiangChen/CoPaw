@@ -1,4 +1,5 @@
 import React from "react";
+import { tagTask, taskIdentityKey } from "@/api/modules/cronTaskSources";
 import {
   cleanup,
   fireEvent,
@@ -69,6 +70,30 @@ function pausedTask(
 }
 
 describe("ChatTaskList actions", () => {
+  it("新旧同 ID 任务不共享选中状态或 React key，动作保留真实来源", () => {
+    const context = {
+      actor_id: "u",
+      tenant_id: "u",
+      source_id: "s",
+      agent_id: "a",
+    };
+    const oldTask = tagTask(taskJob({ name: "旧任务" }), "legacy", context);
+    const newTask = tagTask(taskJob({ name: "新任务" }), "scheduler", context);
+    const clicked = vi.fn();
+    render(
+      <ChatTaskList
+        tasks={[oldTask, newTask]}
+        selectedTaskId={taskIdentityKey(newTask)}
+        onTaskClick={clicked}
+      />,
+    );
+    const oldRow = screen.getByText("旧任务").closest(".chat-task-list-item");
+    const newRow = screen.getByText("新任务").closest(".chat-task-list-item");
+    expect(oldRow).not.toHaveClass("chat-task-list-item--selected");
+    expect(newRow).toHaveClass("chat-task-list-item--selected");
+    fireEvent.click(newRow!);
+    expect(clicked).toHaveBeenCalledWith(newTask);
+  });
   afterEach(() => {
     cleanup();
   });

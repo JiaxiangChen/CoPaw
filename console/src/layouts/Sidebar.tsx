@@ -205,6 +205,12 @@ export default function Sidebar({
       label: t("nav.cronJobs"),
     },
     {
+      key: "scheduler-cron-jobs",
+      icon: <SparkDateLine size={18} />,
+      path: "/scheduler-cron-jobs",
+      label: t("nav.cronJobsNew", "定时任务（新）"),
+    },
+    {
       key: "channels",
       icon: <SparkWifiLine size={18} />,
       path: "/channels",
@@ -318,6 +324,12 @@ export default function Sidebar({
             path: "/monitor/cron-batch-dispatch",
             label: t("nav.monitorCronBatchDispatch", "批调度监控"),
           },
+          {
+            key: "monitor-cron-batch-dispatch-new",
+            icon: <SparkRefreshLine size={18} />,
+            path: "/monitor/cron-batch-dispatch-new",
+            label: t("nav.monitorCronBatchDispatchNew", "批调度看板（新）"),
+          },
         ]
       : []),
     {
@@ -415,6 +427,11 @@ export default function Sidebar({
         {
           key: "cron-jobs",
           label: collapsed ? null : t("nav.cronJobs"),
+          icon: <SparkDateLine size={16} />,
+        },
+        {
+          key: "scheduler-cron-jobs",
+          label: collapsed ? null : t("nav.cronJobsNew", "定时任务（新）"),
           icon: <SparkDateLine size={16} />,
         },
         {
@@ -547,6 +564,13 @@ export default function Sidebar({
                 label: collapsed
                   ? null
                   : t("nav.monitorCronBatchDispatch", "批调度监控"),
+                icon: <SparkRefreshLine size={16} />,
+              },
+              {
+                key: "monitor-cron-batch-dispatch-new",
+                label: collapsed
+                  ? null
+                  : t("nav.monitorCronBatchDispatchNew", "批调度看板（新）"),
                 icon: <SparkRefreshLine size={16} />,
               },
             ]

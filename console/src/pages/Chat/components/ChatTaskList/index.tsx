@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useId } from "react";
 import type { CronJobSpecOutput } from "@/api/types";
+import { taskIdentityKey } from "@/api/modules/cronTaskSources";
 import Style from "./style";
 import { TasksIconSmall } from "../ChatSidebar/CollapsedToolbar/icons";
 import {
@@ -63,7 +64,7 @@ export default function ChatTaskList(props: ChatTaskListProps) {
   const pausedRegionId = useId();
   const { runnableTasks, pausedTasks } = partitionTasksByPauseState(tasks);
   const selectedTaskIsPaused = pausedTasks.some(
-    (task) => task.id === selectedTaskId,
+    (task) => taskIdentityKey(task) === selectedTaskId,
   );
 
   useEffect(() => {
@@ -91,9 +92,11 @@ export default function ChatTaskList(props: ChatTaskListProps) {
 
     return (
       <div
-        key={task.id}
+        key={taskIdentityKey(task)}
         className={`chat-task-list-item${
-          task.id === selectedTaskId ? " chat-task-list-item--selected" : ""
+          taskIdentityKey(task) === selectedTaskId
+            ? " chat-task-list-item--selected"
+            : ""
         }${
           sidebarMeta.state !== "active" && sidebarMeta.state !== "running"
             ? " chat-task-list-item--paused"

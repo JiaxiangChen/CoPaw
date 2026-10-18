@@ -18,6 +18,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+it("新版可以注入保存协议，绝不调用旧接口", async () => {
+  const savePriority = vi.fn().mockResolvedValue({});
+  render(
+    <BatchPriorityEditor
+      jobId="new-parent"
+      initial={{ user_ids: ["alice", "bob"] }}
+      savePriority={savePriority}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText("优先用户 bob 上移"));
+  fireEvent.click(screen.getByText("保存优先策略"));
+  await screen.findByText("优先策略已保存，从新批次生效");
+  expect(savePriority).toHaveBeenCalledWith({
+    user_ids: ["bob", "alice"],
+    branch_ids: [],
+  });
+  expect(batchOperations.savePriority).not.toHaveBeenCalled();
+});
+
 it("saves the reordered user and primary-branch lists", async () => {
   vi.mocked(batchOperations.savePriority).mockResolvedValue({});
   render(

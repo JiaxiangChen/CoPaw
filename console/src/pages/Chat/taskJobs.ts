@@ -1,5 +1,6 @@
 import type { CronJobSpecOutput } from "../../api/types";
 import { formatListTime } from "./listTimeFormat.ts";
+import { isSchedulerTask } from "@/api/modules/cronTaskSources";
 
 export interface TaskSidebarMeta {
   state: "active" | "running" | "auto-paused" | "manual-paused";
@@ -24,6 +25,7 @@ export function isVisibleTask(job: CronJobSpecOutput): boolean {
 }
 
 export function getTaskSidebarMeta(job: CronJobSpecOutput): TaskSidebarMeta {
+  if (isSchedulerTask(job)) return managedSidebarMeta(job);
   const unreadCount = Math.max(
     0,
     Number(job.task?.unread_execution_count || 0),
@@ -76,6 +78,35 @@ export function getTaskSidebarMeta(job: CronJobSpecOutput): TaskSidebarMeta {
     canResume: false,
     canDelete: !job.enabled,
     canEdit: !job.enabled,
+  };
+}
+
+/** 新控制协议将停用、在途执行和内容编辑分开，旧任务仍沿用原规则。 */
+function managedSidebarMeta(
+  job: import("@/api/types/cronTaskSource").SourcedManagedTask,
+): TaskSidebarMeta {
+  const unreadCount = Math.max(
+    0,
+    Number(job.task?.unread_execution_count || 0),
+  );
+  const paused =
+    !job.enabled || Boolean(job.task?.is_paused || job.task?.pause_reason);
+  const running = Boolean(job.task?.is_running);
+  const state = running
+    ? "running"
+    : job.task?.pause_reason === AUTO_PAUSE_REASON
+    ? "auto-paused"
+    : paused
+    ? "manual-paused"
+    : "active";
+  return {
+    state,
+    unreadCount,
+    canPause: !job.deleted && !paused,
+    canRun: !job.deleted && !paused && !running,
+    canResume: !job.deleted && paused,
+    canDelete: !job.deleted,
+    canEdit: !job.deleted && job.management_status === "ready",
   };
 }
 
@@ -184,8 +215,24 @@ export function deriveChatTaskState(
 } {
   return {
     tasks: jobs.filter(isVisibleTask),
-    currentTask: chatId
-      ? jobs.find((job) => job.task?.chat_id === chatId) || null
-      : null,
+    currentTask: currentTaskForChat(jobs, chatId),
   };
+}
+
+/** 裸 ID 不能在新旧来源撞号时静默选中其中一个。 */
+export function uniqueTaskForId(
+  jobs: CronJobSpecOutput[],
+  id: string,
+): CronJobSpecOutput | null {
+  const matches = jobs.filter((job) => job.id === id);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function currentTaskForChat(
+  jobs: CronJobSpecOutput[],
+  chatId: string | undefined,
+): CronJobSpecOutput | null {
+  if (!chatId) return null;
+  const matches = jobs.filter((job) => job.task?.chat_id === chatId);
+  return matches.length === 1 ? matches[0] : null;
 }

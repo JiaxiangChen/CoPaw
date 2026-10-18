@@ -23,7 +23,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
 } from "react";
 import { flushSync } from "react-dom";
 import { Button, Modal, Result, Switch } from "antd";
@@ -41,6 +40,20 @@ import sessionApi from "./sessionApi";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
 import { cronJobApi } from "../../api/modules/cronjob";
+import { schedulerCronApi } from "@/api/modules/schedulerCron";
+import {
+  isSchedulerTask,
+  sameTask,
+  tagTask,
+  taskIdentityKey,
+  taskOrigin,
+} from "@/api/modules/cronTaskSources";
+import { cronAccessKey } from "@/api/cronTaskContext";
+import { useChatTaskSources } from "./useChatTaskSources";
+import { useManagedTaskActions } from "./useManagedTaskActions";
+import { useTaskReadOnOpen } from "./useTaskReadOnOpen";
+import { ManagedProgressModal } from "../Control/SchedulerCronJobs/ManagedProgressModal";
+import { detailToJob } from "../Control/SchedulerCronJobs/helpers";
 import { feedbackApi } from "../../api/modules/feedback";
 import { expertsApi, type Expert } from "../../api/modules/experts";
 import { contextReferencesApi } from "../../api/modules/contextReferences";
@@ -122,16 +135,18 @@ import {
 import {
   deriveChatTaskState,
   getTaskOpenTarget,
-  shouldMarkTaskReadOnOpen,
+  uniqueTaskForId,
 } from "./taskJobs";
 import { DEFAULT_FORM_VALUES } from "../Control/CronJobs/components";
 import { buildCronJobFormValues } from "../Control/CronJobs/helpers";
 import {
   extractTaskContentText,
   submitCronTaskEdit,
+  prepareCronTaskEditValues,
   type CronTaskEditFormValues,
 } from "./taskEditSubmit";
 import ChatTaskEditFormBody from "./components/ChatTaskEditFormBody";
+import { buildCronJobSubmitPayload } from "../Control/CronJobs/helpers";
 import {
   refreshTaskSessionWithRetry,
   TASK_SESSION_REFRESH_RECOVERY_DELAY_MS,
@@ -688,7 +703,23 @@ function ChatPageContent() {
     return match?.[1];
   }, [location.pathname]);
   const [showModelPrompt, setShowModelPrompt] = useState(false);
-  const [jobs, setJobs] = useState<CronJobSpecOutput[]>([]);
+  const {
+    jobs,
+    setJobs,
+    refreshJobs,
+    error: taskQueryError,
+    scopeKey: taskScopeKey,
+  } = useChatTaskSources();
+  const taskViewRef = useRef({ scopeKey: taskScopeKey });
+  if (taskViewRef.current.scopeKey !== taskScopeKey)
+    taskViewRef.current = { scopeKey: taskScopeKey };
+  const taskView = taskViewRef.current;
+  const isCurrentTaskView = useCallback(
+    (task: CronJobSpecOutput) =>
+      taskView === taskViewRef.current &&
+      taskOrigin(task)?.accessKey === cronAccessKey(),
+    [taskView],
+  );
   const [taskProgress, setTaskProgress] = useState<ChatTaskProgressData | null>(
     null,
   );
@@ -827,11 +858,6 @@ function ChatPageContent() {
           setContextReferencesLoading(false);
       });
   }, []);
-
-  // useTransition for non-urgent state updates (badge clearing)
-  const [, startTransition] = useTransition();
-  // Debounce flag for markTaskRead API calls
-  const markTaskReadPendingRef = useRef(false);
 
   const isChatActiveRef = useRef(false);
   isChatActiveRef.current =
@@ -1099,7 +1125,14 @@ function ChatPageContent() {
   useEffect(() => {
     if (!taskIdRef.current || jobs.length === 0) return;
 
-    const task = jobs.find((j) => j.id === taskIdRef.current);
+    const task = taskQueryError
+      ? null
+      : uniqueTaskForId(jobs, taskIdRef.current);
+    if (!task) {
+      message.warning("任务链接无法唯一定位，请在对应任务列表中打开");
+      taskIdRef.current = null;
+      return;
+    }
     const chatId = task?.task?.chat_id;
 
     if (chatId) {
@@ -1109,7 +1142,7 @@ function ChatPageContent() {
     } else {
       taskIdRef.current = null;
     }
-  }, [jobs, navigate]);
+  }, [jobs, navigate, message, taskQueryError]);
   // ==================== URL 导航参数结束 ====================
 
   // Setup multimodal capabilities tracking via custom hook
@@ -1127,19 +1160,42 @@ function ChatPageContent() {
     prevSelectedAgentRef.current = selectedAgent;
   }, [selectedAgent]);
 
-  const refreshJobs = useCallback(async () => {
-    try {
-      const nextJobs = await cronJobApi.listCronJobs();
-      setJobs(Array.isArray(nextJobs) ? nextJobs : []);
-    } catch {
-      setJobs([]);
-    }
-  }, []);
+  const notifyManagedTask = useCallback(
+    (text: string, failed: boolean) => {
+      if (failed) message.error(text);
+      else message.info(text);
+    },
+    [message],
+  );
+  const {
+    perform: performManagedTask,
+    update: updateManagedTask,
+    progress: managedTaskProgress,
+    closeProgress: closeManagedProgress,
+  } = useManagedTaskActions(taskScopeKey, refreshJobs, notifyManagedTask);
+  const notifyReadFailure = useCallback(
+    (text: string) => {
+      message.warning(text);
+    },
+    [message],
+  );
+  const lastTaskQueryError = useRef<string | null>(null);
+  useEffect(() => {
+    if (taskQueryError && taskQueryError !== lastTaskQueryError.current)
+      message.warning(taskQueryError);
+    lastTaskQueryError.current = taskQueryError;
+  }, [taskQueryError, message]);
+  useEffect(() => {
+    setEditingTask(null);
+    taskEditForm.resetFields();
+    setTaskEditSaving(false);
+  }, [taskScopeKey, taskEditForm]);
 
   const { tasks, currentTask } = useMemo(
     () => deriveChatTaskState(jobs, chatId),
     [jobs, chatId],
   );
+  useTaskReadOnOpen(currentTask, refreshJobs, notifyReadFailure);
   const feedbackTask = useMemo(
     () =>
       currentTask
@@ -1556,8 +1612,6 @@ function ChatPageContent() {
   }, []);
 
   useEffect(() => {
-    void refreshJobs();
-
     // 仅从其他标签页切换回来时刷新（移除 window.focus 触发，减少不必要的 API 调用）
     const handleVisibilityRefresh = () => {
       if (document.visibilityState === "visible") {
@@ -1601,43 +1655,9 @@ function ChatPageContent() {
     taskHadResultRef.current = hadResult;
   }, [currentTask?.task?.has_scheduled_result]);
 
-  useEffect(() => {
-    if (!currentTask?.id) return;
-    if ((currentTask.task?.unread_execution_count || 0) <= 0) return;
-    if (!shouldMarkTaskReadOnOpen(currentTask)) return;
-
-    // Debounce: skip if there's already a pending markTaskRead request
-    if (markTaskReadPendingRef.current) return;
-
-    markTaskReadPendingRef.current = true;
-
-    // Non-urgent update: badge clearing can be delayed
-    startTransition(() => {
-      setJobs((prev) =>
-        prev.map((job) =>
-          job.id === currentTask.id && job.task
-            ? {
-                ...job,
-                task: {
-                  ...job.task,
-                  unread_execution_count: 0,
-                },
-              }
-            : job,
-        ),
-      );
-    });
-
-    void cronJobApi
-      .markTaskRead(currentTask.id, false)
-      .catch(() => {})
-      .finally(() => {
-        markTaskReadPendingRef.current = false;
-      });
-  }, [currentTask?.id, currentTask?.task?.unread_execution_count]);
-
   const handleTaskOpen = useCallback(
     (task: CronJobSpecOutput) => {
+      if (!isCurrentTaskView(task)) return;
       const taskOpenTarget = getTaskOpenTarget(task);
       if (!taskOpenTarget) return;
       const shouldAutoPreviewOnOpen = taskOpenTarget !== chatIdRef.current;
@@ -1652,14 +1672,19 @@ function ChatPageContent() {
       }
       navigate(`/chat/${taskOpenTarget}`, { replace: true });
     },
-    [navigate, setSessionLoading],
+    [navigate, setSessionLoading, isCurrentTaskView],
   );
 
   const handleTaskResume = useCallback(
     async (task: CronJobSpecOutput) => {
+      if (!isCurrentTaskView(task)) return;
+      if (isSchedulerTask(task)) {
+        await performManagedTask(task, "resume");
+        return;
+      }
       setJobs((prev) =>
         prev.map((job) =>
-          job.id === task.id
+          sameTask(job, task)
             ? {
                 ...job,
                 enabled: true,
@@ -1679,21 +1704,28 @@ function ChatPageContent() {
 
       try {
         await cronJobApi.resumeCronJob(task.id);
+        if (!isCurrentTaskView(task)) return;
         message.success("任务已恢复");
         void refreshJobs();
       } catch {
+        if (!isCurrentTaskView(task)) return;
         message.error("恢复失败");
         void refreshJobs();
       }
     },
-    [message, refreshJobs],
+    [message, refreshJobs, performManagedTask, setJobs, isCurrentTaskView],
   );
 
   const handleTaskPause = useCallback(
     async (task: CronJobSpecOutput) => {
+      if (!isCurrentTaskView(task)) return;
+      if (isSchedulerTask(task)) {
+        await performManagedTask(task, "pause");
+        return;
+      }
       setJobs((prev) =>
         prev.map((job) =>
-          job.id === task.id
+          sameTask(job, task)
             ? {
                 ...job,
                 enabled: false,
@@ -1711,21 +1743,28 @@ function ChatPageContent() {
 
       try {
         await cronJobApi.pauseCronJob(task.id);
+        if (!isCurrentTaskView(task)) return;
         message.success("任务已停止");
         void refreshJobs();
       } catch {
+        if (!isCurrentTaskView(task)) return;
         message.error("停止失败");
         void refreshJobs();
       }
     },
-    [message, refreshJobs],
+    [message, refreshJobs, performManagedTask, setJobs, isCurrentTaskView],
   );
 
   const handleTaskRun = useCallback(
     async (task: CronJobSpecOutput) => {
+      if (!isCurrentTaskView(task)) return;
+      if (isSchedulerTask(task)) {
+        await performManagedTask(task, "run");
+        return;
+      }
       setJobs((prev) =>
         prev.map((job) =>
-          job.id === task.id
+          sameTask(job, task)
             ? {
                 ...job,
                 state: {
@@ -1746,14 +1785,16 @@ function ChatPageContent() {
 
       try {
         await cronJobApi.runCronJob(task.id);
+        if (!isCurrentTaskView(task)) return;
         message.success("任务已开始执行");
         void refreshJobs();
       } catch {
+        if (!isCurrentTaskView(task)) return;
         message.error("执行失败");
         void refreshJobs();
       }
     },
-    [message, refreshJobs],
+    [message, refreshJobs, performManagedTask, setJobs, isCurrentTaskView],
   );
 
   const handleTaskDelete = useCallback(
@@ -1767,39 +1808,83 @@ function ChatPageContent() {
         cancelText: "取消",
         cancelButtonProps: { type: "text" },
         onOk: async () => {
-          setJobs((prev) => prev.filter((job) => job.id !== task.id));
+          if (!isCurrentTaskView(task)) return;
+          if (isSchedulerTask(task)) {
+            const result = await performManagedTask(task, "delete");
+            if (
+              result?.operation?.logical_delete_applied &&
+              isCurrentTaskView(task) &&
+              task.task?.chat_id === chatIdRef.current
+            )
+              navigate("/chat", { replace: true });
+            return;
+          }
+          setJobs((prev) => prev.filter((job) => !sameTask(job, task)));
           if (task.task?.chat_id && task.task.chat_id === chatIdRef.current) {
             navigate("/chat", { replace: true });
           }
           try {
             await cronJobApi.deleteCronJob(task.id);
+            if (!isCurrentTaskView(task)) return;
             message.success("任务已删除");
             void refreshJobs();
           } catch {
+            if (!isCurrentTaskView(task)) return;
             message.error("删除失败");
             void refreshJobs();
           }
         },
       });
     },
-    [message, navigate, refreshJobs],
+    [
+      message,
+      navigate,
+      refreshJobs,
+      performManagedTask,
+      setJobs,
+      isCurrentTaskView,
+    ],
   );
 
   const handleTaskEdit = useCallback(
-    (task: CronJobSpecOutput) => {
-      const formValues = buildCronJobFormValues(task);
-      setEditingTask(task);
+    async (task: CronJobSpecOutput) => {
+      if (!isCurrentTaskView(task)) return;
+      let current = task;
+      if (isSchedulerTask(task)) {
+        try {
+          const detail = await schedulerCronApi.detail(
+            taskOrigin(task)!.context,
+            task.id,
+          );
+          if (!isCurrentTaskView(task)) return;
+          current = tagTask(
+            detailToJob(detail),
+            "scheduler",
+            taskOrigin(task)!.context,
+            taskOrigin(task)!.accessKey,
+          );
+        } catch {
+          message.error("任务详情读取失败，请刷新后重试");
+          return;
+        }
+      }
+      const plain = { ...current } as typeof current & {
+        clientTaskOrigin?: unknown;
+      };
+      delete plain.clientTaskOrigin;
+      const formValues = buildCronJobFormValues(plain);
+      setEditingTask(current);
       taskEditForm.setFieldsValue({
         ...formValues,
         taskContentText:
-          task.task_type === "text"
+          current.task_type === "text"
             ? formValues.text || ""
-            : task.task_type === "agent"
+            : current.task_type === "agent"
             ? extractTaskContentText(formValues.request?.input)
             : undefined,
       } as Parameters<typeof taskEditForm.setFieldsValue>[0]);
     },
-    [taskEditForm],
+    [taskEditForm, message, isCurrentTaskView],
   );
 
   const handleTaskEditClose = useCallback(() => {
@@ -1811,28 +1896,53 @@ function ChatPageContent() {
   const handleTaskEditSubmit = useCallback(
     async (values: CronTaskEditFormValues) => {
       if (!editingTask) return;
+      if (!isCurrentTaskView(editingTask)) return;
 
       setTaskEditSaving(true);
       try {
+        if (isSchedulerTask(editingTask)) {
+          const payload = buildCronJobSubmitPayload(
+            prepareCronTaskEditValues(values),
+          );
+          const operation = await updateManagedTask(
+            editingTask,
+            editingTask,
+            payload,
+          );
+          if (operation && isCurrentTaskView(editingTask)) {
+            setEditingTask(null);
+            taskEditForm.resetFields();
+          }
+          return;
+        }
         await submitCronTaskEdit(
           editingTask,
           values,
           cronJobApi.replaceCronJob,
         );
+        if (!isCurrentTaskView(editingTask)) return;
         message.success("任务已更新");
         setEditingTask(null);
         taskEditForm.resetFields();
         void refreshJobs();
       } catch (error) {
+        if (!isCurrentTaskView(editingTask)) return;
         console.error("Failed to update cron task from chat sidebar:", error);
         message.error(
           error instanceof SyntaxError ? "任务配置格式不正确" : "保存失败",
         );
       } finally {
-        setTaskEditSaving(false);
+        if (isCurrentTaskView(editingTask)) setTaskEditSaving(false);
       }
     },
-    [editingTask, message, refreshJobs, taskEditForm],
+    [
+      editingTask,
+      message,
+      refreshJobs,
+      taskEditForm,
+      updateManagedTask,
+      isCurrentTaskView,
+    ],
   );
 
   useEffect(() => {
@@ -2220,9 +2330,10 @@ function ChatPageContent() {
     () => ({
       cronTaskId: feedbackTask?.cronTaskId || null,
       cronTaskName: feedbackTask?.cronTaskName || null,
+      cronTaskOrigin: currentTask ? taskOrigin(currentTask) : null,
       disableEventRecording: skipPreviewTracking,
     }),
-    [feedbackTask, skipPreviewTracking],
+    [feedbackTask, skipPreviewTracking, currentTask],
   );
 
   const options = useMemo(() => {
@@ -2449,11 +2560,7 @@ function ChatPageContent() {
             <RuntimeLoadingBridge bridgeRef={runtimeLoadingBridgeRef} />
             <ChatHeaderTitle />
             <span style={{ flex: 1 }} />
-            {!isContentOnly && (
-              <FileManager
-                enableSessionAnnotations={false}
-              />
-            )}
+            {!isContentOnly && <FileManager enableSessionAnnotations={false} />}
             {!isContentOnly && <ChatActionGroup chatId={chatId} />}
             {!isContentOnly && <ModelSelector />}
           </>
@@ -2718,7 +2825,9 @@ function ChatPageContent() {
                 {!isContentOnly && (
                   <ChatSidebar
                     tasks={tasks}
-                    selectedTaskId={currentTask?.id}
+                    selectedTaskId={
+                      currentTask ? taskIdentityKey(currentTask) : undefined
+                    }
                     onCreateSession={handleCreateSessionFromSidebar}
                     onTaskClick={handleTaskOpen}
                     onTaskPause={handleTaskPause}
@@ -2788,6 +2897,17 @@ function ChatPageContent() {
           </HtmlPreviewTrackingProvider>
         </ChatFeedbackRenderProvider>
 
+        {managedTaskProgress && (
+          <ManagedProgressModal
+            key={taskIdentityKey(managedTaskProgress.job)}
+            context={taskOrigin(managedTaskProgress.job)!.context}
+            job={managedTaskProgress.job}
+            initialOperation={managedTaskProgress.operation}
+            initialExecution={managedTaskProgress.execution}
+            onClose={closeManagedProgress}
+            onChanged={() => void refreshJobs()}
+          />
+        )}
         <Modal
           open={Boolean(editingTask)}
           title="编辑任务"

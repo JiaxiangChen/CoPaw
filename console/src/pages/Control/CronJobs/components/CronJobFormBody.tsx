@@ -25,6 +25,8 @@ interface CronJobFormBodyProps {
   skillOptions?: SelectOption[];
   skillOptionsLoading?: boolean;
   idDisabled?: boolean;
+  /** 新版编辑将启停作为独立管理操作；默认保留旧表单行为。 */
+  enabledDisabled?: boolean;
 }
 
 export function CronJobFormBody({
@@ -35,6 +37,7 @@ export function CronJobFormBody({
   skillOptions = [],
   skillOptionsLoading = false,
   idDisabled = false,
+  enabledDisabled = false,
 }: CronJobFormBodyProps) {
   const { t } = useTranslation();
   const validateSkillIds = (_: unknown, value: unknown) => {
@@ -77,7 +80,7 @@ export function CronJobFormBody({
         label={t("cronJobs.enabled")}
         valuePropName="checked"
       >
-        <Switch />
+        <Switch disabled={enabledDisabled} />
       </Form.Item>
 
       <Form.Item name={["schedule", "type"]} label="ScheduleType" hidden>

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CronJobSpecOutput } from "@/api/types";
+import { taskIdentityKey } from "@/api/modules/cronTaskSources";
 import type { IAgentScopeRuntimeWebUISession } from "@/components/agentscope-chat";
 import { useChatAnywhereSessionsState } from "@/components/agentscope-chat";
 import { TasksIconSmall, HistoryIconSmall } from "../CollapsedToolbar/icons";
@@ -156,7 +157,7 @@ function TasksContent({
   const pausedRegionId = useId();
   const { runnableTasks, pausedTasks } = partitionTasksByPauseState(tasks);
   const selectedTaskIsPaused = pausedTasks.some(
-    (task) => task.id === selectedTaskId,
+    (task) => taskIdentityKey(task) === selectedTaskId,
   );
 
   useEffect(() => {
@@ -173,9 +174,9 @@ function TasksContent({
 
     return (
       <div
-        key={task.id}
+        key={taskIdentityKey(task)}
         className={`expandable-panel-task-card${
-          task.id === selectedTaskId
+          taskIdentityKey(task) === selectedTaskId
             ? " expandable-panel-task-card--selected"
             : ""
         }${
