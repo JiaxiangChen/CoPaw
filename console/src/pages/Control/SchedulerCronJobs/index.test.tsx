@@ -95,6 +95,25 @@ beforeEach(() => {
   });
 });
 
+it("编辑读取最新详情后同步列表排程，不保留旧列表10点而表单9点", async () => {
+  const listed = { ...job, schedule: { ...job.schedule, cron: "0 10 * * *" } };
+  vi.mocked(request).mockImplementation(async (url) => {
+    if (url.includes("/new-job?"))
+      return {
+        ...job,
+        spec: { ...job, schedule: { ...job.schedule, cron: "0 9 * * *" } },
+      };
+    return { items: [listed], next_cursor: null };
+  });
+  render(<SchedulerCronJobsPage />);
+  await screen.findByText(/ 10:00$/);
+  fireEvent.click(screen.getByRole("button", { name: "更多操作 新版任务" }));
+  fireEvent.click(await screen.findByText("编辑", { exact: true }));
+  await screen.findByDisplayValue("09:00");
+  await waitFor(() => expect(screen.queryByText(/ 10:00$/)).toBeNull());
+  expect(screen.getByText(/ 09:00$/)).toBeInTheDocument();
+});
+
 it("已删除任务筛选位于页头操作区且可以开启和关闭", async () => {
   render(<SchedulerCronJobsPage />);
   await screen.findByText("新版任务");

@@ -191,6 +191,27 @@ export function useManagedCronJobs(
     [scopeKey, reload],
   );
 
+  /** 编辑读取最新详情后同步旧列表快照，不额外发一次可能滞后的列表请求。 */
+  const reconcileJob = useCallback(
+    (fresh: ManagedJob) => {
+      if (!mounted.current || currentKey.current !== scopeKey) return;
+      ++sequence.current;
+      setLoading(false);
+      setJobs((previous) =>
+        previous.map((item) =>
+          item.id === fresh.id &&
+          item.tenant_id === fresh.tenant_id &&
+          item.source_id === fresh.source_id &&
+          item.agent_id === fresh.agent_id &&
+          item.definition_version <= fresh.definition_version
+            ? fresh
+            : item,
+        ),
+      );
+    },
+    [scopeKey],
+  );
+
   return {
     jobs,
     loading,
@@ -199,6 +220,7 @@ export function useManagedCronJobs(
     operation,
     execution,
     reload,
+    reconcileJob,
     setOperation,
     setExecution,
     create: (spec: ManagedCronSpec, requestId: string) =>

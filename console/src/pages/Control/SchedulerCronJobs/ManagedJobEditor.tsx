@@ -35,6 +35,7 @@ interface Props {
     requestId: string,
   ) => Promise<ManagedOperation | null>;
   onClose: () => void;
+  onLoaded?: (job: ManagedJob) => void;
 }
 
 /** 原表单只负责编辑展示；服务端 ID、版本和启停走新版协议。 */
@@ -44,11 +45,13 @@ export function ManagedJobEditor({
   saving,
   onSave,
   onClose,
+  onLoaded,
 }: Props) {
   const [form] = Form.useForm<CronJobFormValues>();
   const models = useExecutionModelOptions(true);
   const [skills, setSkills] = useState<SkillSelectOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState(job);
   const request = useRef(new RequestIdentity());
@@ -57,6 +60,9 @@ export function ManagedJobEditor({
     mounted.current = true;
     let alive = true;
     const load = async () => {
+      setLoading(true);
+      setReady(false);
+      setError(null);
       try {
         const [detail, options, timezone] = await Promise.all([
           job
@@ -70,6 +76,13 @@ export function ManagedJobEditor({
         ]);
         if (!alive) return;
         const current = detail ? detailToJob(detail) : null;
+        if (
+          current &&
+          job &&
+          current.definition_version < job.definition_version
+        )
+          throw new Error("任务详情版本落后于列表，请刷新后重新编辑。");
+        if (current) onLoaded?.(current);
         setSnapshot(current);
         setSkills(buildSkillSelectOptions(options.skills ?? []));
         form.setFieldsValue(
@@ -88,6 +101,7 @@ export function ManagedJobEditor({
                 },
               },
         );
+        setReady(true);
       } catch (failure) {
         if (alive) setError(failureMessage(failure));
       } finally {
@@ -99,8 +113,9 @@ export function ManagedJobEditor({
       alive = false;
       mounted.current = false;
     };
-  }, [context, job, form]);
+  }, [context, job, form, onLoaded]);
   const submit = async (values: CronJobFormValues) => {
+    if (!ready || loading || saving) return;
     try {
       const spec = buildCronJobSubmitPayload(values);
       const operation = await onSave(snapshot, spec, request.current.for(spec));
@@ -126,7 +141,7 @@ export function ManagedJobEditor({
           <Button onClick={onClose}>取消</Button>
           <Button
             type="primary"
-            disabled={loading}
+            disabled={loading || !ready}
             loading={saving}
             onClick={() => form.submit()}
           >

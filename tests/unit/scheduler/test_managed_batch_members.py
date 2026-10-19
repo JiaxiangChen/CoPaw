@@ -13,6 +13,75 @@ from tests.unit.scheduler.test_managed_cron_callbacks import (
 
 
 @pytest.mark.asyncio
+async def test_batch_prefire_makes_all_members_ready_without_individual_scatter(
+    callback_setup,
+    monkeypatch,
+):
+    import json
+    from scheduler.app.services.cron.managed.distribution import BroadcastStore
+    from scheduler.app.services.cron.managed.distribution_worker import (
+        BroadcastProcessor,
+    )
+    from scheduler.app.services.cron.managed.scheduling import (
+        ManagedSchedulingService,
+    )
+    from tests.unit.scheduler.test_managed_cron_distribution import payload
+
+    db, caller, management = callback_setup
+    created = await create_source(callback_setup, "batch_enabled")
+    task = await BroadcastStore(db).submit(
+        caller,
+        created["job_id"],
+        payload(),
+    )
+    await BroadcastProcessor(
+        db,
+        management.resources,
+        management.platform,
+    ).process(task["task_id"])
+    stored = await db.fetch_one(
+        "SELECT payload_json FROM swe_cron_managed_broadcast_tasks WHERE task_id=%s",
+        (task["task_id"],),
+    )
+    timer = json.loads(stored["payload_json"])["timer_sync"]
+    assert timer["advance_minutes"] == 120
+    assert timer["spec"]["schedule"]["cron"] == "0 7 * * *"
+    now = datetime(2026, 10, 15, 23, tzinfo=timezone.utc)
+    callback = {
+        **body(db, created, kind="batch"),
+        "operation_id": task["task_id"],
+    }
+    accepted = await ManagedSchedulingService(db, clock=lambda: now).accept(
+        caller,
+        callback,
+        "batch",
+    )
+    rows = await db.fetch_all(
+        "SELECT not_before_at, scheduled_fire_at, dispatch_meta_json FROM swe_cron_execution_runs WHERE kind='batch'",
+    )
+    assert len(rows) == 3
+    assert {row["not_before_at"] for row in rows} == {"2026-10-15 23:00:00"}
+    assert {row["scheduled_fire_at"] for row in rows} == {
+        "2026-10-16 01:00:00",
+    }
+    assert all(
+        json.loads(row["dispatch_meta_json"])["parent_scheduled_fire_at"]
+        == "2026-10-16T01:00:00+00:00"
+        for row in rows
+    )
+    from scheduler.app.services.cron.managed import work_query
+
+    monkeypatch.setattr(
+        work_query,
+        "utc_now",
+        lambda: now.replace(tzinfo=None),
+    )
+    db.conn.create_function("JSON_UNQUOTE", 1, lambda value: value)
+    ready = await work_query.ManagedWorkQuery(db, 10).rows(running=False)
+    assert len(ready) == accepted["enqueued_intents"] == 3
+
+
+@pytest.mark.asyncio
 async def test_real_batch_callback_persists_members_in_its_acceptance_transaction(
     callback_setup,
 ):

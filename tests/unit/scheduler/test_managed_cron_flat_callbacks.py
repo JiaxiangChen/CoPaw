@@ -233,19 +233,21 @@ async def test_fixed_batch_body_preserves_advance_offsets_and_independent_member
     for receipt in receipts:
         logical = datetime.fromisoformat(receipt["logical_fire_at"])
         advance = logical - RECEIVED_AT.replace(tzinfo=None)
-        assert advance > timedelta(0)
+        assert advance == timedelta(minutes=120)
     rows = await db.fetch_all(
         "SELECT r.not_before_at,r.scheduled_fire_at,j.offset_minutes FROM swe_cron_execution_runs r "
         "JOIN swe_cron_jobs_v2 j ON r.tenant_id=j.tenant_id AND r.source_id=j.source_id "
         "AND r.agent_id=j.agent_id AND r.job_id=j.job_id",
     )
     assert len(rows) == 6
+    assert {row["offset_minutes"] for row in rows} == {0, 120}
     for row in rows:
         assert datetime.fromisoformat(
             row["not_before_at"],
-        ) == datetime.fromisoformat(row["scheduled_fire_at"]) - timedelta(
-            minutes=row["offset_minutes"],
-        )
+        ) == RECEIVED_AT.replace(tzinfo=None)
+        assert datetime.fromisoformat(
+            row["scheduled_fire_at"],
+        ) == RECEIVED_AT.replace(tzinfo=None) + timedelta(minutes=120)
     assert (
         len(await db.fetch_all("SELECT * FROM swe_cron_managed_batch_members"))
         == 6

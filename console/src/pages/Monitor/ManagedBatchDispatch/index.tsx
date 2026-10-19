@@ -90,16 +90,16 @@ function Board({ source, actor }: { source: string; actor: string }) {
   const stats = batches.value?.stats;
   const metrics = [
     ["Batch 总数", stats?.total_batches, "当前全局筛选范围"],
-    ["逻辑成员总数", stats?.total_members, "重试不增加成员数"],
-    ["运行中 Batch", stats?.running_batches, "含等待异步收敛"],
+    ["任务总数", stats?.total_members, "含父任务，重试不增加任务数"],
+    ["运行中 Batch", stats?.running_batches, "含等待子任务完成"],
     [
-      "成员完成率",
+      "任务完成率",
       stats?.total_members
         ? `${((stats.done_members / stats.total_members) * 100).toFixed(1)}%`
         : "-",
-      "明确终态 / 逻辑成员",
+      "明确终态 / 任务总数",
     ],
-    ["失败成员", stats?.failed_members, "当前业务尝试"],
+    ["失败任务", stats?.failed_members, "当前业务尝试"],
     [
       "有效 Worker",
       workers.value?.current_capacity.reduce(

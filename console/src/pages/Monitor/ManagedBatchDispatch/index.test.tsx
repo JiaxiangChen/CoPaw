@@ -66,7 +66,7 @@ it("零成员不伪造百分之百完成率，空数据没有旧接口回退", a
   const overview = screen.getByRole("region", { name: "新版批调度概览" });
   await waitFor(() =>
     expect(
-      within(overview).getByText("成员完成率").parentElement?.textContent,
+      within(overview).getByText("任务完成率").parentElement?.textContent,
     ).toContain("-"),
   );
   expect(within(overview).queryByText("100%")).toBeNull();

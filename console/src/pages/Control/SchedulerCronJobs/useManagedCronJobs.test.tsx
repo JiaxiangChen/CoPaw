@@ -40,6 +40,29 @@ beforeEach(() => {
   vi.mocked(schedulerCronApi.listAll).mockResolvedValue([job]);
 });
 
+it("详情对齐不覆盖其他Agent同名ID或更高版本，卸载后不再更新", async () => {
+  const newer = { ...job, definition_version: 3 };
+  vi.mocked(schedulerCronApi.listAll).mockResolvedValue([newer]);
+  const { result, unmount } = renderHook(() => useManagedCronJobs(context));
+  await waitFor(() => expect(result.current.jobs).toHaveLength(1));
+  act(() => result.current.reconcileJob({ ...job, definition_version: 2 }));
+  expect(result.current.jobs[0]).toEqual(newer);
+  act(() =>
+    result.current.reconcileJob({
+      ...job,
+      agent_id: "other",
+      definition_version: 4,
+    }),
+  );
+  expect(result.current.jobs[0]).toEqual(newer);
+  act(() => result.current.reconcileJob({ ...newer, name: "最新详情" }));
+  expect(result.current.jobs[0].name).toBe("最新详情");
+  const reconcile = result.current.reconcileJob;
+  unmount();
+  act(() => reconcile({ ...newer, name: "迟到详情" }));
+  expect(result.current.jobs[0].name).toBe("最新详情");
+});
+
 it("Agent 切换后迟到旧响应不覆盖新列表", async () => {
   let resolveOld!: (value: ManagedJob[]) => void;
   vi.mocked(schedulerCronApi.listAll)

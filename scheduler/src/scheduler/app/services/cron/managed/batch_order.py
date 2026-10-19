@@ -60,8 +60,13 @@ async def ordered_members(db, root, selected, logical, now, kind):
                     ),
                 },
                 "viewer_heat_score": heat.get(row["job_id"], 0),
-                "due_at": logical
-                - timedelta(minutes=int(row["offset_minutes"] or 0)),
+                # 批入口已经提前触发；整批立即就绪，不按成员散列二次等待。
+                "due_at": (
+                    now
+                    if kind == "batch"
+                    else logical
+                    - timedelta(minutes=int(row["offset_minutes"] or 0))
+                ),
             },
         )
     return compute_batch_dispatch_order(entries)

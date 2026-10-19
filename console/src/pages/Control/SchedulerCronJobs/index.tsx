@@ -135,6 +135,7 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
           context={target}
           job={panel.kind === "edit" ? panel.job : null}
           saving={data.busy}
+          onLoaded={data.reconcileJob}
           onClose={close}
           onSave={(job, spec, id) =>
             job ? data.update(job, spec, id) : data.create(spec, id)

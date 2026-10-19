@@ -90,9 +90,11 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 }
 ```
 
-Header 若存在，不允许与 Body 的租户、来源或 Agent 冲突；管理角色不从 Body 读取。缺 external_job_id/jobId 时读取共库当前普通或批入口绑定，仍检查其存在及注册操作引用。缺触发时间时，以接收时间为物理触发时间，加已保存提前量形成逻辑时间，保留散列成员等待，不反推 cron 或虚构平台计划时间。可选明确时间仍按原排程规则校验；即使同一流水号或时间重复提交，也不会合并成旧执行。
+Header 若存在，不允许与 Body 的租户、来源或 Agent 冲突；管理角色不从 Body 读取。缺 external_job_id/jobId 时读取共库当前普通或批入口绑定，仍检查其存在及注册操作引用。缺触发时间时，以接收时间为物理触发时间，加已保存提前量形成逻辑时间，不反推 cron 或虚构平台计划时间。批入口的散列提前量只影响外部提前触发，批内成员统一受理时就绪，不再按成员偏移等待。可选明确时间仍按原排程规则校验；即使同一流水号或时间重复提交，也不会合并成旧执行。
 
-1. 一次普通/批触发返回 202，检查 accepted=true，保存 execution_id 或 batch_id。对同一测试 Body 再发送一次，两个 ID 应不同，reused=false，分别新增回执及执行/成员。批入口各条按冻结 not_before_at 等待自己的时间。202 且 accepted=false/status=skipped 表示实际门禁阻止执行，须查看 reason，不是执行已开始。
+1. 一次普通/批触发返回 202，检查 accepted=true，保存 execution_id 或 batch_id。对同一测试 Body 再发送一次，两个 ID 应不同，reused=false，分别新增回执及执行/成员。新批入口各成员的not_before_at应相同且是受理时刻，入队后只受优先级、容量及实际运行门禁约束，不因散列再次等到各自时间；logical_fire_at/原通知时间仍保留。202 且 accepted=false/status=skipped 表示实际门禁阻止执行，须查看 reason，不是执行已开始。
+
+2026-10-19时间/批内就绪修复：部署Scheduler和Console，无新增SQL、配置或Monitor服务端修改。只影响新受理批次；历史已入队快照的not_before_at不改写。新版编辑读到详情后，列表同步相同详情定义；低于列表定义版本的详情提示刷新并禁止保存。验证时打开非默认10:00任务，表单与列表应一致，原样保存不改变Cron；如已有其他操作更新任务，以最新详情为准，不用固定09:00掩盖差异。批看板顶部为任务数（含父任务）、成员为子任务状态/完成时间，原长解释句已删除。
 2. 单任务 POST `/{job_id}/run` 另用手动请求号，GET `/{job_id}/executions/{execution_id}` 观察 queued→accepted→running→终态；停用/运行中的任务拒绝新手动请求。手动执行与自动逻辑期独立。
 3. SWE 直接写共库状态和历史，不等待最终回传 Scheduler。HTTP 成功不等于业务成功，HTTP 超时也不证明未受理；按相同执行 ID 查询，不重新生成执行。
 4. 主 status=success、settled_status=null 时继续等待已有异步子任务；最终 settled_status=success/error 反映整轮，不覆盖 SWE 主状态。不因异步未确认提前释放模型池或删除运行资源。

@@ -61,17 +61,17 @@ const memberColumns: ColumnsType<ManagedBatchMember> = [
     ),
   },
   {
-    title: "状态 / 收敛",
+    title: "状态 / 子任务",
     width: 160,
     render: (_, item) => (
       <>
         {statusTag(item.status)}
         <div>
           {item.settled_status
-            ? `收敛：${item.settled_status}`
+            ? `子任务状态：${item.settled_status}`
             : item.status === "success"
-            ? "等待异步结果收敛"
-            : "尚未收敛"}
+            ? "等待子任务完成"
+            : "子任务状态未确认"}
         </div>
       </>
     ),
@@ -159,10 +159,6 @@ export default function BatchDetail({
         <span>回调 {timeText(batch.created_at)}</span>
         <span>Owner 未记录</span>
       </div>
-      <p>
-        成员数 {(data?.batch || batch).member_count}
-        ；主执行状态与异步收敛状态分别展示。已入队任务继续执行。
-      </p>
       {detail.error && <Alert type="error" showIcon message={detail.error} />}
       <Tabs
         defaultActiveKey="members"
@@ -256,7 +252,7 @@ export default function BatchDetail({
                         {item.current_definition_version}；操作者{" "}
                         {item.actor_id}；管理状态 {item.management_status}
                         ；调度模式 {item.dispatch_state}；受理{" "}
-                        {timeText(item.accepted_at)}；收敛{" "}
+                        {timeText(item.accepted_at)}；子任务完成{" "}
                         {timeText(item.settled_at)}
                       </div>
                     ),
