@@ -330,3 +330,9 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 工作台任务页顶部汇总随客户名单响应读取 `targetCusCount`、`todayTouchCount`、`sevenDayTouchCount`、`unTouchedCount`（外部响应 `data` 下，由前端适配到响应顶层）。今日任务经营视角使用所选当天技能的统计，其余视角/模块使用当天全部技能；搜索、标签和接触状态筛选只过滤表格，不重算后端汇总。各模块独立保存名单及统计并同步更新；首次加载显示 `--`，后台刷新保留旧值，缺失统计显示 `--`，当天无场景时显示 0 且不查询名单。列表分页条数仍按当前筛选结果展示。
 
 今日任务经营视角原始客户名单为空且查询完成时，在当前任务标题旁展示执行时间；使用 `plans.items[].scenes[].cron_expr` 经 `mapSceneItem` 解析的排程，由任务树节点透传 `schedule` 并复用 `scheduleLabel`。日/周排程显示具体时分，小时排程显示“每小时整点”，自定义排程显示原表达式。搜索或接触状态筛选导致的空列表不触发展示；客户视角、待触达、已完成不显示。`plans` 不返回实际执行状态，空名单不能严格证明任务尚未执行。
+
+## 财富工作台嵌入头部控制
+
+- 父应用通过 iframe URL 的 `hideLogo=true` 隐藏整个财富工作台头部（品牌及标题），例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
+- 入口与参数延续逻辑位于 `console/src/pages/WealthWorkbench/index.tsx`。内部导航省略参数时补回入口隐藏设置并保留其他查询参数，支持导航后刷新；不写入 sessionStorage，不影响独立打开的工作台。
+- `.root.withoutHeader` 位于同目录 `index.module.less`，同步调整信息播报、侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。

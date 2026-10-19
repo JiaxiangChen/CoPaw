@@ -6,7 +6,7 @@
  * 角色预览切换时通过 key 重挂载页面子树，还原原型"切换角色重置页面视图状态"的行为。
  */
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import cx from "classnames";
 import styles from "./index.module.less";
 import { useWealthStore, useCanAccess } from "./store";
@@ -22,6 +22,26 @@ import { useVisibilityRefresh } from "./useVisibilityRefresh";
 
 export default function WealthWorkbench() {
   useVisibilityRefresh();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [entryHideLogo] = useState(
+    () => searchParams.get("hideLogo") === "true",
+  );
+  const hideHeader = searchParams.has("hideLogo")
+    ? searchParams.get("hideLogo") === "true"
+    : entryHideLogo;
+
+  // 内部导航可能省略查询参数；补回入口设置，使刷新后仍保持嵌入布局。
+  useEffect(() => {
+    if (hideHeader && !searchParams.has("hideLogo")) {
+      setSearchParams(
+        (params) => {
+          params.set("hideLogo", "true");
+          return params;
+        },
+        { replace: true },
+      );
+    }
+  }, [hideHeader, searchParams, setSearchParams]);
   const initialized = useWealthStore((s) => s.initialized);
   const accountId = useWealthStore((s) => s.accountId);
   const init = useWealthStore((s) => s.init);
@@ -61,9 +81,15 @@ export default function WealthWorkbench() {
     );
 
   return (
-    <div className={cx(styles.root, collapsed && styles.collapsed)}>
+    <div
+      className={cx(
+        styles.root,
+        collapsed && styles.collapsed,
+        hideHeader && styles.withoutHeader,
+      )}
+    >
       <IconDefs />
-      <Topbar />
+      {!hideHeader && <Topbar />}
       <Ticker />
       <Sidebar
         collapsed={collapsed}
