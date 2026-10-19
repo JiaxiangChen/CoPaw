@@ -219,6 +219,21 @@ SWE_WARMUP_HEADERS_JSON = EnvVarLoader.get_str(
     "",
 )
 
+# SWE 定时任务手动重跑配置。认证值必须由部署环境注入，避免密钥进入源码。
+_SWE_CRON_RERUN_DEFAULT_BASE_URL = (
+    "http://ai-assist-gateway.paas.cmbchina.cn/gateway/swe/api/cron/jobs"
+    if ENV_NAME == "prd"
+    else "http://ai-assist-gateway.paasuat.cmbchina.cn/gateway/swe/api/cron/jobs"
+)
+SWE_CRON_RERUN_BASE_URL = EnvVarLoader.get_str(
+    "MONITOR_SWE_CRON_RERUN_BASE_URL",
+    _SWE_CRON_RERUN_DEFAULT_BASE_URL,
+).rstrip("/")
+SWE_CRON_RERUN_AUTHORIZATION = EnvVarLoader.get_str(
+    "MONITOR_SWE_CRON_RERUN_AUTHORIZATION",
+    "",
+)
+
 # ============================================================
 # 高频问题分析工作流配置
 # ============================================================

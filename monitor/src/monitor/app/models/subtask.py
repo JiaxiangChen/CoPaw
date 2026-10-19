@@ -182,3 +182,20 @@ class ExecutionAsyncStatusResponse(BaseModel):
     total_updated: int = Field(default=0, description="更新总数")
     total_success: int = Field(default=0, description="成功数")
     total_error: int = Field(default=0, description="错误数")
+
+
+class FailedExecutionRerunRequest(BaseModel):
+    """Request for rerunning the latest failed cron executions."""
+
+    tenant_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        description="需要重跑当天失败任务的租户 ID 列表",
+    )
+
+
+class FailedExecutionRerunResponse(BaseModel):
+    """Result of rerunning failed cron executions."""
+
+    rerun_count: int = Field(default=0, description="发起重跑成功的任务数量")
+    failed_count: int = Field(default=0, description="发起重跑失败的任务数量")
