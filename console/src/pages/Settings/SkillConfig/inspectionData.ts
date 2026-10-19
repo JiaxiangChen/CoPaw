@@ -1,3 +1,8 @@
+/**
+ * 文件不一致！！！！！
+ * ！！！！！！！！！！
+ * ！！！！！！！！！！
+ */
 import type {
   SkillExposureStats,
   SkillPreviewStats,
