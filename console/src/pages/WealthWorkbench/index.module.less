@@ -4051,3 +4051,24 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+// 嵌入入口 hideLogo=true：移除整个品牌头部及其占位，保留信息播报。
+.root.withoutHeader {
+  .wealthTicker {
+    top: 0;
+  }
+  .sidebar {
+    top: 42px;
+  }
+  .main {
+    padding-top: 62px;
+  }
+  .formSection {
+    scroll-margin-top: 60px;
+  }
+  @media (max-width: 950px) {
+    .main {
+      padding-top: 59px;
+    }
+  }
+}
