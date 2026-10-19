@@ -36,7 +36,13 @@ function mockTransports() {
       };
       const { items, ...fields } = result;
       return new Response(
-        JSON.stringify({ code: 200, data: { ...fields, list: items ?? [] } }),
+        JSON.stringify({
+          code: 200,
+          data:
+            path === "/api/agent/workspace/skill-config/list"
+              ? items ?? []
+              : { ...fields, list: items ?? [] },
+        }),
       );
     }),
   );
@@ -194,9 +200,8 @@ async function requestHandler(
   options: RequestInit = {},
 ): Promise<unknown> {
   const method = options.method ?? "GET";
-  if (path.startsWith("/wealth/scene-skills")) {
-    const category =
-      new URL(path, "http://test").searchParams.get("category") ?? "";
+  if (path.startsWith("/api/agent/workspace/skill-config/list")) {
+    const category = JSON.parse(String(options.body)).category ?? "";
     return {
       items: category
         ? SCENE_FIXTURES.filter((s) => s.category === category)
@@ -529,7 +534,7 @@ describe("WealthWorkbench store", () => {
   it("loadScenes 按大类查询且每次都取最新；toggleScene 选择/移除场景", async () => {
     const sceneCalls = () =>
       mockRequest.mock.calls.filter(([p]) =>
-        String(p).startsWith("/wealth/scene-skills"),
+        String(p).startsWith("/api/agent/workspace/skill-config/list"),
       ).length;
     await useWealthStore.getState().loadScenes("");
     await useWealthStore.getState().loadScenes(""); // 不做缓存，每次都重新查询

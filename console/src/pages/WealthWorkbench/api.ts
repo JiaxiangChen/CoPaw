@@ -93,7 +93,8 @@ interface SceneSkillItem {
 }
 
 interface SceneSkillListResponse {
-  items: SceneSkillItem[];
+  code: string | number;
+  data?: SceneSkillItem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,8 +175,30 @@ function mapPlan(view: PlanView): Plan {
 }
 
 // ---------------------------------------------------------------------------
-// 场景查询：/wealth/scene-skills（外部接口代理）
+// 场景查询：同源 skill-config/list，由前端 Nginx 转发
 // ---------------------------------------------------------------------------
+
+async function fetchSceneSkills(category: string): Promise<SceneSkillItem[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const context = getIframeContext();
+    const resp = await fetch("/api/agent/workspace/skill-config/list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bbkId: context.bbk || DEFAULT_BBK_ID, category }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`场景请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as SceneSkillListResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`场景接口返回失败：${payload.code}`);
+    }
+    return (payload.data ?? []).filter((item) => Boolean(item?.skillId));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * 按产品大类查询经营场景；categoryCode 传空串表示查询全部大类。
@@ -185,10 +208,8 @@ export async function fetchScenesByCategory(
   categoryCode: string,
 ): Promise<Scene[]> {
   try {
-    const resp = await request<SceneSkillListResponse>(
-      `/wealth/scene-skills?category=${encodeURIComponent(categoryCode)}`,
-    );
-    return resp.items.map(mapScene);
+    const items = await fetchSceneSkills(categoryCode);
+    return items.map(mapScene);
   } catch (error) {
     console.warn("[Wealth] 场景接口不可用，返回空列表", error);
     return [];
@@ -202,10 +223,8 @@ export async function fetchScenesByCategory(
  */
 export async function fetchAvailableSceneCount(): Promise<number | null> {
   try {
-    const resp = await request<SceneSkillListResponse>(
-      "/wealth/scene-skills?category=",
-    );
-    return resp.items.length;
+    const items = await fetchSceneSkills("");
+    return items.length;
   } catch (error) {
     console.warn("[Wealth] 可用场景总数查询失败", error);
     return null;
@@ -237,7 +256,6 @@ export async function fetchSkillStats(
 ): Promise<Record<string, SkillStat> | null> {
   if (!planIds.length) return {};
   try {
-    const auth = buildAuthHeaders();
     const resp = await fetch("/api/agent/workspace/skill-stats", {
       method: "POST",
       headers: {
@@ -364,7 +382,10 @@ export async function fetchNameList(
     const context = getIframeContext();
     const resp = await fetch("/api/agent/workspace/name-list", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: getWPlusCookie("token") ?? "",
+      },
       body: JSON.stringify({
         skillIds: ids,
         bbkId: context.bbk || DEFAULT_BBK_ID,
@@ -650,7 +671,6 @@ export async function fetchSchemeSignature(
   bbkOrgId: string,
 ): Promise<string> {
   const auth = buildAuthHeaders();
-  console.log("auth", auth);
   const resp = await fetch(`/expert/get-sign`, {
     method: "POST",
     credentials: "include",
