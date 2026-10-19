@@ -95,6 +95,36 @@ beforeEach(() => {
   });
 });
 
+it("已删除任务筛选位于页头操作区且可以开启和关闭", async () => {
+  render(<SchedulerCronJobsPage />);
+  await screen.findByText("新版任务");
+  const header = screen.getByRole("banner");
+  const filter = within(header).getByRole("button", {
+    name: "包含已删除任务（查看清理进度）",
+  });
+  expect(within(header).getByRole("button", { name: /刷\s*新/ })).toBeVisible();
+  expect(
+    within(header).getByRole("button", { name: /cronJobs.createJob|创建任务/ }),
+  ).toBeVisible();
+  expect(filter).toHaveAttribute("aria-pressed", "false");
+  filter.focus();
+  expect(filter).toHaveFocus();
+  fireEvent.click(filter);
+  await waitFor(() =>
+    expect(vi.mocked(request).mock.lastCall?.[0]).toContain(
+      "include_deleted=true",
+    ),
+  );
+  expect(filter).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(filter);
+  await waitFor(() =>
+    expect(vi.mocked(request).mock.lastCall?.[0]).toContain(
+      "include_deleted=false",
+    ),
+  );
+  expect(filter).toHaveAttribute("aria-pressed", "false");
+});
+
 it("新页完整列表和启用动作只走 Scheduler，携带管理版本和真实用户 Header", async () => {
   render(<SchedulerCronJobsPage />);
   await screen.findByText("新版任务");

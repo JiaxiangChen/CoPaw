@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""校验平台绑定及触发时间语义，不以接收时间随意生成新的执行身份。"""
+"""校验共库注册引用；平台未传 ID 或时间时按固定 Body 协议受理。"""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -35,8 +35,10 @@ async def binding_context(db, row, body, kind):
         if kind == "ordinary"
         else "batch_external_job_id"
     )
-    external_id = str(body.get("external_job_id") or body.get("jobId") or "")
     expected = str(row.get("state_" + field) or "")
+    external_id = str(
+        body.get("external_job_id") or body.get("jobId") or expected,
+    )
     if (
         not expected
         or external_id != expected
@@ -241,15 +243,9 @@ def trigger_times(body, binding, now):
         )
         logical_time = physical_time + advance
     else:
-        if not trigger_id(body):
-            raise ValueError("cron_trigger_identity_required")
-        local = now.astimezone(ZoneInfo(zone)) + timedelta(microseconds=1)
-        physical_time = (
-            croniter(binding["spec"]["schedule"]["cron"], local)
-            .get_prev(datetime)
-            .astimezone(timezone.utc)
-        )
-        logical_time = physical_time + advance
+        # 平台只传注册时的固定 Body，不能推测它的日志或计划期。
+        # 接收时间是本次触发事实；批提前量仍用于计算成员等待时间。
+        return now + advance, now
     if not croniter.match(
         binding["spec"]["schedule"]["cron"],
         physical_time.astimezone(ZoneInfo(zone)),

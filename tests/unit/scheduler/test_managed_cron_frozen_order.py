@@ -163,10 +163,11 @@ async def test_later_priority_only_changes_new_batch_order(callback_setup):
         db,
         clock=lambda: datetime(2026, 10, 16, 1, tzinfo=timezone.utc),
     )
-    await service.accept(caller, callback, "batch")
+    first = await service.accept(caller, callback, "batch")
     await priority(callback_setup, root["job_id"], "next-priority", ["bob"])
     replay = await service.accept(caller, callback, "batch")
-    assert replay["reused"]
+    assert not replay["reused"]
+    assert replay["batch_id"] != first["batch_id"]
     callback.update(
         trigger_id="next-period",
         scheduled_fire_at="2026-10-17T09:00:00+08:00",
@@ -176,10 +177,16 @@ async def test_later_priority_only_changes_new_batch_order(callback_setup):
         clock=lambda: datetime(2026, 10, 17, 1, tzinfo=timezone.utc),
     ).accept(caller, callback, "batch")
     first_period = db.conn.execute(
-        "SELECT tenant_id FROM swe_cron_execution_runs WHERE scheduled_fire_at='2026-10-16 01:00:00' ORDER BY dispatch_order LIMIT 1",
+        "SELECT tenant_id FROM swe_cron_execution_runs WHERE json_extract(dispatch_meta_json,'$.batch_id')=? ORDER BY dispatch_order LIMIT 1",
+        (first["batch_id"],),
+    ).fetchone()[0]
+    replay_priority = db.conn.execute(
+        "SELECT tenant_id FROM swe_cron_execution_runs WHERE json_extract(dispatch_meta_json,'$.batch_id')=? ORDER BY dispatch_order LIMIT 1",
+        (replay["batch_id"],),
     ).fetchone()[0]
     next_period = db.conn.execute(
         "SELECT tenant_id FROM swe_cron_execution_runs WHERE scheduled_fire_at='2026-10-17 01:00:00' ORDER BY dispatch_order LIMIT 1",
     ).fetchone()[0]
     assert first_period == "carol"
+    assert replay_priority == "bob"
     assert next_period == "bob"

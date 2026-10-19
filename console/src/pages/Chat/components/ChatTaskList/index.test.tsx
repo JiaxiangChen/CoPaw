@@ -10,6 +10,33 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CronJobSpecOutput } from "@/api/types";
 import ChatTaskList from ".";
+import { formatListTime } from "../../listTimeFormat";
+
+it("新版手动历史展示最近运行时间和未读次数，不依赖自动结果标志", () => {
+  const task = tagTask(
+    taskJob({
+      state: { last_run_at: "2026-10-19 05:18:00", last_status: "success" },
+      task: {
+        visible_in_my_tasks: true,
+        has_scheduled_result: false,
+        latest_scheduled_preview: "",
+        unread_execution_count: 2,
+        is_running: false,
+        is_paused: false,
+      },
+    }),
+    "scheduler",
+    { actor_id: "u", tenant_id: "u", source_id: "s", agent_id: "a" },
+  );
+  const { container } = render(<ChatTaskList tasks={[task]} />);
+  expect(
+    screen.getByText(formatListTime("2026-10-19T05:18:00Z")),
+  ).toBeVisible();
+  expect(
+    container.querySelector(".chat-task-list-item-badge"),
+  ).toHaveTextContent("2");
+  expect(screen.getByText("已完成")).toBeVisible();
+});
 
 function taskJob(
   overrides: Partial<CronJobSpecOutput> = {},

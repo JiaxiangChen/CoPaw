@@ -18,7 +18,7 @@ from .managed_cron_management import (
     require_managed_runtime,
 )
 from ..services.cron.managed.children_controls import ChildrenControlService
-from ..services.cron.managed.batch_delete import BatchDeleteService
+from ..services.cron.managed.async_batch_delete import AsyncBatchDelete
 from ..services.cron.managed.contracts import ManagedCronUnavailable
 from ..services.cron.managed.controls import ControlService
 from ..services.cron.managed.executions import (
@@ -120,6 +120,13 @@ class BatchDeleteRequest(OperationRequest):
         min_length=1,
         max_length=1000,
         description="明确选中的关联子任务及各自定义版本，空列表不代表删除全部，重复目标无效",
+    )
+
+
+class DeleteAllChildrenRequest(OperationRequest):
+    items: list[BatchDeleteChild] = Field(
+        min_length=1,
+        description="用户确认时读取的完整未删除子任务快照；不包含确认后新增项",
     )
 
 
@@ -311,14 +318,30 @@ async def apply_selected_child_actions(
     caller: CallerIdentity = Depends(caller_identity),
     management=Depends(get_management_service),
 ):
-    """仅对明确选中的关联子任务逐项删除或受理手动执行，不扩大到未选择对象。
+    """仅对明确选中的关联子任务异步删除或受理手动执行，不扩大到未选择对象。
 
     身份沿用可信网关 Header：X-User-Id、X-Source-Id 必填，tenant、Agent 和 scope 按现有约定解析。
     Header 使用源身份，Body 选择目标 tenant/Agent/job 及版本；真实操作人不变。返回逐项结果和计数，某项失败不回滚其他项，执行受理成功不等于执行完成。
     """
-    if body.action == "run":
-        await require_managed_runtime(request, caller)
+    await require_managed_runtime(request, caller)
     try:
+        if body.action == "delete":
+            items = [
+                {
+                    **item.model_dump(),
+                    "agent_id": item.agent_id or caller.agent_id,
+                }
+                for item in body.items
+            ]
+            result = await AsyncBatchDelete(
+                management.store.db,
+                management,
+            ).submit(
+                caller,
+                job_id,
+                {"request_id": body.request_id, "items": items},
+            )
+            return JSONResponse(status_code=202, content=result)
         return await ChildrenControlService(
             management.store.db,
             management,
@@ -333,7 +356,9 @@ async def apply_selected_child_actions(
 
 @router.post(
     "/{job_id}/broadcast/children/batch-delete",
-    summary="同步批量删除选中的分发子任务",
+    status_code=202,
+    summary="异步受理选中的分发子任务删除",
+    dependencies=[Depends(require_managed_runtime)],
 )
 async def batch_delete_children(
     job_id: str,
@@ -341,20 +366,103 @@ async def batch_delete_children(
     caller: CallerIdentity = Depends(caller_identity),
     management=Depends(get_management_service),
 ):
-    """使用父任务 Header 身份，逐项验证子任务关系并同步返回完整处理结果。
-
-    保留真实操作人，不把目标 tenant/Agent 当授权。整批目标及子操作身份持久保存；原 request_id 换清单或版本返回 409。
-    同源分发与本次同步删除互斥，不创建异步删除 task；部分失败和正常等待清理也返回 HTTP 200，必须检查每项 http_status、logical_delete_applied 和计数。
-    清理失败保留逻辑删除，通过返回的单任务 operation_id 人工续办；重提本接口不自动重试失败清理。
-    """
+    """持久保存原清单后返回202；后台校验关系、版本并删除，GET查询结果。"""
     try:
-        return await BatchDeleteService(
+        return await AsyncBatchDelete(
             management.store.db,
             management,
-        ).delete(
+        ).submit(
             caller,
             job_id,
             body.model_dump(),
+        )
+    except Exception as exc:
+        raise control_error(exc) from exc
+
+
+@router.post(
+    "/{job_id}/broadcast/children/delete-all",
+    status_code=202,
+    summary="异步受理确认快照内的全部子任务删除",
+    dependencies=[Depends(require_managed_runtime)],
+)
+async def delete_all_children(
+    job_id: str,
+    body: DeleteAllChildrenRequest,
+    caller: CallerIdentity = Depends(caller_identity),
+    management=Depends(get_management_service),
+):
+    """完整清单一次受理；关闭页面后仍处理，逐项授权不因全量而放宽。"""
+    try:
+        return await AsyncBatchDelete(management.store.db, management).submit(
+            caller,
+            job_id,
+            {**body.model_dump(), "all_children": True},
+        )
+    except Exception as exc:
+        raise control_error(exc) from exc
+
+
+@router.get(
+    "/{job_id}/broadcast/children/batch-delete/tasks/current",
+    summary="查询最近一次子任务异步删除进度",
+)
+async def current_children_deletion(
+    job_id: str,
+    caller: CallerIdentity = Depends(caller_identity),
+    management=Depends(get_management_service),
+):
+    """查回最近一次异步删除；没有记录时返回null，不发起删除。"""
+    try:
+        return {
+            "task": await AsyncBatchDelete(
+                management.store.db,
+                management,
+            ).current(caller, job_id),
+        }
+    except Exception as exc:
+        raise control_error(exc) from exc
+
+
+@router.get(
+    "/{job_id}/broadcast/children/batch-delete/tasks/{operation_id}",
+    summary="查询指定子任务异步删除进度",
+)
+async def children_deletion_progress(
+    job_id: str,
+    operation_id: str,
+    caller: CallerIdentity = Depends(caller_identity),
+    management=Depends(get_management_service),
+):
+    """只读返回固定清单的已确认结果和待处理数量，不发起删除或清理。"""
+    try:
+        return await AsyncBatchDelete(management.store.db, management).get(
+            caller,
+            job_id,
+            operation_id,
+        )
+    except Exception as exc:
+        raise control_error(exc) from exc
+
+
+@router.post(
+    "/{job_id}/broadcast/children/batch-delete/tasks/{operation_id}/retry",
+    status_code=202,
+    summary="人工续办原子任务异步删除清单",
+    dependencies=[Depends(require_managed_runtime)],
+)
+async def retry_children_deletion(
+    job_id: str,
+    operation_id: str,
+    caller: CallerIdentity = Depends(caller_identity),
+    management=Depends(get_management_service),
+):
+    """人工重新排队意外中断的原清单；不重试单项业务/清理失败。"""
+    try:
+        return await AsyncBatchDelete(management.store.db, management).retry(
+            caller,
+            job_id,
+            operation_id,
         )
     except Exception as exc:
         raise control_error(exc) from exc

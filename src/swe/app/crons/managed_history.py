@@ -130,7 +130,6 @@ def history_values(run, outcome, now, *, deleted=False):
     spec = json.loads(run["spec_json"])
     started = _utc(run.get("started_at") or run.get("accepted_at") or now)
     end = _utc(now)
-    read = run["kind"] == "manual" and outcome.status == "success"
     beijing = ZoneInfo("Asia/Shanghai")
     return {
         "job_id": run["job_id"],
@@ -157,10 +156,8 @@ def history_values(run, outcome, now, *, deleted=False):
         "output_preview": outcome.preview[:512],
         "meta": history_metadata(run, outcome),
         **notification_fields(run, spec, outcome, now, deleted=deleted),
-        "is_read": int(read),
-        "read_at": (
-            end.astimezone(beijing).replace(tzinfo=None) if read else None
-        ),
+        "is_read": 0,
+        "read_at": None,
         "created_at": end.astimezone(beijing).replace(tzinfo=None),
     }
 

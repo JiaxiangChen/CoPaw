@@ -304,6 +304,51 @@ export const schedulerCronApi = {
       "POST",
       { request_id: requestId, items },
     ),
+  childrenDeleteAll: (
+    context: ManagedCronContext,
+    id: string,
+    items: ManagedSelectedChild[],
+    requestId: string,
+  ) =>
+    write<ManagedBatchDeleteResult>(
+      context,
+      `${jobPath(id)}/broadcast/children/delete-all`,
+      "POST",
+      { request_id: requestId, items },
+    ),
+  currentChildrenDeletion: (context: ManagedCronContext, id: string) =>
+    call<{ task: ManagedBatchDeleteResult | null }>(
+      context,
+      `${jobPath(id)}/broadcast/children/batch-delete/tasks/current`,
+    ),
+  childrenDeletion: (
+    context: ManagedCronContext,
+    id: string,
+    operationId: string,
+  ) =>
+    call<ManagedBatchDeleteResult>(
+      context,
+      `${jobPath(
+        id,
+      )}/broadcast/children/batch-delete/tasks/${encodeURIComponent(
+        operationId,
+      )}`,
+    ),
+  retryChildrenDeletion: (
+    context: ManagedCronContext,
+    id: string,
+    operationId: string,
+  ) =>
+    write<ManagedBatchDeleteResult>(
+      context,
+      `${jobPath(
+        id,
+      )}/broadcast/children/batch-delete/tasks/${encodeURIComponent(
+        operationId,
+      )}/retry`,
+      "POST",
+      {},
+    ),
   childrenRun: (
     context: ManagedCronContext,
     id: string,

@@ -147,21 +147,142 @@ async def test_queued_execution_is_skipped_after_disable(execution_setup):
 
 
 @pytest.mark.asyncio
-async def test_manual_success_does_not_add_scheduled_unread(execution_setup):
+async def test_manual_success_updates_sidebar_and_starts_unread_once(
+    execution_setup,
+):
     from swe.app.crons.managed_execution import ManagedExecutionService
     from swe.app.crons.managed_results import ExecutionWriter
 
     db = execution_setup[0]
     row, _ = await enqueue(execution_setup, kind="manual")
-    await ManagedExecutionService(ExecutionWriter(db), Engine()).execute(
+    service = ManagedExecutionService(ExecutionWriter(db), Engine())
+    await service.execute(
         row["execution_id"],
         key(row),
     )
+    await service.execute(row["execution_id"], key(row))
     state = db.conn.execute("SELECT * FROM swe_cron_job_states").fetchone()
-    assert not state["unread_execution_count"]
+    assert state["unread_execution_count"] == 1
+    assert state["has_scheduled_result"] == 1
+    assert state["last_scheduled_run_at"]
+    assert state["last_run_at"]
+    assert state["latest_scheduled_preview"] == "report res"
     history = db.conn.execute("SELECT * FROM swe_cron_executions").fetchone()
     assert history["is_manual"] == 1
-    assert history["is_read"] == 1
+    assert history["is_read"] == 0
+    assert history["read_at"] is None
+    assert (
+        db.conn.execute("SELECT COUNT(*) FROM swe_cron_executions").fetchone()[
+            0
+        ]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_unread_accumulates_and_existing_mark_read_clears_it(
+    execution_setup,
+):
+    from scheduler.app.services.cron.managed.controls import ControlService
+    from swe.app.crons.managed_execution import ManagedExecutionService
+    from swe.app.crons.managed_results import ExecutionWriter
+
+    db, caller, management = execution_setup
+    service = ManagedExecutionService(ExecutionWriter(db), Engine())
+    first, _ = await enqueue(
+        execution_setup,
+        kind="manual",
+        trigger="manual-1",
+    )
+    await service.execute(first["execution_id"], key(first))
+    second, _ = await enqueue(
+        execution_setup,
+        kind="manual",
+        trigger="manual-2",
+    )
+    await service.execute(second["execution_id"], key(second))
+    state = db.conn.execute("SELECT * FROM swe_cron_job_states").fetchone()
+    assert state["unread_execution_count"] == 2
+    assert state["last_scheduled_run_at"]
+    result = await ControlService(db, management.platform).mark_read(
+        caller,
+        first["job_id"],
+        {"request_id": "read-manual-results"},
+    )
+    assert result["status"] == "completed"
+    assert (
+        db.conn.execute(
+            "SELECT unread_execution_count FROM swe_cron_job_states",
+        ).fetchone()[0]
+        == 0
+    )
+    histories = db.conn.execute(
+        "SELECT is_read,read_at FROM swe_cron_executions",
+    ).fetchall()
+    assert len(histories) == 2
+    assert all(
+        history["is_read"] == 1 and history["read_at"] for history in histories
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_unread_does_not_directly_trigger_automatic_pause(
+    execution_setup,
+    monkeypatch,
+):
+    from swe.app.crons import managed_results
+    from swe.app.crons.managed_execution import ManagedExecutionService
+
+    monkeypatch.setattr(
+        managed_results,
+        "resolve_cron_unread_auto_pause_config",
+        lambda _: SimpleNamespace(enabled=True, threshold=1),
+    )
+    db = execution_setup[0]
+    run, _ = await enqueue(execution_setup, kind="manual")
+    await ManagedExecutionService(
+        managed_results.ExecutionWriter(db),
+        Engine(),
+    ).execute(run["execution_id"], key(run))
+    state = db.conn.execute("SELECT * FROM swe_cron_job_states").fetchone()
+    assert state["unread_execution_count"] == 1
+    assert not state["pause_reason"]
+
+
+@pytest.mark.asyncio
+async def test_manual_success_replaces_older_automatic_result_preview(
+    execution_setup,
+):
+    from swe.app.crons.managed_execution import ManagedExecutionService
+    from swe.app.crons.managed_results import ExecutionOutcome, ExecutionWriter
+
+    db = execution_setup[0]
+    writer = ExecutionWriter(db)
+    automatic, _ = await enqueue(
+        execution_setup,
+        kind="ordinary",
+        trigger="auto-before-manual",
+    )
+    await ManagedExecutionService(writer, Engine()).execute(
+        automatic["execution_id"],
+        key(automatic),
+    )
+    manual, _ = await enqueue(
+        execution_setup,
+        kind="manual",
+        trigger="manual-after-auto",
+    )
+    await writer.accept(manual["execution_id"], key(manual))
+    await writer.start(manual["execution_id"], key(manual), "manual-owner")
+    await writer.complete(
+        manual["execution_id"],
+        key(manual),
+        "manual-owner",
+        ExecutionOutcome("success", preview="manual now"),
+    )
+    state = db.conn.execute("SELECT * FROM swe_cron_job_states").fetchone()
+    assert state["latest_scheduled_preview"] == "manual now"
+    assert state["unread_execution_count"] == 2
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from .callback_contract import (
     PROTOCOL,
@@ -13,7 +13,7 @@ from .callback_contract import (
     trigger_times,
 )
 from .contracts import ManagedCronNotFound
-from .definition import canonical, request_hash
+from .definition import canonical
 from .dispatch_state_store import CONTROLS
 from .distribution import _children
 from .executions import ExecutionConflict, ExecutionRequest, ExecutionStore
@@ -26,6 +26,13 @@ from .batch_members import record_batch_members
 
 RECEIPTS = "swe_cron_managed_trigger_receipts"
 logger = logging.getLogger(__name__)
+
+
+def _allows_empty_batch(targets, kind):
+    """仍有批模式对象但暂时无人可执行时，保留既有零成员看板回执。"""
+    return kind == "batch" and any(
+        row["state_dispatch_state"] == "batch_enabled" for row in targets
+    )
 
 
 class TriggerGrant:
@@ -70,44 +77,16 @@ class ManagedSchedulingService:
             include_deleted=True,
         )
         binding = await binding_context(self.db, root, body, kind)
-        identifier = trigger_id(body)
-        callback_key = (
-            request_hash([key, kind, binding["external_id"], identifier])
-            if identifier
-            else None
-        )
-        if callback_key:
-            previous = await self.db.fetch_one(
-                f"SELECT * FROM {RECEIPTS} WHERE callback_key=%s",
-                (callback_key,),
-            )
-            if previous:
-                return {
-                    **json.loads(previous["response_json"]),
-                    "reused": True,
-                }
+        # 平台没有每次触发的标识，且约定每次请求都是新触发。
+        receipt_id = str(uuid4())
+        identifier = trigger_id(body) or receipt_id
         now = self.clock().astimezone(timezone.utc)
         logical, physical = trigger_times(body, binding, now)
-        receipt_id = str(
-            uuid5(
-                NAMESPACE_URL,
-                canonical([PROTOCOL, key, kind, logical.isoformat()]),
-            ),
-        )
         async with transaction(self.db) as tx:
             await tx.fetch_one(
                 f"SELECT job_id FROM swe_cron_jobs_v2 WHERE {WHERE_JOB} FOR UPDATE",
                 key,
             )
-            previous = await tx.fetch_one(
-                f"SELECT * FROM {RECEIPTS} WHERE receipt_id=%s OR callback_key=%s",
-                (receipt_id, callback_key),
-            )
-            if previous:
-                return {
-                    **json.loads(previous["response_json"]),
-                    "reused": True,
-                }
             root = await ManagedCronRepository(tx)._get_row(
                 key,
                 include_deleted=True,
@@ -128,7 +107,7 @@ class ManagedSchedulingService:
                 RECEIPTS,
                 {
                     "receipt_id": receipt_id,
-                    "callback_key": callback_key,
+                    "callback_key": None,
                     **dict(zip(IDENTITY_FIELDS, key)),
                     "external_job_id": binding["external_id"],
                     "operation_id": binding["operation_id"],
@@ -199,7 +178,7 @@ class ManagedSchedulingService:
                 for row in children
             ]
         selected = [row for row in targets if self._eligible(row, kind)]
-        if kind == "ordinary" and not selected:
+        if not selected and not _allows_empty_batch(targets, kind):
             return {
                 "job_id": root["job_id"],
                 "accepted": False,
@@ -313,7 +292,7 @@ class ManagedSchedulingService:
             }
             command = ExecutionRequest(
                 kind,
-                logical.isoformat(),
+                receipt_id,
                 logical,
                 dispatch_meta=metadata,
                 not_before_at=due,

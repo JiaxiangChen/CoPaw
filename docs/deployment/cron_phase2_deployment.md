@@ -2,7 +2,11 @@
 
 本材料针对当前本地第二阶段代码，不表示已经部署或真实联调通过。三服务共用数据库；新任务不写 jobs.json 或旧 `_states`，存量接口和存量平台入口不切换。智拓实际接入属于第三阶段。
 
+2026-10-19 更新：新版平台回调按实际固定 Body 适配，不要求 Header、平台 jobId、执行流水号或触发时间。用户明确每次回调都是新触发，不做流水号、计划期或普通/批跨入口去重；同一次已入队执行的派发重试和结果落库仍按原 execution_id 保持幂等。只更新 Scheduler 即可生效，本次不新增表、列或配置。
+
 ## 文件与执行顺序
+
+2026-10-19 异步子任务删除：本轮只更新Scheduler和Console，不新增表/字段或环境配置，复用swe_cron_registration_journal。先部署Scheduler及其后台，再部署Console；前后端需要匹配，不能把旧前端的HTTP200同步完成判断用于新202响应。SWE无需因本轮异步删除单独更新；改造前行内包不包含本轮异步删除。
 
 1. 数据库负责人先在实际共库执行只读的 [结构核对 SQL](cron_phase2_schema_audit.sql)，保存数据库版本、缺列、列类型/精度、索引和引擎结果。
 2. 缺整表时选择执行 [完整建表 SQL](cron_phase2_manual_create.sql) 中相应语句，每列与每表都有中文 COMMENT。它覆盖两张第一阶段基础表和七张新协议表，不是“再建九张不同的表”。已有表不会被 CREATE IF NOT EXISTS 自动升级。
@@ -19,12 +23,12 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 | swe_cron_jobs_v2 | 任务定义；Scheduler 写新任务，第一阶段导入仍是 legacy，不自动接管。 |
 | swe_cron_job_states | 共用管理/运行状态；Scheduler 写管理控制，SWE 写受理运行结果，分字段更新。 |
 | swe_cron_registration_journal | CRUD、启停、三态等持久操作与平台步骤；Scheduler 写，失败可查原操作。 |
-| swe_cron_execution_runs | 每次执行快照、去重、租约及主结果；Scheduler 登记/派发/settled 收敛，SWE 写真实运行结果。 |
+| swe_cron_execution_runs | 每次执行快照、同一执行恢复幂等、租约及主结果；每次平台请求建立独立执行。Scheduler 登记/派发/settled 收敛，SWE 写真实运行结果。 |
 | swe_cron_managed_broadcast_tasks | 每轮异步分发、源快照与批入口同步计划；Scheduler 写。 |
 | swe_cron_managed_broadcast_items | 固定接收人、子任务身份、散列和逐项结果；Scheduler 写。 |
 | swe_cron_managed_dispatch_controls | 整组调度目标及配置版本；不代表每个对象都已切换成功。 |
 | swe_cron_managed_mode_items | 三态逐对象同步进度，保留成功/失败，支持混合状态。 |
-| swe_cron_managed_trigger_receipts | 实际收到的平台触发及固定成员/跳过回执，重放不补生工作。 |
+| swe_cron_managed_trigger_receipts | 每次平台请求独立保存触发事实和成员/跳过回执；不复用旧回执，callback_key 保留兼容旧列且新写入为空。 |
 
 七张既有依赖表不是本次新建：swe_cron_jobs、swe_cron_executions、swe_cron_dispatch_scope_leases、swe_cron_dispatch_worker_capacity、swe_cron_dispatch_intents、swe_cron_dispatch_model_worker_policy、swe_cron_dispatch_worker_strategy。具体必需列由结构核对 SQL 列全。
 
@@ -37,7 +41,7 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 - 网关把 `/api/scheduler/cron/jobs` 与新版 `/api/scheduler/cron/ordinary/callback`、`/batch/callback` 转发 Scheduler；旧入口仍指向原服务。Console 新页为 `/scheduler-cron-jobs`，原页 `/cron-jobs` 不变。
 - `SCHEDULER_SWE_API_BASE_URL` 为 Scheduler 可达的 SWE/网关根地址；`SWE_SERVER_DOMAIN` 为平台可达且能路由新版回调的根地址。使用现有 `SWE_CRON_SCHEDULER_*` 平台配置，不新加必配内部 Token。连接参数不全时不能创建真实启用定时器验收。
 - 沿用可信网关身份：X-User-Id 为真实操作者，X-Tenant-Id/X-Source-Id/X-Agent-Id 为目标任务。角色由网关核验，不手工伪造 manager/admin。三服务共库不代表工作区/会话/产物共盘，必须验证同一身份路由到可访问实际资源的 SWE 实例。
-- 外部平台须实证稳定触发日志 ID 或明确计划时间、实际平台 jobId、jobParam 透传和 Header/身份路由。平台未确认时区字段，本地 payload 沿用既有协议；本轮至少验证 Asia/Shanghai，不能据此承诺任意时区的平台触发正确。
+- 外部平台已确认只传注册参数解码后的固定 Body、不传 Header。新版回调也保留 jobParam 编码封装兼容。平台注册引用、完整任务身份及 scope 须匹配共库记录；平台入口沿用可信内网边界，数据库引用核验本身不是来源认证。平台未确认时区字段，注册 payload 沿用既有协议；本轮至少验证 Asia/Shanghai，不能据此承诺任意时区的平台触发正确。
 - 2026-10-17用户确认平台没有注册查询接口：无已保存平台ID按注册失败处理，错误码platform_registration_failed，原操作人工retry再次新增；已有ID只续办后续步骤。可能留下重复/孤立定时器，删除只能关闭已知ID，验收时须知晓此风险，不再等待平台查回协议。
 
 ## Postman 准备
@@ -63,27 +67,56 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 2. GET `/{job_id}/broadcast/tasks/current` 找最近一轮，再 GET `/{job_id}/broadcast/tasks/{task_id}` 查询进度和全部结果游标。终态后查询 children，确认真实接收人身份、固定子 ID/资源、实际散列；存在未删除子任务时源正文修改应冲突。
 3. 再发同样接收人且使用新请求号，子任务正常复用 ID/资源；真正失败在新一轮处理。用 targets=[] 验证只调整全部未删除既有子任务排程，包括停用任务，不改正文/模型/启停，不重新准备资源。
 4. PUT `/{job_id}/dispatch-state` 设 batch_enabled，用 GET 返回的 version；查询目标、生效方式、逐项计数。切换中不得换目标，失败可对原 operation retry，不能把 sync_status=failed 当作全组不能触发。
-5. 在可控预发布故障中令一个对象平台操作失败，验证 effective_state=mixed：已生效批对象走新批入口，未切换普通对象仍走普通入口，同逻辑期不重复执行。失败提示保留，修复平台后人工 retry。
+5. 在可控预发布故障中令一个对象平台操作失败，验证 effective_state=mixed：已生效批对象走新批入口，未切换普通对象仍走普通入口。每次到达的新回调独立受理，不再以同逻辑期合并普通/批执行。失败提示保留，修复平台后人工 retry。
 6. 切 batch_paused，只阻止新增批触发，已入队和执行中的工作继续；切 ordinary 先逐对象启用普通绑定，全部完成才关闭组批入口。普通新入口只用于新任务，不修改存量平台指向。
 
 ## 第三轮：实际执行和结果
 
-先在人工确认的新平台绑定上触发，不能拿旧任务平台 ID 或随造 operation_id 试验。推荐由平台实际到时回调验证；必要时平台负责人提供该绑定的真实 jobParam、jobId 和计划时间后用 Postman 重放。
+先在人工确认的新平台绑定上触发，不能使用旧任务或随造 operation_id。推荐由平台实际回调验证；Postman 只对专用测试任务操作，每点一次发送都会新增执行或批次，不要用 Runner 自动重试生产回调。
 
-新版 callback Body 可以使用平台 jobParam 封装，也可以显式传 job_id、external_job_id、operation_id、callback_protocol=scheduler_managed_v1、trigger_id、scheduled_fire_at。scheduled_fire_at 是原排程逻辑期；fire_time/trigger_time 是实际平台排程时间，散列/批提前时二者不同。必须在真实时间窗口内测试，不把当前时间随意当计划时间。
+两个入口分别为 POST `/api/scheduler/cron/ordinary/callback` 和 POST `/api/scheduler/cron/batch/callback`。不需要身份 Header，Body 使用平台的固定格式，替换为真实测试任务及其当前有效注册操作：
 
-1. 一次普通/批实际触发返回 202，保存返回的 execution_id 或批成员引用。重复相同平台日志/逻辑期，复用回执和执行身份，不追加执行。批入口各条按冻结 not_before_at 等待自己的时间。
+```json
+{
+  "tenant_id": "80280256",
+  "source_id": "RMASSIST",
+  "agent_id": "default",
+  "job_id": "<测试任务ID>",
+  "task_type": "job",
+  "scopeId": "ODAyODAyNTY.Uk1BU1NJU1Q",
+  "fromId": "80280256",
+  "callback_protocol": "scheduler_managed_v1",
+  "operation_id": "<当前有效注册操作ID>"
+}
+```
+
+Header 若存在，不允许与 Body 的租户、来源或 Agent 冲突；管理角色不从 Body 读取。缺 external_job_id/jobId 时读取共库当前普通或批入口绑定，仍检查其存在及注册操作引用。缺触发时间时，以接收时间为物理触发时间，加已保存提前量形成逻辑时间，保留散列成员等待，不反推 cron 或虚构平台计划时间。可选明确时间仍按原排程规则校验；即使同一流水号或时间重复提交，也不会合并成旧执行。
+
+1. 一次普通/批触发返回 202，检查 accepted=true，保存 execution_id 或 batch_id。对同一测试 Body 再发送一次，两个 ID 应不同，reused=false，分别新增回执及执行/成员。批入口各条按冻结 not_before_at 等待自己的时间。202 且 accepted=false/status=skipped 表示实际门禁阻止执行，须查看 reason，不是执行已开始。
 2. 单任务 POST `/{job_id}/run` 另用手动请求号，GET `/{job_id}/executions/{execution_id}` 观察 queued→accepted→running→终态；停用/运行中的任务拒绝新手动请求。手动执行与自动逻辑期独立。
 3. SWE 直接写共库状态和历史，不等待最终回传 Scheduler。HTTP 成功不等于业务成功，HTTP 超时也不证明未受理；按相同执行 ID 查询，不重新生成执行。
 4. 主 status=success、settled_status=null 时继续等待已有异步子任务；最终 settled_status=success/error 反映整轮，不覆盖 SWE 主状态。不因异步未确认提前释放模型池或删除运行资源。
-5. 自动结果未读增加；打开新任务 Chat/报告按新接口标读。已读不恢复；恢复仅清已有边界，之后完成结果仍未读。新旧任务 Chat 列表旧在前、新在后，动作不串源。
+5. 自动或手动成功结果未读增加；打开新任务 Chat/报告按新接口标读。新任务侧栏展示最新实际运行时间和状态，已有手动运行记录不提示尚未启动。已读不恢复，历史手动已读记录不重置；手动结果不直接触发自动未读暂停。恢复仅清已有边界，之后完成结果仍未读。新旧任务 Chat 列表旧在前、新在后，动作不串源。
 6. 重启验证只恢复已受理工作与结果提交，不重跑已发生业务，不补造漏收到的平台周期。失败、超时、取消和结果不明分别保留安全错误码。
 
 ## 第四轮：删除、新旧隔离和异常
 
+### 异步选中/全部删除的 Postman 验证
+
+所有请求沿用源任务的X-User-Id/X-Tenant-Id/X-Source-Id/X-Agent-Id Header。只使用预发布测试父任务和子任务，以下操作会真实删除指定任务。
+
+1. 查询全部游标页子任务，固定job_id、tenant_id、agent_id和expected_definition_version；保存确认时的未删除快照。选中删除用 `POST /api/scheduler/cron/jobs/{parent}/broadcast/children/batch-delete`（最多1000项），全部快照用同目录 `POST /delete-all`（可超过1000项）；Body为 `{"request_id":"delete-uat-001","items":[{"job_id":"child-id","tenant_id":"receiver","agent_id":"default","expected_definition_version":1}]}`。期望202和operation_id，不把受理当作完成。
+2. 用返回的整批operation_id查询 `GET /api/scheduler/cron/jobs/{parent}/broadcast/children/batch-delete/tasks/{operation_id}`，观察operation_status为pending/running到completed，并检查逐项结果。`GET .../tasks/current`应查回相同操作；没有历史返回 `{"task":null}`。GET不触发删除、平台注册/停用或SWE清理。
+3. 相同request_id及Body再次提交，应复用operation_id；修改清单、模式或版本使用同一个request_id应冲突。整批业务结束仍可能有pending清理项或failed项，检查logical_delete_applied及计数，不仅看operation_status。子任务版本冲突或不属于父任务时仅该项失败，不扩大删除范围。
+4. Console点击“删除全部子任务”确认后关闭弹窗，再次打开能查回进度；全量提交不受筛选或分页影响，确认后新增任务不在本次快照。后台处理中禁止重复提交；结束时可结束本次操作。取消确认不发送POST。
+5. 测试在途执行：已开始的继续完成；逻辑删除可先成立，整批处理完后pending_count仍可大于0；原后台清理完成后GET应看到最终完成。单项平台/SWE清理失败须在该子任务操作进度里人工retry，重复GET不应增加外部调用。
+6. 测试实例重启/请求断开：已受理清单在租约到期后恢复，成功项不重复清理。整批意外失败时保留安全error_code，用 `POST .../tasks/{operation_id}/retry` 重新排队原清单，或原Body原request_id重提；不自动重试单项业务失败。后台未就绪不受理，返回503。
+
+部署后由预发布验收人观察至少一次完整删除及一次重开页面过程，按operation_id检索“开始处理子任务删除清单”“批量删除处理结束”和“新链路恢复巡检暂未完成 lane=_deletions/deletions”。健康信号为数量推进、同ID重提无重复清理；持续无进度超过外部超时和120秒租约窗口、不断失败或结果缺失时，停止新增删除，保留已受理记录排查。回退前先停新增入口并确认待处理清单，不能认为回退会撤销已经逻辑删除的任务。
+
 - DELETE 新任务先逻辑删除，含删除查询仍能看到记录及原清理操作；未开始工作跳过，在途继续，整轮结束才清资源。源删除不自动删除其全部子任务；批量删除显式选择并逐项检查结果。
 - 用源管理者真实 Header 管理关联子任务，只改变目标 workspace，不把操作人换成接收人；接收人不能枚举或删除其他接收人的任务。
-- 更新期间平台已引用新操作但管理日志未完成：本次合法触发应持久 skipped，更新完成后重放不补跑。分发批入口更新响应丢失时，持久计划和已知绑定可继续有效触发，查询仍提示同步失败。
+- 更新期间平台已引用新操作但管理日志未完成：本次合法触发应持久 skipped，原跳过记录不补跑；更新完成后新的回调请求独立判断、可正常受理。分发批入口更新响应丢失时，持久计划和已知绑定可继续有效触发，查询仍提示同步失败。
 - 新接口 400/404/409/503 不回退旧写接口；模拟单来源列表失败，另一来源可更新，失败来源已知任务不被当删除。旧 SWE CRUD、旧批入口、原任务页面各做一条正向回归。
 - 验证新任务没有 jobs.json/旧 _states 条目仍可查询、执行和标读。会话/报告文件仍可正常产生，这是执行产物，不等于重新启用任务文件存储。
 
@@ -93,9 +126,9 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 
 日志按 job_id、operation_id、task_id、receipt_id、execution_id 关联，检查“新版定时后台已启动”“平台触发已持久处理”“新定时任务结果提交结束”“整轮”相关安全日志。不要要求打印凭据、任务正文或原始敏感异常。
 
-健康信号：重放不重复；accepted 有持久记录；三态失败计数可查且有效对象仍触发；模型池不超限，已结束整轮释放占位；无新版记录被旧处理器领取。异常信号：后台异常退出、持续 dispatch_failed、主成功长期不收敛、错误关联历史、清理长期等待或跨身份资源不一致。
+健康信号：每次有效平台回调有独立持久回执及执行，重试同一已入队 execution_id 不重新运行业务；三态失败计数可查且有效对象仍触发；模型池不超限，已结束整轮释放占位；无新版记录被旧处理器领取。异常信号：后台异常退出、持续 dispatch_failed、主成功长期不收敛、错误关联历史、清理长期等待或跨身份资源不一致。
 
-出现重复执行、越权、错误绑定、丢结果或共库事务错误，应停止扩大范围，暂停确认的新批入口并停用相关新普通任务，保留全部表和操作记录。不要清表、删日志或用旧接口接管新任务；不能直接回滚到不识别新执行协议的版本而期望其处理已有新队列。先让在途结果和待清理事实收敛，再由负责人确定应用版本回退与恢复步骤，旧任务入口保持原样。
+出现同一 execution_id 重复运行业务、越权、错误绑定、丢结果或共库事务错误，应停止扩大范围，暂停确认的新批入口并停用相关新普通任务，保留全部表和操作记录。不同平台请求产生不同执行是本轮明确行为，不按错误重复执行处理。不要清表、删日志或用旧接口接管新任务；不能直接回滚到不识别新执行协议的版本而期望其处理已有新队列。先让在途结果和待清理事实收敛，再由负责人确定应用版本回退与恢复步骤，旧任务入口保持原样。
 
 当前未完成目标业务MySQL、网关、外部平台及多实例资源路由验收。已另用独立本地MySQL 8.1执行结构及事务检查，详见[本地MySQL记录](cron_phase2_mysql_local_verification.md)；这不替代目标版本及存量数据核对。注册查回协议不再是前置条件，改按用户确认的失败/人工重试规则，但重复定时器风险仍需明确。
 
@@ -105,4 +138,4 @@ SQL 为人工交付文件，应用不会读取执行。执行前由数据库负�
 
 真实 MySQL 测试为 `tests/integrated/scheduler/test_managed_cron_mysql.py`。仅在显式提供 `CRON_MANAGED_TEST_MYSQL_JSON`，且 database 符合 `test_cron_managed_...` 隔离库名时连接；不读取应用默认连接、不执行DDL。测试写入随机命名空间并只清理该命名空间，覆盖两表事务回滚、并发请求幂等与跨SWE/Scheduler连接的受理和结果单次写入。需先人工准备完整测试表及既有依赖；不要使用生产或预发布业务库运行该自动化测试。此变量只用于开发测试，不是应用新增配置。
 
-本轮在独立本地MySQL 8.1上显式配置后，10项检查均通过，含6项实际数据库场景；无配置运行仍会跳过这6项，不应计为数据库通过。行内仍以本文Postman流程为验收入口，不要求调用方运行Python；测试代码为开发侧提供可复现的验证方式。
+历史版本在独立本地MySQL 8.1上显式配置后，10项检查均通过，含6项实际数据库场景；这不是 2026-10-19 新回调语义的 MySQL 实测证明。无配置运行仍会跳过这6项，不应计为数据库通过。行内仍以本文Postman流程为验收入口，不要求调用方运行Python；测试代码为开发侧提供可复现的验证方式。

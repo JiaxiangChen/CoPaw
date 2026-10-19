@@ -64,12 +64,13 @@ async def test_callback_http_supports_existing_jobparam_and_full_header_identity
                 },
             ).encode(),
         ).decode()
-        duplicate = await client.post(
+        another = await client.post(
             "/api/scheduler/cron/ordinary/callback",
             json={"jobParam": encoded},
         )
-        assert duplicate.status_code == 202
-        assert duplicate.json()["reused"]
+        assert another.status_code == 202
+        assert another.json()["accepted"] and not another.json()["reused"]
+        assert another.json()["execution_id"] != first.json()["execution_id"]
         wrong = await client.post(
             "/api/scheduler/cron/ordinary/callback",
             json={"jobParam": encoded},
@@ -80,5 +81,5 @@ async def test_callback_http_supports_existing_jobparam_and_full_header_identity
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 1
+        == 2
     )

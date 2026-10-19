@@ -346,20 +346,28 @@ class ExecutionWriter:
         state = await self._state(key)
         latest = await self.db.fetch_one(
             f"SELECT execution_id FROM {TABLE} WHERE {WHERE} "
-            "AND status='success' AND kind<>'manual' "
+            "AND status='success' "
             "ORDER BY started_order DESC, execution_id DESC LIMIT 1",
             key,
         )
         values = await self._runtime_values(key, outcome)
-        if outcome.status == "success" and run["kind"] != "manual":
-            values.update(self._success_values(state, outcome, now, enabled))
+        if outcome.status == "success":
+            # 手动也产生展示和未读，但不直接触发自动未读暂停。
+            values.update(
+                self._success_values(
+                    state,
+                    outcome,
+                    now,
+                    enabled and run["kind"] != "manual",
+                ),
+            )
             if latest and latest["execution_id"] != run["execution_id"]:
                 values.pop("latest_scheduled_preview", None)
                 values.pop("last_scheduled_run_at", None)
         await self._write_state(key, state, values)
 
     @staticmethod
-    def _success_values(state, outcome, now, enabled):
+    def _success_values(state, outcome, now, allow_auto_pause):
         unread = int(state.get("unread_execution_count") or 0) + 1
         values = {
             "has_scheduled_result": 1,
@@ -373,7 +381,7 @@ class ExecutionWriter:
         if (
             config.enabled
             and unread >= config.threshold
-            and enabled
+            and allow_auto_pause
             and not state.get("pause_reason")
         ):
             values.update(

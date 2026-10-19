@@ -1,4 +1,4 @@
-import { Tooltip } from "antd";
+import { Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Button, Dropdown, Modal } from "@agentscope-ai/design";
 import { MoreOutlined } from "@ant-design/icons";
@@ -10,7 +10,7 @@ import {
   createColumns,
   isBroadcastChildJob,
 } from "../CronJobs/components/columns";
-import { MODE_LABELS, scheduleLabel } from "./helpers";
+import { isBatchDispatchMode, MODE_LABELS, scheduleLabel } from "./helpers";
 import styles from "../CronJobs/index.module.less";
 
 export interface ManagedJobPanel {
@@ -67,10 +67,13 @@ export function createManagedColumns({
       column.key === "cron"
         ? {
             ...column,
-            render: (cron: string) => (
+            render: (cron: string, job: ManagedJob) => (
               <Tooltip title={`Cron 表达式：${cron}`}>
                 <span className={styles.cronText}>
-                  {scheduleLabel(cron, t)}
+                  {isBatchDispatchMode(job.dispatch_state) && (
+                    <Tag color="processing">批调度</Tag>
+                  )}
+                  <span>{scheduleLabel(cron, t)}</span>
                 </span>
               </Tooltip>
             ),

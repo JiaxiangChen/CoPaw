@@ -4,6 +4,7 @@
 import json
 import logging
 
+from .diagnostics import format_management_error
 from .operations import (
     LeaseLost,
     ManagementConflict,
@@ -89,11 +90,21 @@ class ManagementService:
                 status="failed",
                 error="platform_registration_failed",
             )
-        except Exception:
+        except Exception as exc:
             code = (
                 "swe_prepare_failed"
                 if operation["stage"] == "prepare"
                 else "cron_management_step_failed"
+            )
+            logger.error(
+                "定时任务管理失败 operation_id=%s job_id=%s stage=%s "
+                "error_code=%s error_type=%s\n%s",
+                operation_id,
+                job_id,
+                operation["stage"],
+                code,
+                type(exc).__name__,
+                format_management_error(exc),
             )
             await self.store.checkpoint(
                 operation,

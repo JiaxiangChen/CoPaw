@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""验证新回调只受理已绑定触发，冻结批次成员并跨入口去重。"""
+"""验证新回调每次独立受理、冻结成员并保留绑定和运行状态检查。"""
 
 import json
 import re
@@ -103,7 +103,7 @@ def body(db, created, *, kind="ordinary", trigger="platform-log-1"):
 
 
 @pytest.mark.asyncio
-async def test_normal_callback_is_durable_and_repeated_log_does_not_roll_to_next_period(
+async def test_normal_callback_is_independent_but_explicit_stale_time_is_rejected(
     callback_setup,
 ):
     from scheduler.app.services.cron.managed.scheduling import (
@@ -116,16 +116,20 @@ async def test_normal_callback_is_durable_and_repeated_log_does_not_roll_to_next
     service = ManagedSchedulingService(db, clock=lambda: now)
     command = body(db, created)
     first = await service.accept(caller, command, "ordinary")
-    now += timedelta(days=1)
     again = await service.accept(caller, command, "ordinary")
     assert first["accepted"]
-    assert again["reused"]
-    assert first["execution_id"] == again["execution_id"]
+    assert again["accepted"] and not again["reused"]
+    assert first["execution_id"] != again["execution_id"]
+    now += timedelta(days=1)
+    stale = await service.accept(caller, command, "ordinary")
+    assert stale["status"] == "skipped"
+    assert stale["reason"] == "trigger_outside_window"
+    assert not stale["reused"]
     assert (
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 1
+        == 2
     )
 
 
@@ -171,8 +175,15 @@ async def test_batch_freezes_members_and_preserves_pause_semantics(
         "UPDATE swe_cron_job_states SET dispatch_state='batch_paused'",
     )
     replay = await service.accept(caller, command, "batch")
-    assert replay["batch_id"] == result["batch_id"]
-    assert replay["reused"]
+    assert replay["status"] == "skipped"
+    assert replay["reason"] == "batch_paused"
+    assert not replay["reused"]
+    assert (
+        db.conn.execute(
+            "SELECT COUNT(*) FROM swe_cron_execution_runs",
+        ).fetchone()[0]
+        == 3
+    )
     assert all(
         json.loads(row[0])["protocol"] == "scheduler_managed_v1"
         for row in db.conn.execute(
@@ -182,7 +193,7 @@ async def test_batch_freezes_members_and_preserves_pause_semantics(
 
 
 @pytest.mark.asyncio
-async def test_wrong_binding_and_missing_stable_identity_do_not_create_work(
+async def test_wrong_binding_is_rejected_but_stable_trigger_identity_is_optional(
     callback_setup,
 ):
     from scheduler.app.services.cron.managed.scheduling import (
@@ -204,19 +215,19 @@ async def test_wrong_binding_and_missing_stable_identity_do_not_create_work(
         )
     command.pop("trigger_id")
     command.pop("scheduled_fire_at")
-    with pytest.raises(ValueError, match="identity"):
-        await service.accept(caller, command, "ordinary")
+    result = await service.accept(caller, command, "ordinary")
+    assert result["accepted"] and not result["reused"]
     assert (
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 0
+        == 1
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform_response_lost", [False, True])
-async def test_bound_trigger_during_update_is_skipped_and_never_replayed_as_new_work(
+async def test_update_time_trigger_is_skipped_but_new_arrival_after_publish_is_accepted(
     callback_setup,
     platform_response_lost,
 ):
@@ -280,13 +291,14 @@ async def test_bound_trigger_during_update_is_skipped_and_never_replayed_as_new_
         )
     assert updated["status"] == "completed"
     replay = await scheduling.accept(caller, command, "ordinary")
-    assert replay["reused"]
-    assert replay["status"] == "skipped"
+    assert not replay["reused"]
+    assert replay["accepted"]
+    assert received[0]["status"] == "skipped"
     assert (
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 0
+        == 1
     )
 
 
@@ -414,13 +426,14 @@ async def test_partial_mode_failure_accepts_effective_batch_and_keeps_ordinary_f
     management.platform.fail_target = None
     await modes.retry(caller, created["job_id"], accepted["operation_id"])
     again = await batch_service.accept(caller, batch, "batch")
-    assert again["reused"]
-    assert again["enqueued_intents"] == 2
+    assert not again["reused"]
+    assert again["batch_id"] != first["batch_id"]
+    assert again["enqueued_intents"] == 3
     assert (
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 3
+        == 6
     )
 
 
@@ -472,7 +485,8 @@ async def test_broadcast_timer_update_accepts_known_binding_before_sync_finishes
         "failed" if response_lost else "completed"
     )
     replay = await scheduling.accept(caller, command, "batch")
-    assert replay["reused"]
+    assert not replay["reused"]
+    assert replay["batch_id"] != observed[0]["batch_id"]
     assert replay["enqueued_intents"] == 3
     if response_lost:
         now += timedelta(days=1)
@@ -488,11 +502,11 @@ async def test_broadcast_timer_update_accepts_known_binding_before_sync_finishes
         assert later["accepted"]
     assert db.conn.execute(
         "SELECT COUNT(*) FROM swe_cron_execution_runs",
-    ).fetchone()[0] == (6 if response_lost else 3)
+    ).fetchone()[0] == (9 if response_lost else 6)
 
 
 @pytest.mark.asyncio
-async def test_pending_ordinary_mode_tick_is_skipped_and_not_replayed_after_publish(
+async def test_pending_mode_tick_is_skipped_and_later_arrivals_are_independent(
     callback_setup,
 ):
     from dataclasses import replace
@@ -586,22 +600,21 @@ async def test_pending_ordinary_mode_tick_is_skipped_and_not_replayed_after_publ
     assert len(observed) == 1
     assert observed[0]["status"] == "skipped"
     assert observed[0]["reason"] == "job_not_eligible"
-    assert (await scheduling.accept(receiver, command, "ordinary"))[
-        "status"
-    ] == "skipped"
+    later = await scheduling.accept(receiver, command, "ordinary")
+    assert later["accepted"] and not later["reused"]
     fresh = await scheduling.accept(
         receiver,
         {**command, "trigger_id": "after-mode-publish"},
         "ordinary",
     )
-    # 同一计划期的首次跳过已持久化，换日志 ID 也不补生这期执行。
-    assert fresh["reused"]
-    assert fresh["status"] == "skipped"
+    # 不补跑已跳过的旧执行；当前这两次请求各自创建新执行。
+    assert fresh["accepted"] and not fresh["reused"]
+    assert fresh["execution_id"] != later["execution_id"]
     assert (
         db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs",
         ).fetchone()[0]
-        == 0
+        == 2
     )
 
 

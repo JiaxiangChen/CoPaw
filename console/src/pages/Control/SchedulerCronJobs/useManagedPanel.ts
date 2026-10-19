@@ -11,6 +11,13 @@ export function useManagedPanel<T>(
   const [loading, setLoading] = useState(true);
   const alive = useRef(false);
   const serial = useRef(0);
+  /** 写请求已确认的新视图作废此前在途查询，避免迟到空结果覆盖受理进度。 */
+  const replaceValue = useCallback((next: T) => {
+    ++serial.current;
+    setValue(next);
+    setError(null);
+    setLoading(false);
+  }, []);
   const reload = useCallback(async () => {
     const current = ++serial.current;
     setLoading(true);
@@ -39,5 +46,14 @@ export function useManagedPanel<T>(
     const timer = window.setTimeout(() => void reload(), 3000);
     return () => window.clearTimeout(timer);
   }, [value, loading, error, pending, reload]);
-  return { value, setValue, error, setError, loading, reload, alive };
+  return {
+    value,
+    setValue,
+    replaceValue,
+    error,
+    setError,
+    loading,
+    reload,
+    alive,
+  };
 }

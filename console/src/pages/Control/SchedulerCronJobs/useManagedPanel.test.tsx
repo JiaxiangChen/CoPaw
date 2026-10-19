@@ -3,6 +3,19 @@ import { expect, it, vi } from "vitest";
 import { useManagedPanel } from "./useManagedPanel";
 const idle = () => false;
 
+it("异步受理结果替换视图后，先前查询迟到不能覆盖已受理操作", async () => {
+  let resolve!: (value: string) => void;
+  const load = () =>
+    new Promise<string>((done) => {
+      resolve = done;
+    });
+  const { result } = renderHook(() => useManagedPanel(load, idle));
+  act(() => result.current.replaceValue("accepted-operation"));
+  await act(async () => resolve("old-empty-query"));
+  expect(result.current.value).toBe("accepted-operation");
+  expect(result.current.loading).toBe(false);
+});
+
 it("新查询已返回后，旧查询迟到不能覆盖弹窗进度", async () => {
   let resolve!: (value: string) => void;
   const oldLoad = () =>

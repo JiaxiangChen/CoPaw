@@ -18,7 +18,7 @@
 | 6 | 修改调度模式 | Scheduler | PUT /api/scheduler/cron/jobs/{job_id}/dispatch-state | 接口、逐对象处理器及后台装配已实现，待部署联调 |
 | 7 | 查看分发子任务列表 | Scheduler | GET /api/scheduler/cron/jobs/{job_id}/broadcast/children | 已实现本地查询 |
 | 8 | 按 skill_id 查询 Workflow 绑定 | SWE | GET /api/cron/workflow-bindings/{skill_id} | 存量接口，保留原实现 |
-| 9 | 批量删除分发子任务（同步） | Scheduler | POST /api/scheduler/cron/jobs/{job_id}/broadcast/children/batch-delete | 已实现本地接口及恢复、幂等测试 |
+| 9 | 批量删除分发子任务（异步） | Scheduler | POST /api/scheduler/cron/jobs/{job_id}/broadcast/children/batch-delete | 202受理，后台处理，支持查询和恢复 |
 
 第 5、6 项及其配套查询已注册到本地代码，后台处理器也已实现；后台已接入正常应用生命周期，但仍须全部必需表列、既有连接地址和平台配置就绪，提交受理不等于部署环境已经验收。“本地已实现”不代表预发布已部署。新版普通/批回调已开发，实际平台和数据库联调尚未完成，现在不要创建启用中的真实定时器做完整执行验收。
 
@@ -28,7 +28,7 @@
 
 ### 2.1 身份 Header
 
-身份放在 Header，不在 Body 或 Query 中另传 scope_id、agent_id 来替代身份。
+本文件的智拓及前端管理接口身份放在 Header，不在 Body 或 Query 中另传 scope_id、agent_id 来替代身份。平台专用 ordinary/batch callback 是例外：2026-10-19 已确认平台仅发送固定 Body，不提供 Header；其兼容及每请求独立执行语义见[部署与回调验证](../deployment/cron_phase2_deployment.md#第三轮实际执行和结果)。这不放开管理接口的 Header 身份要求。
 
 | Header | 要求 | 说明 |
 | --- | --- | --- |
@@ -266,13 +266,13 @@ DELETE 带 JSON Body；使用不支持 DELETE JSON 快捷方法的 SDK 时，改
 
 清理失败可返回 503 和失败 operation，仍可能 logical_delete_applied=true。正常等待在途执行结束时可返回 202、stage=cleanup_waiting；不能将它解释成重新启用或要求取消已经开始的执行。
 
-单任务删除只处理指定 job_id，不自动级联子任务。智拓删除规划/场景时，应按原业务范围查询子任务，可调用本节新增的同步批量删除接口，或逐个带其真实身份调用单任务删除，再处理父任务；部分失败必须保留相应业务关联用于后续清理。分发正在进行时先等待分发结束，不强行删除源任务。
+单任务删除只处理指定 job_id，不自动级联子任务。智拓删除规划/场景时，应按原业务范围查询子任务，可调用本节异步批量删除接口，等待进度结束后再处理父任务；也可逐个带其真实身份调用单任务删除。部分失败必须保留相应业务关联用于后续清理。分发正在进行时先等待分发结束，不强行删除源任务。
 
 同一任务重复删除会复用既有删除操作，不重复清理资源。需要恢复未完成清理时，显式调用操作 retry。不存在、非新链路管理或无权访问的任务不按“已删除成功”处理。
 
-### 6.3 批量删除分发子定时任务（同步）
+### 6.3 批量删除分发子定时任务（异步，2026-10-19更新）
 
-本接口已在本地代码实现，仍需实际部署及联调验证。它组合单任务删除能力，同步返回每个子任务本次处理结果，不创建异步批量删除 task，也不要求轮询分发 tasks 接口。
+本接口先保存固定目标清单和原操作身份，返回 HTTP 202；Scheduler 后台组合单任务删除能力，前端查询专用删除进度，不轮询分发 tasks 接口。关闭客户端不取消已受理操作，重启后按共库租约恢复。本地实现不代表预发布联调完成。
 
 #### 请求
 
@@ -306,7 +306,7 @@ Content-Type: application/json
 | 字段 | 类型 | 要求 |
 | --- | --- | --- |
 | request_id | string | 必填，本次批量删除的稳定请求 ID；1～128 字符，沿用单任务操作的安全规则 |
-| items | array | 必填，1～1000 项；空数组不表示删除全部，超过上限需分批 |
+| items | array | 选中删除为1～1000项；空数组不表示删除全部。完整全量快照使用下述delete-all入口 |
 | items[].job_id | string | 必填，来自子任务列表的 job_id，不使用 tenant_id 代替任务 ID |
 | items[].tenant_id | string | 必填，该子任务实际所属 tenant |
 | items[].agent_id | string | 必填，该子任务实际 Agent，来自查询结果 |
@@ -314,9 +314,20 @@ Content-Type: application/json
 
 调用方先完整分页查询，再按自己的业务范围选择待删除项。仅删除 items 明确指定且属于该父任务的对象，不隐式删除父任务、其他子任务或同一接收方后来创建的新任务。重复目标属于请求格式错误，不在一次请求中处理两遍。源任务仍有进行中的分发时返回 409，本次不开始删除；批量删除和同源新分发应串行协调，避免边删边新增。
 
-#### 同步响应
+#### 受理和进度查询
 
-请求正常处理并取得逐项结果时返回 HTTP 200，包括部分失败或等待清理的情况；必须检查每项结果，不能只判断 HTTP 状态。没有“提交成功就立即返回一个批量 task_id，后台再逐项删除”的流程。
+初次受理返回 HTTP 202，包括 operation_id、operation_status=pending、total_count和pending_count，初始results可为空。受理不等于已逻辑删除。每次进度响应中，operation_status 表示整批清单 pending/running/completed/failed；completed 只表示逐项处理结束，仍需检查失败和待清理计数。系统意外失败会停止，不自动重试业务失败。
+
+```text
+POST /api/scheduler/cron/jobs/{job_id}/broadcast/children/delete-all
+GET  /api/scheduler/cron/jobs/{job_id}/broadcast/children/batch-delete/tasks/current
+GET  /api/scheduler/cron/jobs/{job_id}/broadcast/children/batch-delete/tasks/{operation_id}
+POST /api/scheduler/cron/jobs/{job_id}/broadcast/children/batch-delete/tasks/{operation_id}/retry
+```
+
+delete-all 的 Body 与选中删除相同，但items提交确认时完整读取的未删除子任务快照，可超过1000项，一次持久受理；不含筛选外遗漏或确认后新增对象，不删除父任务。它不会放宽父子关系、权限或版本校验。current 返回 `{"task": null}` 或 `{"task": {...}}`，指定ID查询直接返回进度对象；GET只读，不调用SWE或平台。人工retry无业务Body，返回202，将整批意外失败重新排队，不重试子任务清理业务失败。所有入口沿用父任务Header身份。
+
+新版通用 `POST /{job_id}/broadcast/children/actions` 的 `action=delete` 同样复用异步受理，返回202及上述进度对象；其可选agent_id继续按原协议省略时沿用源Agent。`action=run` 保持原执行受理行为。旧SWE接口不变。
 
 示例：两项均已逻辑删除，其中一项等待在途执行结束后清理资源。
 
@@ -324,6 +335,8 @@ Content-Type: application/json
 {
   "request_id": "zhituo-delete-children-001",
   "source_job_id": "7ad85834-4ec4-5b9e-9a31-bd701ebc1234",
+  "operation_id": "batch-delete-operation-id",
+  "operation_status": "completed",
   "status": "pending",
   "total_count": 2,
   "deleted_count": 2,
@@ -362,18 +375,18 @@ Content-Type: application/json
 - total_count 是目标数；completed_count、pending_count、failed_count 互斥且相加等于 total_count。
 - deleted_count 只统计已确认逻辑删除的项，与清理统计独立；清理失败或等待清理的项也可能已逻辑删除，不能再视为可执行任务。
 - 每项 status 为 completed、pending 或 failed；失败项通过 http_status/error_code 表达版本冲突和外部清理失败等原因；不存在、无权或非关联对象统一按 404 处理，不泄露其他任务信息。未产生删除操作时 operation_id、stage 为 null，logical_delete_applied=false。
-- 顶层 status：全部完成为 completed；无失败但仍等待为 pending；全部失败为 failed；有失败且并非全部失败为 partial_failed。部分失败与等待同时存在时仍为 partial_failed，客户端继续读取各项和计数。
+- 顶层 status 在整批未结束时与operation_status一致；逐项处理结束后，全部完成为completed、仅有待清理为pending、全部失败为failed、部分失败为partial_failed。失败与等待同时存在仍继续检查各项和计数；不能只按status判断后台是否仍在处理。
 
 #### 删除、重试和超时边界
 
 1. 每项独立校验父子关系、真实操作权限和子任务版本，再先逻辑删除、后停用平台及清理 SWE 资源。某项失败不回滚其他项，也不因一个子任务异常而扩大删除范围。
-2. 同步不表示一直等待 Agent/Workflow 完成：已开始的执行继续；未开始的已删除任务不再派发；在途资源延后清理，该项返回 pending、stage=cleanup_waiting。
+2. 后台不等待 Agent/Workflow 一直完成：已开始的执行继续；未开始的已删除任务不再派发；在途资源延后清理，该项返回 pending、stage=cleanup_waiting。
 3. 平台或资源清理失败时，该项为 failed；若已逻辑删除，logical_delete_applied 仍为 true，保留 operation_id 供人工重试，不恢复任务。
 4. 服务端保存本次目标清单及稳定子操作身份。同一 request_id 和原 Body 重提复用已处理结果，不重复删除成功项；同一 request_id 换目标或版本返回 409，不把它当成新一轮操作。
-5. 清理失败项按返回的子任务身份和 operation_id，使用现有单任务进度查询及 retry 接口续办；批量接口不额外定义异步任务查询接口。已删除项重复提交复用原删除操作，不因自身删除已使版本增加而重复清理。
-6. 同步批量调用仍可能遇到网关或外部服务超时；客户端保留原 request_id 和原 Body 找回已处理进度，不据超时断言全部未删除，也不保证 1000 项外部清理都能在一次网关时限内结束。
-7. 父任务不存在/无权、请求格式非法、同源分发冲突等整批前置问题使用 404、400/422、409。存储等系统异常使本次无法给出完整逐项结果时返回 503；已经提交的删除不回滚，重提仍使用原请求。
-8. 同一批次仍被其他实例同步处理时返回 409；等待原调用结束或租约过期后，使用相同请求重提。整批协调日志不能交给通用 operation retry 重做，必须重提原批量请求；失败子任务仍使用其自己的 operation_id 续办。
+5. 清理失败项按返回的子任务身份和operation_id，使用现有单任务进度查询及retry接口人工续办；专用批量进度GET可观察其后续状态，不重做已成功的外部清理。
+6. 受理响应丢失时保留原request_id和原Body重提，或先查current；不会生成新的整批任务。关闭页面后整个已受理快照仍由后台继续，不再有前端关闭后剩余片未提交的问题。
+7. 父任务不存在/无权、请求格式非法、同源分发冲突等前置问题使用404、400/422、409；后台未就绪或受理存储不可用返回503，不伪造受理成功。已有删除不回滚。
+8. 同源同一request_id重提查回原进度，即使其他实例正在处理也不另起一批；不同新请求与进行中的同源操作互斥。意外失败后可重提原Body或调用专用整批retry；通用operations retry不负责该整批清单，失败子任务仍使用自己的operation_id人工续办。
 
 
 ## 七 查询定时任务
@@ -692,7 +705,7 @@ GET {SchedulerBaseUrl}/api/scheduler/cron/jobs/{job_id}/dispatch-state
 
 - 一次切换未完成时不能改成另一目标，返回 409；可以查询或重试当前切换。
 - 外部同步失败只提示并支持重试，不因“同步失败”给整组增加禁止触发标记。
-- 普通与批模式部分切换成功时允许短暂混合，已同步对象按新方式，未同步对象暂按原方式，服务端去重并继续收敛。
+- 普通与批模式部分切换成功时允许短暂混合，已同步对象按新方式，未同步对象暂按原方式，继续收敛；按 2026-10-19 最新确认，平台每次新回调独立执行，不做跨入口周期去重。
 - 明确的批暂停、单任务停用和删除仍有效。“外部失败不阻断”不表示可以忽略业务暂停。
 - 已入队和运行中的执行继续，不因模式切换取消。
 - 模式作用于源任务及全部有效关联子任务，不仅最近一次 targets。

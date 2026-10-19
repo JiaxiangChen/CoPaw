@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ...config.context import encode_scope_id, is_valid_identity_value
+from .managed_diagnostics import format_storage_error
 from .managed_resources import ResourcePreparer
 
 router = APIRouter(
@@ -108,19 +109,34 @@ async def _locked_operation(request, body):
     db = getattr(request.app.state, "db_connection", None)
     if db is None or not getattr(db, "is_connected", False):
         raise HTTPException(503, "cron_database_unavailable")
+    stage = "begin_transaction"
     try:
         async with db.transaction():
             # 资源操作与逻辑删除、定义发布共用行锁，避免提前清理或绑定冲突。
             # 这里只加锁核对，不代写 Scheduler 的定义和管理字段。
+            stage = "lock_job"
             await db.fetch_one(
                 "SELECT job_id FROM swe_cron_jobs_v2 WHERE tenant_id=%s AND source_id=%s "
                 "AND agent_id=%s AND job_id=%s FOR UPDATE",
                 (tenant, source, agent, body.job_id),
             )
-            yield await _operation(request, body)
+            stage = "validate_operation"
+            row = await _operation(request, body)
+            stage = "resource_action"
+            yield row
+            stage = "finish_transaction"
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error(
+            "SWE 定时任务资源存储失败 operation_id=%s job_id=%s stage=%s "
+            "error_code=cron_resource_storage_unavailable error_type=%s\n%s",
+            body.operation_id,
+            body.job_id,
+            stage,
+            type(exc).__name__,
+            format_storage_error(exc),
+        )
         raise HTTPException(503, "cron_resource_storage_unavailable") from exc
 
 

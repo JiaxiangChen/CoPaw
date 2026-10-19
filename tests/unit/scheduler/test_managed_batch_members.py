@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""批成员按真实回执归属，普通复用、重放与错误关联均执行真实SQL。"""
+"""批成员按独立回执归属，普通与批触发不复用，关联原子落库。"""
 
 from datetime import datetime, timezone
 
@@ -41,15 +41,17 @@ async def test_real_batch_callback_persists_members_in_its_acceptance_transactio
     assert members[0]["business_attempt"] == 1
     assert members[0]["member_role"] == "parent"
     assert members[0]["source_id"] == caller.source_id
-    assert (await service.accept(caller, command, "batch"))["reused"]
+    another = await service.accept(caller, command, "batch")
+    assert not another["reused"]
+    assert another["batch_id"] != first["batch_id"]
     assert (
         len(await db.fetch_all("SELECT * FROM swe_cron_managed_batch_members"))
-        == 1
+        == 2
     )
 
 
 @pytest.mark.asyncio
-async def test_batch_members_include_an_execution_first_accepted_as_ordinary(
+async def test_batch_members_do_not_reuse_an_independent_ordinary_arrival(
     callback_setup,
 ):
     from scheduler.app.services.cron.managed.dispatch_state import (
@@ -87,10 +89,10 @@ async def test_batch_members_include_an_execution_first_accepted_as_ordinary(
         (result["batch_id"],),
     )
     assert row is not None
-    assert row["current_execution_id"] == original["execution_id"]
-    assert (await db.fetch_one("SELECT kind FROM swe_cron_execution_runs"))[
-        "kind"
-    ] == "ordinary"
+    assert row["current_execution_id"] != original["execution_id"]
+    runs = await db.fetch_all("SELECT kind FROM swe_cron_execution_runs")
+    assert len(runs) == 2
+    assert {run["kind"] for run in runs} == {"ordinary", "batch"}
 
 
 @pytest.mark.asyncio

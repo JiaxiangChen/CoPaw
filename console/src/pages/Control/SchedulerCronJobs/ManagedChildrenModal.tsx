@@ -1,12 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Alert, Input, Select, Space, Typography } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Input, Select, Space, Tag, Typography } from "antd";
 import { Button, Modal, Switch, Table } from "@agentscope-ai/design";
 import {
   schedulerCronApi,
   targetManagedContext,
 } from "@/api/modules/schedulerCron";
 import type {
-  ManagedBatchDeleteResult,
   ManagedChild,
   ManagedCronContext,
   ManagedJob,
@@ -15,6 +14,7 @@ import type {
 import {
   detailToJob,
   failureMessage,
+  isBatchDispatchMode,
   RequestIdentity,
   selectedChildren,
 } from "./helpers";
@@ -24,6 +24,12 @@ import {
   duplicateChildNames,
   filterChildren,
 } from "./childListView";
+import {
+  createChildrenDeletion,
+  deletionInProgress,
+  runChildrenDeletion,
+  type ChildrenDeletionPlan,
+} from "./childrenDeletion";
 import styles from "../CronJobs/components/BroadcastChildrenModal.module.less";
 
 const idle = () => false;
@@ -56,11 +62,11 @@ export function ManagedChildrenModal({
   const [pageSize, setPageSize] = useState(8);
   const [selected, setSelected] = useState<React.Key[]>([]);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ManagedBatchDeleteResult | null>(null);
   const [runResult, setRunResult] = useState<string | null>(null);
-  const deletion = useRef<{ items: ManagedSelectedChild[]; id: string } | null>(
-    null,
-  );
+  const deletion = useRef<ChildrenDeletionPlan | null>(null);
+  const writeLock = useRef(false);
+  const confirmation = useRef<ReturnType<typeof Modal.confirm> | null>(null);
+  useEffect(() => () => confirmation.current?.destroy(), []);
   const runRequest = useRef(new RequestIdentity());
   const controlRequests = useRef(new Map<string, RequestIdentity>());
   const load = useCallback(
@@ -68,6 +74,40 @@ export function ManagedChildrenModal({
     [context, job.id, includeDeleted],
   );
   const panel = useManagedPanel(load, idle);
+  const ignoredDeletion = useRef<string | null>(null);
+  const loadDeletion = useCallback(async () => {
+    const value = await schedulerCronApi.currentChildrenDeletion(
+      context,
+      job.id,
+    );
+    return {
+      task:
+        value.task?.operation_id === ignoredDeletion.current
+          ? null
+          : value.task ?? null,
+    };
+  }, [context, job.id]);
+  const deletionPanel = useManagedPanel(loadDeletion, (value) =>
+    Boolean(
+      value.task &&
+        value.task.operation_status !== "failed" &&
+        (deletionInProgress(value.task) || value.task.pending_count > 0),
+    ),
+  );
+  const result = deletionPanel.value?.task ?? null;
+  const deleteLocked = Boolean(deletion.current || result);
+  const deleting = Boolean(result && deletionInProgress(result));
+  const deletedCount = result?.deleted_count ?? 0;
+  const deletionProgressKey = `${result?.operation_id ?? ""}:${deletedCount}`;
+  const notifiedProgress = useRef("");
+  const reloadChildren = panel.reload;
+  useEffect(() => {
+    if (deletedCount > 0 && notifiedProgress.current !== deletionProgressKey) {
+      notifiedProgress.current = deletionProgressKey;
+      void reloadChildren();
+      onChanged();
+    }
+  }, [deletedCount, deletionProgressKey, reloadChildren, onChanged]);
   const children = panel.value ?? EMPTY_CHILDREN;
   const filtered = useMemo(
     () => filterChildren(children, search, branch),
@@ -111,20 +151,33 @@ export function ManagedChildrenModal({
       if (panel.alive.current) setBusy(false);
     }
   };
-  const act = async (remove: boolean) => {
-    if (!panel.alive.current || busy) return;
+  const act = async (remove: boolean, fixed?: ManagedSelectedChild[]) => {
+    if (!panel.alive.current || busy || writeLock.current) return;
+    writeLock.current = true;
     setBusy(true);
     try {
-      const items = selectedChildren(chosen);
+      const items = fixed ?? selectedChildren(chosen);
       if (remove) {
-        deletion.current ??= { items, id: new RequestIdentity().for(items) };
-        const value = await schedulerCronApi.childrenDelete(
-          context,
-          job.id,
-          deletion.current.items,
-          deletion.current.id,
-        );
-        if (panel.alive.current) setResult(value);
+        if (result?.operation_id) {
+          const value = await schedulerCronApi.retryChildrenDeletion(
+            context,
+            job.id,
+            result.operation_id,
+          );
+          if (panel.alive.current) deletionPanel.replaceValue({ task: value });
+        } else {
+          deletion.current ??= createChildrenDeletion(items, Boolean(fixed));
+          await runChildrenDeletion(
+            context,
+            job.id,
+            deletion.current,
+            (value) => {
+              if (panel.alive.current)
+                deletionPanel.replaceValue({ task: value });
+            },
+            () => panel.alive.current,
+          );
+        }
       } else {
         const value = await schedulerCronApi.childrenRun(
           context,
@@ -152,6 +205,32 @@ export function ManagedChildrenModal({
     } catch (failure) {
       if (panel.alive.current) panel.setError(failureMessage(failure));
     } finally {
+      writeLock.current = false;
+      if (panel.alive.current) setBusy(false);
+    }
+  };
+  const confirmDeleteAll = async () => {
+    if (!panel.alive.current || busy || writeLock.current || deleteLocked)
+      return;
+    writeLock.current = true;
+    setBusy(true);
+    try {
+      const all = await schedulerCronApi.childrenAll(context, job.id, false);
+      if (!panel.alive.current) return;
+      const items = selectedChildren(all.filter((child) => !child.deleted));
+      if (!items.length) throw new Error("没有可删除的子任务，请刷新列表");
+      confirmation.current = Modal.confirm({
+        title: `删除全部 ${items.length} 个子任务？`,
+        content: `将删除父任务「${job.name}」下本次读取的全部未删除子任务，不受搜索、机构筛选或分页影响。不删除父任务；未开始的执行将跳过，正在执行的任务不取消。`,
+        okText: "确认删除全部",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk: () => act(true, items),
+      });
+    } catch (failure) {
+      if (panel.alive.current) panel.setError(failureMessage(failure));
+    } finally {
+      writeLock.current = false;
       if (panel.alive.current) setBusy(false);
     }
   };
@@ -190,9 +269,12 @@ export function ManagedChildrenModal({
       >
         <Alert
           type="info"
-          message="删除先逻辑删除，在途执行继续；批量结果逐项展示，失败和待清理项可按原请求续办。"
+          message="删除异步受理，关闭页面后继续处理；已开始的执行继续，失败清理可在单项进度中重试。"
         />
         {panel.error && <Alert type="error" showIcon message={panel.error} />}
+        {deletionPanel.error && (
+          <Alert type="error" showIcon message={deletionPanel.error} />
+        )}
         {duplicateNames.length > 0 && (
           <Alert
             type="warning"
@@ -204,7 +286,7 @@ export function ManagedChildrenModal({
         <Space wrap>
           <Switch
             checked={includeDeleted}
-            disabled={busy || Boolean(deletion.current)}
+            disabled={busy || deleteLocked}
             onChange={(value) => {
               setIncludeDeleted(value);
               setSelected([]);
@@ -212,15 +294,18 @@ export function ManagedChildrenModal({
             }}
           />
           <span>包含已删除</span>
-          <Button onClick={() => void panel.reload()} loading={panel.loading}>
+          <Button
+            onClick={() => {
+              void panel.reload();
+              void deletionPanel.reload();
+            }}
+            loading={panel.loading || deletionPanel.loading}
+          >
             刷新
           </Button>
           <Button
             disabled={
-              busy ||
-              !chosen.length ||
-              chosen.length > 1000 ||
-              Boolean(deletion.current)
+              busy || !chosen.length || chosen.length > 1000 || deleteLocked
             }
             onClick={() => void act(false)}
           >
@@ -230,12 +315,16 @@ export function ManagedChildrenModal({
             danger
             disabled={
               busy ||
+              deleting ||
+              deletionPanel.loading ||
+              Boolean(deletionPanel.error) ||
+              Boolean(result && result.operation_status !== "failed") ||
               chosen.length > 1000 ||
-              (!chosen.length && !deletion.current)
+              (!chosen.length && !deleteLocked)
             }
             onClick={() =>
               Modal.confirm({
-                title: deletion.current
+                title: deleteLocked
                   ? "继续原批量删除？"
                   : `删除选中的 ${chosen.length} 个任务？`,
                 content: "未开始的执行将跳过，正在执行的任务不取消。",
@@ -243,19 +332,36 @@ export function ManagedChildrenModal({
               })
             }
           >
-            {deletion.current ? "重试原批量删除" : "删除选中任务"}
+            {deleteLocked ? "重试原批量删除" : "删除选中任务"}
           </Button>
-          {result?.status === "completed" && (
-            <Button
-              onClick={() => {
-                deletion.current = null;
-                setResult(null);
-                setSelected([]);
-              }}
-            >
-              结束本次操作
-            </Button>
-          )}
+          <Button
+            danger
+            disabled={
+              busy ||
+              panel.loading ||
+              Boolean(panel.error) ||
+              deletionPanel.loading ||
+              Boolean(deletionPanel.error) ||
+              deleteLocked ||
+              !children.some((child) => !child.deleted)
+            }
+            onClick={() => void confirmDeleteAll()}
+          >
+            删除全部子任务
+          </Button>
+          {result?.operation_status === "completed" &&
+            result.pending_count === 0 && (
+              <Button
+                onClick={() => {
+                  deletion.current = null;
+                  ignoredDeletion.current = result.operation_id;
+                  deletionPanel.replaceValue({ task: null });
+                  setSelected([]);
+                }}
+              >
+                结束本次操作
+              </Button>
+            )}
         </Space>
         <Space wrap>
           <Input.Search
@@ -265,7 +371,7 @@ export function ManagedChildrenModal({
             placeholder="搜索用户姓名或 UID"
             style={{ width: 320, maxWidth: "100%" }}
             value={searchInput}
-            disabled={busy || Boolean(deletion.current)}
+            disabled={busy || deleteLocked}
             onChange={(event) => setSearchInput(event.target.value)}
             onSearch={(value) => {
               setSearch(value);
@@ -282,7 +388,7 @@ export function ManagedChildrenModal({
             options={branches}
             value={branch || undefined}
             style={{ width: 180, maxWidth: "100%" }}
-            disabled={busy || Boolean(deletion.current)}
+            disabled={busy || deleteLocked}
             onChange={(value) => {
               setBranch(value || "");
               setSelected([]);
@@ -296,10 +402,33 @@ export function ManagedChildrenModal({
         {runResult && <Alert type="info" message={runResult} />}
         {result && (
           <>
+            <Alert
+              type={
+                result.operation_status === "failed" || result.failed_count > 0
+                  ? "warning"
+                  : "info"
+              }
+              showIcon
+              message={`异步删除 ${result.operation_id}：${
+                deleting
+                  ? "后台排队或处理中，关闭页面不影响执行"
+                  : result.operation_status === "failed"
+                  ? "处理中断，请重试原批量删除"
+                  : result.pending_count > 0
+                  ? "删除已处理，等待在途执行结束后清理"
+                  : "处理结束"
+              }`}
+            />
             <Typography.Text>
               删除 {result.deleted_count} / 完成 {result.completed_count} /
               待处理 {result.pending_count} / 失败 {result.failed_count}
             </Typography.Text>
+            {result.total_count > result.results.length && (
+              <Typography.Text type="secondary">
+                尚有 {result.total_count - result.results.length}{" "}
+                项未返回结果，按待确认处理。
+              </Typography.Text>
+            )}
             <Table
               size="small"
               rowKey={(item) =>
@@ -384,7 +513,14 @@ export function ManagedChildrenModal({
             {
               title: "排程",
               width: 160,
-              render: (_, row) => row.schedule?.cron,
+              render: (_, row) => (
+                <span>
+                  {isBatchDispatchMode(row.dispatch_state) && (
+                    <Tag color="processing">批调度</Tag>
+                  )}
+                  <span>{row.schedule?.cron}</span>
+                </span>
+              ),
             },
             {
               title: "时区",

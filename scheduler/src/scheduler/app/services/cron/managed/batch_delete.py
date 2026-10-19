@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""同步处理固定子任务清单，整批幂等和单项删除沿用共库操作日志。"""
+"""后台逐项处理固定子任务清单，整批幂等沿用共库操作日志。"""
 
 import json
 import logging
@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 def _normalize(payload):
     request_id = identity_value(payload.get("request_id", ""))
     items = payload.get("items")
-    if not isinstance(items, list) or not 1 <= len(items) <= 1000:
+    all_children = payload.get("all_children") is True
+    if not isinstance(items, list) or not items:
+        raise ValueError("invalid_cron_batch_delete_items")
+    if len(items) > 1000 and not all_children:
         raise ValueError("invalid_cron_batch_delete_items")
     result, seen = [], set()
     for item in items:
@@ -49,7 +52,10 @@ def _normalize(payload):
         if type(version) is not int or version < 1:
             raise ValueError("invalid_cron_definition_version")
         result.append({**item})
-    return {"request_id": request_id, "items": result}
+    normalized = {"request_id": request_id, "items": result}
+    if all_children:
+        normalized["all_children"] = True
+    return normalized
 
 
 def _item_result(key, operation=None, *, http_status=200, error=None):
@@ -126,7 +132,7 @@ class BatchDeleteService:
         progress = json.loads(claimed["progress_json"])
         plans = json.loads(claimed["payload_json"])["plans"]
         logger.info(
-            "开始同步删除选中子任务 operation_id=%s source_job_id=%s count=%s",
+            "开始处理子任务删除清单 operation_id=%s source_job_id=%s count=%s",
             claimed["operation_id"],
             parent_id,
             len(plans),
@@ -145,14 +151,14 @@ class BatchDeleteService:
                 await self._save(claimed, progress)
             await self._save(claimed, progress, completed=True)
         except Exception:
-            await self._save(claimed, progress, release=True)
+            await self._save(claimed, progress, failed=True)
             raise
         result = _summary(
             claimed,
             [progress["results"][str(index)] for index in range(len(plans))],
         )
         logger.info(
-            "同步批量删除处理结束 operation_id=%s status=%s deleted=%s pending=%s failed=%s",
+            "批量删除处理结束 operation_id=%s status=%s deleted=%s pending=%s failed=%s",
             claimed["operation_id"],
             result["status"],
             result["deleted_count"],
@@ -210,7 +216,11 @@ class BatchDeleteService:
                 "request_hash": fingerprint,
                 "expected_version": root["definition_version"],
                 "payload_json": canonical(
-                    {"plans": plans, "actor_is_manager": caller.is_manager},
+                    {
+                        "plans": plans,
+                        "actor_is_manager": caller.is_manager,
+                        "all_children": payload.get("all_children", False),
+                    },
                 ),
                 "progress_json": canonical({"results": {}}),
                 "status": "pending",
@@ -252,23 +262,24 @@ class BatchDeleteService:
         progress,
         *,
         completed=False,
-        release=False,
+        failed=False,
     ):
         now = utc_now()
         values = {
             "progress_json": canonical(progress),
             "status": (
-                "completed"
-                if completed
-                else "pending" if release else "running"
+                "completed" if completed else "failed" if failed else "running"
             ),
             "stage": "completed" if completed else "processing",
             "active_key": None if completed else operation["active_key"],
             "lease_owner": (
-                "" if completed or release else operation["lease_owner"]
+                "" if completed or failed else operation["lease_owner"]
             ),
             "lease_until": (
-                None if completed or release else now + timedelta(seconds=120)
+                None if completed or failed else now + timedelta(seconds=120)
+            ),
+            "error_code": (
+                "cron_batch_delete_processing_failed" if failed else None
             ),
             "version": operation["version"] + 1,
             "updated_at": now,

@@ -9,7 +9,57 @@ import {
   getTaskSidebarMeta,
   partitionTasksByPauseState,
   uniqueTaskForId,
+  getTaskLastRunDisplay,
+  hasTaskRunRecord,
 } from "./taskJobs";
+
+it("新版手动历史使用最近运行时间和真实状态，不再被视为未启动", () => {
+  const context = {
+    actor_id: "user-1",
+    tenant_id: "user-1",
+    source_id: "bank",
+    agent_id: "default",
+  };
+  const task = tagTask(
+    taskJob({
+      state: { last_run_at: "2026-10-19 05:18:00", last_status: "success" },
+    }),
+    "scheduler",
+    context,
+  );
+  expect(hasTaskRunRecord(task)).toBe(true);
+  expect(getTaskLastRunDisplay(task)).toEqual({
+    at: "2026-10-19T05:18:00Z",
+    statusText: "已完成",
+  });
+  task.state = { last_run_at: "2026-10-19T06:18:00Z", last_status: "error" };
+  expect(getTaskLastRunDisplay(task)).toEqual({
+    at: "2026-10-19T06:18:00Z",
+    statusText: "执行失败",
+  });
+});
+
+it("新版最新运行不被旧自动成功时间覆盖，旧任务展示语义保持", () => {
+  const original = taskJob({
+    state: { last_run_at: "2026-10-19T06:18:00Z", last_status: "running" },
+  });
+  original.task!.last_scheduled_run_at = "2026-10-18T01:00:00Z";
+  const managed = tagTask(original, "scheduler", {
+    actor_id: "u",
+    tenant_id: "u",
+    source_id: "s",
+    agent_id: "a",
+  });
+  expect(getTaskLastRunDisplay(managed)).toEqual({
+    at: "2026-10-19T06:18:00Z",
+    statusText: "运行中",
+  });
+  expect(getTaskLastRunDisplay(original)).toEqual({
+    at: "2026-10-18T01:00:00Z",
+    statusText: "已完成",
+  });
+  expect(hasTaskRunRecord(taskJob())).toBe(false);
+});
 
 function taskJob(
   overrides: Partial<CronJobSpecOutput> = {},
@@ -50,7 +100,12 @@ function taskJob(
 
 describe("getTaskSidebarMeta", () => {
   it("裸任务链接遇到新旧同 ID 不静默选择旧任务", () => {
-    const context = { actor_id: "u", tenant_id: "u", source_id: "s", agent_id: "a" };
+    const context = {
+      actor_id: "u",
+      tenant_id: "u",
+      source_id: "s",
+      agent_id: "a",
+    };
     const oldTask = tagTask(taskJob(), "legacy", context);
     const newTask = tagTask(taskJob(), "scheduler", context);
     expect(uniqueTaskForId([oldTask, newTask], "job-1")).toBeNull();

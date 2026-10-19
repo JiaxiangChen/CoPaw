@@ -135,6 +135,7 @@ import {
 import {
   deriveChatTaskState,
   getTaskOpenTarget,
+  hasTaskRunRecord,
   uniqueTaskForId,
 } from "./taskJobs";
 import { DEFAULT_FORM_VALUES } from "../Control/CronJobs/components";
@@ -1975,18 +1976,19 @@ function ChatPageContent() {
     chatId,
   ]);
 
-  // Show toast when task has no scheduled result yet
+  // 已有手动或自动运行记录时，不再提示任务尚未启动。
   const taskNoResultShownIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (currentTask && !currentTask.task?.has_scheduled_result) {
-      if (taskNoResultShownIdRef.current !== currentTask.id) {
-        taskNoResultShownIdRef.current = currentTask.id;
+    if (currentTask && !hasTaskRunRecord(currentTask)) {
+      const identity = taskIdentityKey(currentTask);
+      if (taskNoResultShownIdRef.current !== identity) {
+        taskNoResultShownIdRef.current = identity;
         message.info("当前任务暂未启动，等下次收到提醒再来看看哟~");
       }
     } else {
       taskNoResultShownIdRef.current = null;
     }
-  }, [currentTask?.id, currentTask?.task?.has_scheduled_result]);
+  }, [currentTask, message]);
 
   const copyResponse = useCallback(
     async (response: CopyableResponse) => {

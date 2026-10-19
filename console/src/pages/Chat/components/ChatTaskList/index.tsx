@@ -8,8 +8,8 @@ import {
   getTaskNextRunTooltipTimes,
   getTaskPauseStatusText,
   getTaskSidebarMeta,
+  getTaskLastRunDisplay,
   partitionTasksByPauseState,
-  TASK_COMPLETED_STATUS_TEXT,
 } from "../../taskJobs";
 import { formatListTime } from "../../listTimeFormat";
 import TaskActionMenu from "../TaskActionMenu";
@@ -86,6 +86,7 @@ export default function ChatTaskList(props: ChatTaskListProps) {
 
   const renderTask = (task: CronJobSpecOutput) => {
     const sidebarMeta = getTaskSidebarMeta(task);
+    const lastRun = getTaskLastRunDisplay(task);
     const pauseStatusText = getTaskPauseStatusText(sidebarMeta);
     const nextRunText = getTaskNextRunText(task);
     const nextRunTooltipTimes = getTaskNextRunTooltipTimes(task);
@@ -154,15 +155,14 @@ export default function ChatTaskList(props: ChatTaskListProps) {
             {pauseStatusText}
           </div>
         )}
-        {(task.task?.latest_scheduled_preview ||
-          task.task?.last_scheduled_run_at) && (
+        {lastRun && (
           <div className="chat-task-list-item-subtitle">
-            {task.task?.last_scheduled_run_at && (
+            {lastRun.at && (
               <span className="chat-task-list-item-time">
-                {formatListTime(task.task.last_scheduled_run_at)}
+                {formatListTime(lastRun.at)}
               </span>
             )}
-            {TASK_COMPLETED_STATUS_TEXT}
+            {lastRun.statusText}
           </div>
         )}
         {nextRunText && (

@@ -137,6 +137,76 @@ async def test_platform_register_does_not_enable_and_uses_new_callback():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,prefix",
+    [
+        ("ordinary", "[Scheduler]"),
+        ("batch_enabled", "[Scheduler][批调度]"),
+        ("batch_paused", "[Scheduler][批调度]"),
+    ],
+)
+@pytest.mark.parametrize(
+    "name",
+    ["report", "长" * 200],
+    ids=["short", "max-length"],
+)
+async def test_platform_registration_and_update_mark_batch_names_only(
+    mode,
+    prefix,
+    name,
+):
+    from scheduler.app.services.cron.managed.platform import (
+        ManagedPlatformClient,
+    )
+
+    requests = []
+
+    async def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"code": 200, "content": "123"})
+
+    operation = {
+        "operation_id": "op",
+        "job_id": "job",
+        "tenant_id": "alice",
+        "source_id": "bank",
+        "agent_id": "default",
+        "actor_id": "alice",
+    }
+    spec = {
+        "id": "job",
+        "name": name,
+        "scope_id": "YWxpY2U.YmFuaw",
+        "schedule": {"cron": "0 9 * * *"},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ) as http:
+        client = ManagedPlatformClient(
+            {
+                "base_url": "http://platform",
+                "callback_base": "http://scheduler",
+            },
+            http=http,
+        )
+        await client.register(operation, spec, mode)
+        await client.update("123", operation, spec, mode)
+        await client.update("123", operation, spec, mode)
+    payloads = [json.loads(request.content) for request in requests]
+    assert all(
+        payload["jobDesc"] == f"{prefix} alice/bank - {name}"[:200]
+        for payload in payloads
+    )
+    assert all(len(payload["jobDesc"]) <= 200 for payload in payloads)
+    entry = "ordinary" if mode == "ordinary" else "batch"
+    assert all(
+        payload["jobAddress"].endswith(f"/{entry}/callback")
+        for payload in payloads
+    )
+    assert spec["name"] == name
+
+
+@pytest.mark.asyncio
 async def test_platform_register_timeout_is_reported_without_querying():
     from scheduler.app.services.cron.managed.platform import (
         ManagedPlatformClient,

@@ -351,8 +351,10 @@ async def test_mysql_broadcast_mode_callback_and_queue_survive_mode_change(
     await modes.process(ordinary["operation_id"])
     assert (await modes.get(caller, job_id))["effective_state"] == "ordinary"
     replay = await scheduling.accept(caller, command, "batch")
-    assert replay["reused"]
-    assert replay["batch_id"] == accepted["batch_id"]
+    assert not replay["reused"]
+    assert not replay["accepted"]
+    assert replay["status"] == "skipped"
+    assert "batch_id" not in replay
     rows = await ManagedWorkQuery(db, 10).rows(
         running=False,
         scope={

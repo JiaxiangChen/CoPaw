@@ -118,6 +118,9 @@ class ManagedPlatformClient:
 
     def _payload(self, operation, spec, mode):
         callback = "ordinary" if mode == "ordinary" else "batch"
+        prefix = (
+            "[Scheduler]" if callback == "ordinary" else "[Scheduler][批调度]"
+        )
         identity = {
             key: operation[key]
             for key in ("tenant_id", "source_id", "agent_id", "job_id")
@@ -140,7 +143,7 @@ class ManagedPlatformClient:
             "alarmEmail": self.config.get("alarm_email", ""),
             "glueType": "GLUE_GROOVY",
             "glueRemark": spec["id"],
-            "jobDesc": f"[Scheduler] {operation['tenant_id']}/{operation['source_id']} - {spec['name']}"[
+            "jobDesc": f"{prefix} {operation['tenant_id']}/{operation['source_id']} - {spec['name']}"[
                 :200
             ],
             "jobCron": platform_cron(spec["schedule"]["cron"]),

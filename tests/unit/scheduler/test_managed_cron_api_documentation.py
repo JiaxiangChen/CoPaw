@@ -36,7 +36,7 @@ def test_new_interface_documentation_is_available_in_openapi():
         for method, operation in methods.items()
         if method in {"get", "post", "put", "delete"}
     ]
-    assert len(operations) == 28
+    assert len(operations) == 32
     for operation in operations:
         assert re.search(
             r"[\u4e00-\u9fff]",

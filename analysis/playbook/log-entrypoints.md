@@ -35,3 +35,11 @@ Hook 机制的埋点以运行时日志为入口，不写入 `swe_tracing_spans`�
 ## query error dump
 
 `query error dump` 仍可作为请求级故障快照入口，用于补充上下文与失败栈信息，但不替代运行时主日志入口。
+
+## 新版定时任务资源存储失败
+
+Scheduler 的 `swe_prepare_failed` 只表示资源准备步骤失败。若收到 SWE 的 HTTP 503 和 `cron_resource_storage_unavailable`，在 SWE 容器日志中按同一个 `operation_id`、`job_id` 查找 `SWE 定时任务资源存储失败`。
+
+ERROR 日志中的 `stage` 区分 `begin_transaction`（进入事务）、`lock_job`（对新任务定义加行锁）、`validate_operation`（锁内复核操作）、`resource_action`（资源处理）和 `finish_transaction`（正常资源处理结束后的事务退出）。阶段表示最后进入的步骤；若回滚本身失败，仍须结合异常链定位，不能只靠阶段断言失败的是哪一条 SQL。
+
+诊断保留异常链类型、数据库错误号及固定类别、安全的缺失方法名与栈位置，不输出原始异常消息、SQL、任务正文、Header、源码行或局部变量。例如 `1205/lock_wait_timeout` 表示锁等待超时，`1213/deadlock` 表示死锁，`AttributeError` 配合 `missing_attribute=transaction` 可提示部署版本缺少事务方法。公共 HTTP 错误不会被改写为存储失败；此日志不覆盖所有资源准备异常。

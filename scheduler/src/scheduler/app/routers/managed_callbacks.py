@@ -51,36 +51,35 @@ def callback_params(body):
         raise ValueError("invalid_cron_callback_job_param") from exc
 
 
-def callback_caller(headers, params, *, encoded):
+def callback_caller(headers, params):
     values = {key.lower(): value for key, value in headers.items()}
-    if encoded:
-        fallback = {
-            "x-user-id": params.get("fromId"),
-            "x-tenant-id": params.get("tenant_id"),
-            "x-source-id": params.get("source_id"),
-            "x-agent-id": params.get("agent_id", "default"),
-        }
-        for name, value in fallback.items():
-            if (
-                name in values
-                and name != "x-user-id"
-                and value is not None
-                and values[name] != value
-            ):
-                raise ValueError("conflicting_cron_callback_identity")
-            if name not in values and value is not None:
-                values[name] = value
-    return CallerIdentity.from_headers(values)
+    fallback = {
+        "x-user-id": params.get("fromId"),
+        "x-tenant-id": params.get("tenant_id"),
+        "x-source-id": params.get("source_id"),
+        "x-agent-id": params.get("agent_id", "default"),
+    }
+    for name, value in fallback.items():
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise ValueError("invalid_cron_identity")
+        if name in values and name != "x-user-id" and values[name] != value:
+            raise ValueError("conflicting_cron_callback_identity")
+        values.setdefault(name, value)
+    caller = CallerIdentity.from_headers(values)
+    scope = params.get("scopeId", params.get("scope_id"))
+    if scope is not None:
+        if not isinstance(scope, str):
+            raise ValueError("conflicting_cron_scope")
+        CallerIdentity.from_headers({**values, "x-scope-id": scope})
+    return caller
 
 
 async def accept_callback(request, body, kind, service):
     try:
         params = callback_params(body)
-        caller = callback_caller(
-            request.headers,
-            params,
-            encoded=bool(body.get("jobParam") or body.get("job_param")),
-        )
+        caller = callback_caller(request.headers, params)
         result = await service.accept(caller, params, kind)
         return JSONResponse(status_code=202, content=result)
     except ManagedCronNotFound as exc:
@@ -101,9 +100,9 @@ async def ordinary_callback(
     body: dict = Body(...),
     service: ManagedSchedulingService = Depends(scheduling_service),
 ):
-    """校验完整身份、普通定时器 ID、操作引用和新协议标记后冻结一次执行。
+    """校验完整身份、普通定时器绑定、操作引用和新协议标记后冻结一次独立执行。
 
-    支持原平台 jobParam 封装与 Header 上下文，绝不接受完整任务定义；scheduled_fire_at 表示逻辑计划时间，fire_time/trigger_time 表示平台实际排程时间。需要稳定触发标识或明确计划时间，重复触发不重跑。
+    支持无 Header 的平铺 Body 和 jobParam 封装；fromId、tenant_id、source_id、agent_id 提供身份，scopeId 存在时校验。缺平台 ID 时读取当前数据库绑定；不接受完整任务定义。每次请求独立受理，不按流水号或计划期去重；缺时间时以接收时间记录触发，明确时间仍按原排程语义校验。任务停用、删除、归属和管理状态检查仍有效。
     """
     return await accept_callback(request, body, "ordinary", service)
 
@@ -120,6 +119,6 @@ async def batch_callback(
 ):
     """按已注册批绑定受理本次批次，在一个事务内冻结成员、优先级及执行快照。
 
-    只接入当前实际批模式对象，明确批暂停不受理新批；已受理批次在模式切换后仍可重放同一回执。只写已收到的工作，不扫描定义补生漏掉的触发，不等待 SWE 最终执行结果。
+    同样支持无 Header 的平铺 Body 和 jobParam 封装，身份及当前平台注册绑定须通过数据库核验。每次请求建立新批次、不去重，缺时间使用接收时间及已保存的批提前量，保留散列等待。只接入当前实际批模式对象，批暂停不受理新批；已有队列继续。只写收到的工作，不扫描补生漏掉的触发，不等待 SWE 最终执行结果。
     """
     return await accept_callback(request, body, "batch", service)

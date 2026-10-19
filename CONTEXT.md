@@ -4,6 +4,10 @@ This context defines the domain language for Swe's agent orchestration runtime, 
 
 ## Language
 
+**异步子任务删除**:
+用户确认固定子任务范围后先受理、再后台逐项处理的删除操作。受理不等于删除完成；关闭页面不取消已受理范围，重新进入仍可查看进度。删除全部只涵盖确认快照，不涵盖其后新增的子任务；已开始的执行继续，删除失败与等待清理分别展示。
+_Avoid_: 同步等待全部清理、关闭页面取消删除、删除全部包含未来新增任务
+
 **Chat History Snapshot**:
 The externally returned point-in-time representation of one Chat's persisted conversation and turn state. It is a read result, not a promise to wait for an active Answer Turn to finish.
 _Avoid_: live stream, wait-for-completion read, session-file view

@@ -7,6 +7,7 @@ import type {
   ManagedJobDetail,
   ManagedSelectedChild,
   ManagedExecution,
+  ManagedDispatchMode,
 } from "@/api/types/schedulerCron";
 
 export const MODE_LABELS = {
@@ -14,6 +15,10 @@ export const MODE_LABELS = {
   batch_enabled: "开启批调度",
   batch_paused: "暂停批调度",
 } as const;
+
+export function isBatchDispatchMode(mode: ManagedDispatchMode): boolean {
+  return mode === "batch_enabled" || mode === "batch_paused";
+}
 
 export function executionNeedsPolling(
   execution: ManagedExecution | null,

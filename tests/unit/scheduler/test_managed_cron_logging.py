@@ -9,6 +9,7 @@ import tokenize
 from pathlib import Path
 
 import pytest
+import httpx
 
 from tests.unit.scheduler.test_managed_cron_executions import (
     enqueue,
@@ -104,3 +105,159 @@ async def test_execution_logs_include_run_identity_but_not_private_error(
     assert "开始" in caplog.text
     assert "提交" in caplog.text
     assert "do-not-expose" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["http_status", "timeout"])
+async def test_prepare_failure_logs_http_diagnostics_without_secrets(
+    execution_setup,
+    caplog,
+    failure,
+):
+    from scheduler.app.services.cron.managed.swe_client import ManagedSweClient
+
+    db, caller, management = execution_setup
+
+    def respond(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private-task-body", request=request)
+        return httpx.Response(
+            422,
+            json={
+                "detail": "cron_resource_preparation_failed",
+                "input": "private-task-body",
+                "token": "private-response-token",
+            },
+        )
+
+    caplog.set_level(logging.INFO)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ) as client:
+        management.resources = ManagedSweClient(
+            "http://swe",
+            http=client,
+            headers={"Authorization": "Bearer private-request-token"},
+        )
+        result = await management.create(
+            caller,
+            create_payload(request={"input": "private-task-body"}),
+        )
+    assert result["error_code"] == "swe_prepare_failed"
+    assert result["status"] == "failed"
+    assert result["operation_id"] in caplog.text
+    assert result["job_id"] in caplog.text
+    assert "stage=prepare" in caplog.text
+    assert "swe_client.py" in caplog.text
+    if failure == "http_status":
+        assert "HTTPStatusError" in caplog.text
+        assert "http_status=422" in caplog.text
+        assert "cron_resource_preparation_failed" in caplog.text
+    else:
+        assert "ReadTimeout" in caplog.text
+    for secret in (
+        "private-task-body",
+        "private-request-token",
+        "private-response-token",
+    ):
+        assert secret not in caplog.text
+        assert secret not in str(result)
+    assert management.platform.calls == []
+    assert (
+        db.conn.execute("SELECT COUNT(*) FROM swe_cron_jobs_v2").fetchone()[0]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_failure_logs_safe_exception_chain_not_private_messages(
+    execution_setup,
+    caplog,
+    monkeypatch,
+):
+    _, caller, management = execution_setup
+
+    async def fail_prepare(*_args):
+        try:
+            raise RuntimeError("private-task-body password=private-password")
+        except RuntimeError as exc:
+            raise ValueError("cron_chat_manager_unavailable") from exc
+
+    monkeypatch.setattr(management.resources, "prepare", fail_prepare)
+    caplog.set_level(logging.INFO)
+    result = await management.create(caller, create_payload())
+    assert result["error_code"] == "swe_prepare_failed"
+    assert "ValueError" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "fail_prepare" in caplog.text
+    assert "cron_chat_manager_unavailable" in caplog.text
+    assert "private-task-body" not in caplog.text
+    assert "private-password" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        (
+            httpx.Response(
+                422,
+                json={
+                    "detail": [
+                        {
+                            "type": "missing",
+                            "loc": ["body", "operation_id"],
+                            "input": "private-input",
+                            "ctx": {"token": "private-token"},
+                        },
+                    ],
+                },
+            ),
+            "missing at body.operation_id",
+        ),
+        (httpx.Response(500, text="private-input"), "unavailable"),
+        (
+            httpx.Response(500, text="private-input" * 1000),
+            "omitted_large_body",
+        ),
+        (
+            httpx.Response(500, json={"detail": "private-input"}),
+            "omitted_non_code_body",
+        ),
+    ],
+)
+def test_http_error_details_never_include_body_input_or_context(
+    response,
+    expected,
+):
+    from scheduler.app.services.cron.managed.diagnostics import (
+        format_management_error,
+    )
+
+    error = httpx.HTTPStatusError(
+        "private-input",
+        request=httpx.Request(
+            "POST",
+            "http://swe/prepare?token=private-token",
+        ),
+        response=response,
+    )
+    detail = format_management_error(error)
+    assert expected in detail
+    assert "private-input" not in detail
+    assert "private-token" not in detail
+
+
+@pytest.mark.parametrize(
+    "number, meaning",
+    [(1205, "lock_wait_timeout"), (1213, "deadlock")],
+)
+def test_database_error_keeps_number_not_raw_statement(number, meaning):
+    from pymysql.err import OperationalError
+    from scheduler.app.services.cron.managed.diagnostics import (
+        format_management_error,
+    )
+
+    detail = format_management_error(OperationalError(number, "private-sql"))
+    assert f"error_number={number}" in detail
+    assert meaning in detail
+    assert "private-sql" not in detail

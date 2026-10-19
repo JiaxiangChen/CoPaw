@@ -220,6 +220,8 @@ async def test_selected_children_action_api_returns_per_target_result(
             headers=HEADERS,
             json=body,
         )
-        assert response.status_code == 200
-        assert response.json()["success_count"] == 1
-        assert response.json()["results"][0]["tenant_id"] == "bob"
+        assert response.status_code == 202
+        assert response.json()["pending_count"] == 1
+        assert response.json()["deleted_count"] == 0
+        assert response.json()["operation_status"] == "pending"
+        assert response.json()["results"] == []

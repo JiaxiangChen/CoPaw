@@ -20,6 +20,41 @@ export interface TaskGroups {
 const AUTO_PAUSE_REASON = "auto_unread_threshold";
 export const TASK_COMPLETED_STATUS_TEXT = "已完成";
 
+/** 新版已有手动运行时间时，不能因没有自动结果而提示尚未启动。 */
+export function hasTaskRunRecord(job: CronJobSpecOutput): boolean {
+  return Boolean(
+    job.task?.has_scheduled_result ||
+      (isSchedulerTask(job) &&
+        (job.state?.last_run_at || job.task?.last_scheduled_run_at)),
+  );
+}
+
+export function getTaskLastRunDisplay(
+  job: CronJobSpecOutput,
+): { at?: string; statusText: string } | null {
+  const managed = isSchedulerTask(job);
+  const latest = managed ? job.state?.last_run_at : null;
+  let at = latest || job.task?.last_scheduled_run_at || undefined;
+  if (!at && !job.task?.latest_scheduled_preview) return null;
+  // 新状态表按 UTC 保存 DATETIME，接口未带时区时不能按浏览器本地时间解析。
+  if (managed && at && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(at)) {
+    at = at.replace(" ", "T") + "Z";
+  }
+  const states: Record<string, string> = {
+    success: TASK_COMPLETED_STATUS_TEXT,
+    running: "运行中",
+    error: "执行失败",
+    skipped: "已跳过",
+    cancelled: "已取消",
+  };
+  return {
+    at,
+    statusText: latest
+      ? states[job.state?.last_status || ""] || "已运行"
+      : TASK_COMPLETED_STATUS_TEXT,
+  };
+}
+
 export function isVisibleTask(job: CronJobSpecOutput): boolean {
   return Boolean(job.task?.visible_in_my_tasks);
 }

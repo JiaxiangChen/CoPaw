@@ -2,6 +2,7 @@
 """串联真实新路由、跨服务HTTP客户端和共库SQL，不连接外部业务服务。"""
 
 import asyncio
+import base64
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -465,10 +466,12 @@ async def test_existing_skill_lookup_can_supply_new_scheduler_workflow_creation(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind,expected_runs", [("ordinary", 1), ("batch", 3)])
-async def test_platform_envelope_reaches_swe_once_through_new_callback(
+@pytest.mark.parametrize("envelope", ["flat", "encoded"])
+async def test_each_platform_arrival_reaches_swe_through_new_callback(
     chain,
     kind,
     expected_runs,
+    envelope,
 ):
     from scheduler.app.services.cron.managed.distribution_worker import (
         BroadcastProcessor,
@@ -520,6 +523,8 @@ async def test_platform_envelope_reaches_swe_once_through_new_callback(
         "logId": 10001,
         "fireTime": fire.isoformat(),
     }
+    if envelope == "flat":
+        callback = json.loads(base64.urlsafe_b64decode(timer["jobParam"]))
     # 平台封装中的完整身份来自真实客户端，不另造 Header 或操作引用。
     first = await chain.http.post(
         f"/api/scheduler/cron/{kind}/callback",
@@ -539,23 +544,35 @@ async def test_platform_envelope_reaches_swe_once_through_new_callback(
     for row in rows:
         await dispatcher.dispatch_registered(row["execution_id"])
         await asyncio.gather(*chain.swe.state.managed_cron_tasks)
+        # 平台新请求不去重，不等于允许同一执行 ID 的内部重试再跑业务。
+        await dispatcher.dispatch_registered(row["execution_id"])
     assert len(chain.engine.calls) == expected_runs
     repeated = await chain.http.post(
         f"/api/scheduler/cron/{kind}/callback",
         json=callback,
     )
     assert repeated.status_code == 202, repeated.text
-    assert repeated.json() == {**original, "reused": True}
+    assert repeated.json()["accepted"] and not repeated.json()["reused"]
+    reference = "execution_id" if kind == "ordinary" else "batch_id"
+    assert repeated.json()[reference] != original[reference]
+    pending = await chain.db.fetch_all(
+        "SELECT execution_id FROM swe_cron_execution_runs WHERE status='queued' ORDER BY queue_order",
+    )
+    assert len(pending) == expected_runs
+    for row in pending:
+        await dispatcher.dispatch_registered(row["execution_id"])
+        await asyncio.gather(*chain.swe.state.managed_cron_tasks)
+    assert len(chain.engine.calls) == expected_runs * 2
     assert (
         chain.db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_execution_runs WHERE status='success'",
         ).fetchone()[0]
-        == expected_runs
+        == expected_runs * 2
     )
     assert (
         chain.db.conn.execute(
             "SELECT COUNT(*) FROM swe_cron_executions",
         ).fetchone()[0]
-        == expected_runs
+        == expected_runs * 2
     )
     assert all(item[1]["x-user-id"] == "alice" for item in chain.sent)

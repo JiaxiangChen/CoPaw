@@ -155,6 +155,10 @@ export interface ManagedBatchDeleteItem
   error_code?: string | null;
 }
 export interface ManagedBatchDeleteResult {
+  operation_id: string;
+  operation_status: "pending" | "running" | "completed" | "failed";
+  error_code?: string | null;
+  all_children?: boolean;
   request_id: string;
   source_job_id: string;
   status: string;

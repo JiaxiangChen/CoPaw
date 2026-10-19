@@ -15,6 +15,7 @@ from .database import (
 )
 
 from ..__version__ import __version__
+from ..logging import configure_logging
 from ..config.constant import (
     DB_HOST,
     DOCS_ENABLED,
@@ -35,6 +36,7 @@ from .services.cron.managed.runtime import (
     prepare_managed_runtime,
 )
 
+configure_logging()
 logger = logging.getLogger(__name__)
 
 

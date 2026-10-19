@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Alert, Space } from "antd";
-import { Button, Card, Switch, Table } from "@agentscope-ai/design";
+import { Button, Card, Table } from "@agentscope-ai/design";
 import { useTranslation } from "react-i18next";
 import type { ManagedCronContext, ManagedJob } from "@/api/types/schedulerCron";
 import { targetManagedContext } from "@/api/modules/schedulerCron";
@@ -79,6 +79,13 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
         items={[{ title: t("nav.runCenter") }, { title: "定时任务（新）" }]}
         extra={
           <Space>
+            <Button
+              type={includeDeleted ? "primary" : "default"}
+              aria-pressed={includeDeleted}
+              onClick={() => setIncludeDeleted((current) => !current)}
+            >
+              包含已删除任务（查看清理进度）
+            </Button>
             <Button onClick={refresh} loading={data.loading}>
               刷新
             </Button>
@@ -92,10 +99,6 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
           </Space>
         }
       />
-      <Space style={{ marginBottom: 12 }}>
-        <Switch checked={includeDeleted} onChange={setIncludeDeleted} />
-        <span>包含已删除任务（查看清理进度）</span>
-      </Space>
       {(data.error || actionError) && (
         <Alert type="error" showIcon message={actionError || data.error} />
       )}
