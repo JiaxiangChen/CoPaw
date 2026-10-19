@@ -421,6 +421,15 @@ export function attachHtmlPreviewClickTracker(params: {
     return () => { };
   }
 
+  // 屏蔽「随手改」SnapEdit 可视化编辑器页面（snap-editor/snapHtmlEditor.ts 生成，含 #shell/#blockBar 外壳）的点击埋点
+  if (
+    doc.querySelector("#blockBar") ||
+    doc.querySelector("#shell") ||
+    doc.querySelector("#aiPanel")
+  ) {
+    return () => { };
+  }
+
   if (params.listSnapshotReporter) {
     const snapshotPayload = buildHtmlPreviewListSnapshotPayload(
       doc,

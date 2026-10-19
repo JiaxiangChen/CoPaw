@@ -29,6 +29,13 @@ const planView = {
 
 beforeEach(() => {
   mockRequest.mockReset();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (path: string, options?: RequestInit) =>
+        new Response(JSON.stringify(await mockRequest(path, options))),
+    ),
+  );
   useIframeStore
     .getState()
     .setContext({
@@ -48,7 +55,10 @@ beforeEach(() => {
     editingId: null,
   });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 async function openEditPlan() {
   mockRequest.mockResolvedValueOnce({ items: [planView] });
