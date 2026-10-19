@@ -484,11 +484,6 @@ class QueryService:
                   WHERE s.trace_id = e.trace_id
                   AND (s.status IS NULL OR s.status = '')
               )
-              AND NOT EXISTS (
-                  SELECT 1 FROM swe_cron_subtasks s
-                  WHERE s.trace_id = e.trace_id
-                  AND s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT')
-              )
         """
         return await self.db.fetch_all(query)
 
@@ -1234,12 +1229,7 @@ class QueryService:
             AND NOT EXISTS (
                 SELECT 1 FROM swe_cron_subtasks s
                 WHERE s.trace_id = e.trace_id
-                AND (s.status IS NULL OR s.status = '')
-            )
-            AND NOT EXISTS (
-                SELECT 1 FROM swe_cron_subtasks s
-                WHERE s.trace_id = e.trace_id
-                AND s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT')
+                AND (s.status IS NULL OR s.status = '' OR s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT'))
             )
         """
         success_count = await self.db.execute(success_query)
