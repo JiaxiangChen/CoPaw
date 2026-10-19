@@ -302,5 +302,8 @@ async def test_real_workflow_adapter_uses_frozen_version_not_current(
     history = db.conn.execute("SELECT * FROM swe_cron_executions").fetchone()
     assert store.versions == [1]
     assert history["status"] == ("error" if missing else "success")
+    assert history["error_message"] == (
+        "frozen workflow version unavailable" if missing else ""
+    )
     assert engine.calls == (0 if missing else 1)
     assert not list(tmp_path.rglob("jobs.json"))

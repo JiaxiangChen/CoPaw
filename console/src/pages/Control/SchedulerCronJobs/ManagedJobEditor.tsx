@@ -16,12 +16,14 @@ import { useExecutionModelOptions } from "@/hooks/useExecutionModelOptions";
 import { CronJobFormBody } from "../CronJobs/components/CronJobFormBody";
 import { DEFAULT_FORM_VALUES } from "../CronJobs/components/constants";
 import {
-  buildCronJobFormValues,
-  buildCronJobSubmitPayload,
   buildSkillSelectOptions,
   type CronJobFormValues,
   type SkillSelectOption,
 } from "../CronJobs/helpers";
+import {
+  buildManagedCronFormValues,
+  buildManagedCronSubmitPayload,
+} from "./scheduleForm";
 import { detailToJob, failureMessage, RequestIdentity } from "./helpers";
 import styles from "../CronJobs/index.module.less";
 
@@ -87,7 +89,7 @@ export function ManagedJobEditor({
         setSkills(buildSkillSelectOptions(options.skills ?? []));
         form.setFieldsValue(
           current
-            ? buildCronJobFormValues(current)
+            ? buildManagedCronFormValues(current)
             : {
                 ...DEFAULT_FORM_VALUES,
                 id: "由系统自动分配",
@@ -117,7 +119,7 @@ export function ManagedJobEditor({
   const submit = async (values: CronJobFormValues) => {
     if (!ready || loading || saving) return;
     try {
-      const spec = buildCronJobSubmitPayload(values);
+      const spec = buildManagedCronSubmitPayload(values, snapshot);
       const operation = await onSave(snapshot, spec, request.current.for(spec));
       if (mounted.current && operation) onClose();
       else if (mounted.current)

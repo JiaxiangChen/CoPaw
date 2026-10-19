@@ -6,6 +6,16 @@
 
 ## 文件与执行顺序
 
+新版批调度看板展示对齐需部署Monitor、Scheduler和Console，不改调度/重试写入，无SQL/配置增量。错误详情、中文优先信息、父任务冻结模型、批次结果提示及结构化Worker详情见[展示对齐验证](cron_batch_board_display_parity.md)。Owner项已按用户最新要求从新版详情头部移除，该删除展示操作只需更新Console，后端字段不变；入口暂停仍不阻止已入队执行。
+
+2026-10-19失败详情与最终历史修复：部署SWE及Console，无Scheduler生产接口、SQL或配置变更。全部新任务失败信息按旧版异常说明语义写入既有历史error_message及状态last_error（先脱敏、最多200字符），不再仅支持WorkflowCallError，也不追加workflow诊断后缀；run.error_code仍是稳定机器码。新版批业务重试在SWE新结果事务内取消前一历史is_final，新行is_final=1；排队、运输重投及其他批次不提前改标记。新版列表error可hover查看安全详情。以下验证仅操作测试任务：
+
+- 分别触发Agent/子任务失败、workflow缺少用户信息或密钥、授权过期、绑定配置失败，历史error_message和详情state.last_error应保留旧执行器的具体错误说明，而非仅cron_execution_failed。超过200字符截断，令牌/授权头/Cookie脱敏；不展开异常链，run.error_code保持原机器码。
+- workflow受控HTTP失败（如502）沿用原执行器文案“技能任务执行失败”，不往文案拼接HTTP状态；分类和HTTP状态保留在原有workflow执行元数据中。
+- 打开新版任务页hover error，显示同一安全摘要；成功/运行中不显示旧错误，缺失详情有明确提示，不新增查询请求。
+- 对该批失败成员人工重试：202受理时旧is_final仍1；新结果历史真正写入后旧0、新1，重复提交同一请求/结果不新增历史、不再清其他记录。新历史写入或标记更新失败时不得只完成一半。
+- 检查无关租户、其他批次及手动运行历史未被清零。旧历史丢失的错误详情和此前产生的重复is_final不自动回填。验收窗口至少覆盖一次失败→重试→新结果，按执行ID核对共库；持续结果提交失败应暂停新增重试，保留原执行凭证排查，不能重跑业务来掩盖落库失败。
+
 2026-10-19 异步子任务删除：本轮只更新Scheduler和Console，不新增表/字段或环境配置，复用swe_cron_registration_journal。先部署Scheduler及其后台，再部署Console；前后端需要匹配，不能把旧前端的HTTP200同步完成判断用于新202响应。SWE无需因本轮异步删除单独更新；改造前行内包不包含本轮异步删除。
 
 1. 数据库负责人先在实际共库执行只读的 [结构核对 SQL](cron_phase2_schema_audit.sql)，保存数据库版本、缺列、列类型/精度、索引和引擎结果。

@@ -75,6 +75,192 @@ def retry_body(preview, request_id="retry-1", *, stopped=False):
 
 
 @pytest.mark.asyncio
+async def test_new_result_switches_final_history_only_after_business_retry_finishes(
+    callback_setup,
+):
+    from scheduler.app.services.cron.managed.batch_retry import (
+        BatchRetryService,
+    )
+    from swe.app.crons.managed_results import ExecutionWriter, ExecutionOutcome
+
+    db = callback_setup[0]
+    caller, batch = await failed_batch(callback_setup)
+    service = BatchRetryService(db)
+    preview = await service.preview(caller, batch)
+    command = retry_body(preview)
+    accepted = await service.retry(caller, batch, command)
+    assert accepted["queued"] == 1
+    assert (
+        db.conn.execute("SELECT is_final FROM swe_cron_executions").fetchone()[
+            0
+        ]
+        == 1
+    )
+    execution_id = accepted["results"][0]["execution_id"]
+    run = await db.fetch_one(
+        "SELECT * FROM swe_cron_execution_runs WHERE execution_id=%s",
+        (execution_id,),
+    )
+    key = tuple(
+        run[name] for name in ("tenant_id", "source_id", "agent_id", "job_id")
+    )
+    writer = ExecutionWriter(db)
+    await writer.accept(execution_id, key)
+    await writer.start(execution_id, key, "retry-owner")
+    await writer.complete(
+        execution_id,
+        key,
+        "retry-owner",
+        ExecutionOutcome("success"),
+    )
+    rows = db.conn.execute(
+        "SELECT status,is_final FROM swe_cron_executions ORDER BY id",
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [("error", 0), ("success", 1)]
+    assert (
+        await writer.complete(
+            execution_id,
+            key,
+            "retry-owner",
+            ExecutionOutcome("success"),
+        )
+        is False
+    )
+    assert (await service.retry(caller, batch, command))["reused"] is True
+    assert (
+        db.conn.execute("SELECT COUNT(*) FROM swe_cron_executions").fetchone()[
+            0
+        ]
+        == 2
+    )
+
+
+async def _running_retry(setup):
+    from scheduler.app.services.cron.managed.batch_retry import (
+        BatchRetryService,
+    )
+    from swe.app.crons.managed_results import ExecutionWriter
+
+    caller, batch = await failed_batch(setup)
+    db = setup[0]
+    service = BatchRetryService(db)
+    accepted = await service.retry(
+        caller,
+        batch,
+        retry_body(await service.preview(caller, batch)),
+    )
+    execution_id = accepted["results"][0]["execution_id"]
+    run = await db.fetch_one(
+        "SELECT * FROM swe_cron_execution_runs WHERE execution_id=%s",
+        (execution_id,),
+    )
+    key = caller.job_key(run["job_id"])
+    writer = ExecutionWriter(db)
+    await writer.accept(execution_id, key)
+    await writer.start(execution_id, key, "retry-owner")
+    return writer, run, key
+
+
+@pytest.mark.asyncio
+async def test_final_history_update_failure_rolls_back_new_history(
+    callback_setup,
+    monkeypatch,
+):
+    from swe.app.crons.managed_results import ExecutionOutcome
+
+    db = callback_setup[0]
+    writer, run, key = await _running_retry(callback_setup)
+    original = db.execute
+
+    async def fail_final_update(sql, params=None):
+        if sql.startswith("UPDATE swe_cron_executions SET is_final=0"):
+            raise ConnectionError("history update interrupted")
+        return await original(sql, params)
+
+    monkeypatch.setattr(db, "execute", fail_final_update)
+    with pytest.raises(ConnectionError):
+        await writer.complete(
+            run["execution_id"],
+            key,
+            "retry-owner",
+            ExecutionOutcome("success"),
+        )
+    rows = db.conn.execute(
+        "SELECT is_final FROM swe_cron_executions",
+    ).fetchall()
+    assert [row[0] for row in rows] == [1]
+    assert (await writer.get(run["execution_id"], key))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_retry_history_cannot_replace_another_tenant(callback_setup):
+    import json
+    from swe.app.crons.managed_results import ExecutionOutcome
+    from tests.unit.scheduler.test_managed_cron_executions import enqueue
+
+    db, caller, management = callback_setup
+    writer, run, key = await _running_retry(callback_setup)
+    foreign = replace(caller, tenant_id="bob", actor_id="bob")
+    other, _ = await enqueue((db, foreign, management), kind="manual")
+    foreign_key = foreign.job_key(other["job_id"])
+    await writer.accept(other["execution_id"], foreign_key)
+    await writer.start(other["execution_id"], foreign_key, "other-owner")
+    await writer.complete(
+        other["execution_id"],
+        foreign_key,
+        "other-owner",
+        ExecutionOutcome("success"),
+    )
+    meta = json.loads(run["dispatch_meta_json"])
+    meta["previous_execution_id"] = other["execution_id"]
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET dispatch_meta_json=? WHERE execution_id=?",
+        (json.dumps(meta), run["execution_id"]),
+    )
+    with pytest.raises(ValueError, match="history_identity_invalid"):
+        await writer.complete(
+            run["execution_id"],
+            key,
+            "retry-owner",
+            ExecutionOutcome("success"),
+        )
+    assert [
+        row[0]
+        for row in db.conn.execute(
+            "SELECT is_final FROM swe_cron_executions",
+        ).fetchall()
+    ] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_retry_history_cannot_replace_another_batch(callback_setup):
+    import json
+    from swe.app.crons.managed_results import ExecutionOutcome
+
+    db = callback_setup[0]
+    writer, run, key = await _running_retry(callback_setup)
+    meta = json.loads(run["dispatch_meta_json"])
+    meta["batch_id"] = "unrelated-batch"
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET dispatch_meta_json=? WHERE execution_id=?",
+        (json.dumps(meta), run["execution_id"]),
+    )
+    with pytest.raises(ValueError, match="history_batch_invalid"):
+        await writer.complete(
+            run["execution_id"],
+            key,
+            "retry-owner",
+            ExecutionOutcome("success"),
+        )
+    assert [
+        row[0]
+        for row in db.conn.execute(
+            "SELECT is_final FROM swe_cron_executions",
+        ).fetchall()
+    ] == [1]
+
+
+@pytest.mark.asyncio
 async def test_manual_business_retry_keeps_member_count_and_same_request_result(
     callback_setup,
 ):

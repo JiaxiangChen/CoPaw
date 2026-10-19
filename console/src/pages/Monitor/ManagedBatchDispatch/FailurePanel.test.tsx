@@ -67,3 +67,32 @@ it("响应丢失时保留并重提原始请求，不按新预览换请求ID", as
   expect(api.retry.mock.calls[1]).toEqual(api.retry.mock.calls[0]);
   expect(sessionStorage.getItem(key)).toBeNull();
 });
+
+it("失败预览展示原始错误说明，而不只是公开错误码", async () => {
+  api.failures.mockResolvedValue({
+    counts: [{ failure_type: "configuration", label: "配置错误", count: 1 }],
+    items: [
+      {
+        ...candidate,
+        tenant_id: "user",
+        failure_type: "configuration",
+        error_code: "cron_execution_failed",
+        error_message: "workflow secret value missing: auth_token",
+      },
+    ],
+  });
+  render(
+    <FailurePanel
+      source="bank"
+      actor="manager"
+      batchId="batch"
+      onQueued={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByText("workflow secret value missing: auth_token"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("columnheader", { name: "原始失败原因" }),
+  ).toBeInTheDocument();
+});

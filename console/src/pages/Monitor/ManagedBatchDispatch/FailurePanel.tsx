@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Select, Space, Spin, Table } from "antd";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tooltip,
+} from "antd";
 import {
   managedBatchBoard,
   retryCandidates,
@@ -180,6 +189,22 @@ export default function FailurePanel({
               { title: "执行 ID", dataIndex: "execution_id", ellipsis: true },
               { title: "用户", dataIndex: "tenant_id" },
               { title: "业务尝试", dataIndex: "business_attempt" },
+              {
+                title: "原始失败原因",
+                width: 200,
+                render: (_, item) => {
+                  const message =
+                    item.error_message ||
+                    item.settled_error_code ||
+                    item.error_code ||
+                    "-";
+                  return (
+                    <Tooltip title={message}>
+                      <span>{message}</span>
+                    </Tooltip>
+                  );
+                },
+              },
               {
                 title: "原 / 当前版本",
                 render: (_, item) =>

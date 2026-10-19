@@ -39,6 +39,7 @@ VALID = (
 )
 BATCH_FROM = (
     f"FROM {RECEIPTS} c LEFT JOIN swe_cron_jobs_v2 p ON {identity_join('c', 'p')} "
+    f"LEFT JOIN swe_cron_job_states ps ON {identity_join('c', 'ps')} "
     f"LEFT JOIN {MEMBERS} m ON c.batch_id=m.batch_id AND c.source_id=m.source_id AND c.source_id COLLATE utf8mb4_bin=m.source_id "
     f"LEFT JOIN {RUNS} r ON m.current_execution_id=r.execution_id AND {identity_join('m', 'r')} "
     f"LEFT JOIN swe_cron_jobs_v2 d ON {identity_join('m', 'd')} "
@@ -48,9 +49,14 @@ BATCH_SELECT = f"""
 SELECT c.receipt_id,c.batch_id,c.tenant_id,c.source_id,c.agent_id,c.job_id,
 c.logical_fire_at,c.physical_fire_at,c.created_at,c.members_json,
 JSON_UNQUOTE(JSON_EXTRACT(p.spec_json,'$.name')) AS job_name,
+MAX(CASE WHEN m.member_role='parent' THEN r.provider_id END) AS provider_id,
+MAX(CASE WHEN m.member_role='parent' THEN r.model_id END) AS model_id,
+MAX(CASE WHEN ps.dispatch_state='batch_paused' THEN 1 ELSE 0 END) AS dispatch_paused,
 COUNT(m.member_id) AS member_count,
 SUM(CASE WHEN {DONE} THEN 1 ELSE 0 END) AS done_count,
 SUM(CASE WHEN {FAILED} THEN 1 ELSE 0 END) AS failed_count,
+SUM(CASE WHEN r.status='success' AND r.settled_status='success' THEN 1 ELSE 0 END) AS success_count,
+SUM(CASE WHEN r.status IN ('skipped','cancelled') THEN 1 ELSE 0 END) AS skipped_count,
 SUM(CASE WHEN {ACTIVE} THEN 1 ELSE 0 END) AS active_count,
 SUM(CASE WHEN r.status IN ('queued','dispatch_failed') THEN 1 ELSE 0 END) AS waiting_count,
 SUM(CASE WHEN m.member_id IS NOT NULL AND NOT COALESCE({VALID},0) THEN 1 ELSE 0 END) AS invalid_count,

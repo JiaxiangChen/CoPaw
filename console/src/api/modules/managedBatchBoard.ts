@@ -12,6 +12,12 @@ export interface ManagedBatch {
   member_count: number;
   done_count: number;
   failed_count: number;
+  success_count?: number;
+  skipped_count?: number;
+  provider_id?: string | null;
+  model_id?: string | null;
+  dispatch_paused?: boolean;
+  lock_owner?: string | null;
   active_count: number;
   waiting_count: number;
   completion_rate: number | null;
@@ -33,6 +39,7 @@ export interface ManagedBatchMember {
   settled_status: string | null;
   error_code: string | null;
   settled_error_code: string | null;
+  error_message?: string;
   provider_id: string;
   model_id: string;
   definition_version: number;
@@ -92,6 +99,7 @@ export interface RetryCandidate {
   business_attempt: number;
 }
 export interface FailureMember extends RetryCandidate {
+  error_message?: string;
   error_code?: string | null;
   settled_error_code?: string | null;
   tenant_id: string;

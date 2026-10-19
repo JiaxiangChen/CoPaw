@@ -116,3 +116,31 @@ it("低于列表定义版本的详情不允许回填旧时间并提交", async (
   expect(screen.getByRole("button", { name: /保\s*存/ })).toBeDisabled();
   expect(save).not.toHaveBeenCalled();
 });
+
+it.each(["0 9,10,11 * * *", "*/5 * * * *", "0 10 15 * *"])(
+  "真实编辑框以自定义模式展示%s并保留原表达式",
+  async (cron) => {
+    const { schedule, ...status } = job;
+    vi.mocked(request).mockResolvedValue({
+      ...status,
+      spec: { ...job, schedule: { ...schedule, cron } },
+    });
+    const save = vi.fn().mockResolvedValue({ operation_id: "save" });
+    render(
+      <ManagedJobEditor
+        context={context}
+        job={job}
+        saving={false}
+        onSave={save}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      await screen.findByLabelText("cronJobs.cronCustomExpression"),
+    ).toHaveValue(cron);
+    expect(screen.queryByDisplayValue("09:00")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1].schedule.cron).toBe(cron);
+  },
+);

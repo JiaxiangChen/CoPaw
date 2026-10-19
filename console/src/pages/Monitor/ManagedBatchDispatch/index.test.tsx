@@ -89,3 +89,62 @@ it("共享容量中途失败明确标记不完整，不显示成功曲线", asyn
   ).toBeTruthy();
   expect(screen.queryByText("测试容量曲线")).toBeNull();
 });
+
+it("批次列表显示父任务模型、入口暂停、成功失败及跳过数量", async () => {
+  const batch = {
+    batch_id: "batch",
+    job_id: "parent",
+    job_name: "日报",
+    member_count: 4,
+    done_count: 4,
+    failed_count: 1,
+    success_count: 2,
+    skipped_count: 1,
+    status: "failed",
+    completion_rate: 1,
+    dispatch_paused: true,
+    provider_id: "provider",
+    model_id: "model",
+  };
+  api.batches.mockResolvedValue({ items: [batch], total: 1, stats: {} });
+  api.detail.mockResolvedValue({
+    batch,
+    members: [],
+    member_total: 4,
+    events: [],
+    event_total: 0,
+  });
+  render(<ManagedBatchDispatchPage />);
+  const row = await screen.findByRole("button", { name: /日报.*parent/ });
+  expect(within(row).getByText("provider / model")).toBeInTheDocument();
+  expect(within(row).getByText("成功 2 个")).toBeInTheDocument();
+  expect(within(row).getByText("失败 1 个")).toBeInTheDocument();
+  expect(within(row).getByText("跳过／取消 1 个")).toBeInTheDocument();
+});
+
+it("运行中批次只提示入口暂停，不误称已入队任务暂停", async () => {
+  const batch = {
+    batch_id: "batch",
+    job_id: "parent",
+    job_name: "日报",
+    member_count: 4,
+    done_count: 1,
+    failed_count: 0,
+    success_count: 1,
+    skipped_count: 0,
+    status: "running",
+    completion_rate: 0.25,
+    dispatch_paused: true,
+  };
+  api.batches.mockResolvedValue({ items: [batch], total: 1, stats: {} });
+  api.detail.mockResolvedValue({
+    batch,
+    members: [],
+    member_total: 4,
+    events: [],
+    event_total: 0,
+  });
+  render(<ManagedBatchDispatchPage />);
+  expect(await screen.findByText("批调度入口已暂停")).toBeInTheDocument();
+  expect(screen.queryByText("后续调度已暂停")).toBeNull();
+});

@@ -256,21 +256,38 @@ function Board({ source, actor }: { source: string; actor: string }) {
                   <span className={styles.batchTiming}>
                     <strong>{timeText(item.logical_fire_at)}</strong>
                     <em>回调 {timeText(item.created_at)}</em>
+                    <small title="父任务本次执行的冻结模型；各成员模型见成员列表">
+                      {item.provider_id || "-"} / {item.model_id || "-"}
+                    </small>
                   </span>
                   <span className={styles.batchProgress}>
                     {statusTag(item.status)}
-                    <strong>
-                      {item.done_count}/{item.member_count}
-                    </strong>
-                    {item.completion_rate === null ? (
+                    {item.dispatch_paused &&
+                      item.done_count < item.member_count && (
+                        <Tag color="warning">批调度入口已暂停</Tag>
+                      )}
+                    {(item.skipped_count ?? 0) > 0 && (
+                      <strong>跳过／取消 {item.skipped_count} 个</strong>
+                    )}
+                    {item.status === "failed" ? (
+                      <strong className={styles.batchOutcome}>
+                        <span>成功 {item.success_count ?? "-"} 个</span>
+                        <span>失败 {item.failed_count} 个</span>
+                      </strong>
+                    ) : item.completion_rate === null ? (
                       <small>无可执行成员</small>
                     ) : (
-                      <Progress
-                        percent={Math.round(item.completion_rate * 100)}
-                        size="small"
-                        showInfo={false}
-                        status={item.failed_count ? "exception" : "normal"}
-                      />
+                      <>
+                        <strong>
+                          {item.done_count}/{item.member_count}
+                        </strong>
+                        <Progress
+                          percent={Math.round(item.completion_rate * 100)}
+                          size="small"
+                          showInfo={false}
+                          status={item.failed_count ? "exception" : "normal"}
+                        />
+                      </>
                     )}
                   </span>
                 </button>

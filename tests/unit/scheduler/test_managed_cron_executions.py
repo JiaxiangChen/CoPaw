@@ -52,7 +52,8 @@ class ExecutionDatabase(ManagementDatabase):
                 trace_id TEXT, session_id TEXT, input_snapshot TEXT,
                 output_preview TEXT, meta TEXT, notification_status TEXT,
                 notification_due_at TEXT, notification_timezone TEXT,
-                is_read INTEGER, read_at TEXT, created_at TEXT
+                is_read INTEGER, read_at TEXT, created_at TEXT,
+                is_final INTEGER NOT NULL DEFAULT 1
             );
         """)
         add_board_tables(self.conn)

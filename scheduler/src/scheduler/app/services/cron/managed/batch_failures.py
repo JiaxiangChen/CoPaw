@@ -47,6 +47,7 @@ RUN_FIELDS = (
     "dispatch_attempt",
     "updated_at",
     "accepted_at",
+    "history_execution_id",
 )
 
 
@@ -159,9 +160,52 @@ def preview_item(row):
             "settled_error_code",
             row.get("settled_error_code"),
         ),
+        "error_message": row.get("display_error_message", ""),
         "transport_only": row["status"] == "dispatch_failed"
         and not row.get("accepted_at"),
     }
+
+
+async def display_error_messages(db, rows):
+    ids = [
+        row["history_execution_id"]
+        for row in rows
+        if row.get("history_execution_id")
+    ]
+    histories = (
+        await db.fetch_all(
+            "SELECT id,tenant_id,job_id,error_message FROM swe_cron_executions WHERE id IN ("
+            + ",".join("%s" for _ in ids)
+            + ")",
+            tuple(ids),
+        )
+        if ids
+        else []
+    )
+    messages = {
+        (item["id"], item["tenant_id"], item["job_id"]): item["error_message"]
+        for item in histories
+    }
+    for row in rows:
+        history = messages.get(
+            (row.get("history_execution_id"), row["tenant_id"], row["job_id"]),
+        )
+        try:
+            meta = json.loads(row.get("result_json") or "{}")
+        except (ValueError, TypeError):
+            meta = {}
+        detail = meta.get("error_detail") if isinstance(meta, dict) else None
+        code = row.get("settled_error_code") or row.get("error_code")
+        if code == "cron_async_subtasks_failed":
+            code = "子任务执行失败"
+        row["display_error_message"] = next(
+            (
+                value[:2048]
+                for value in (history, detail, code)
+                if isinstance(value, str) and value.strip()
+            ),
+            "",
+        )
 
 
 async def failure_preview(db, caller, batch_id, types=()):
@@ -172,6 +216,7 @@ async def failure_preview(db, caller, batch_id, types=()):
     rows = [row for row in await member_rows(db, receipt) if is_failure(row)]
     counts = Counter(failure_type(row) for row in rows)
     selected = [row for row in rows if not types or failure_type(row) in types]
+    await display_error_messages(db, selected[:200])
     return {
         "batch_id": batch_id,
         "counts": [

@@ -7,7 +7,7 @@ import type {
 } from "../../../api/modules/monitor";
 import WorkerHistoryChart from "../CronBatchDispatch/WorkerHistoryChart";
 import styles from "../CronBatchDispatch/index.module.less";
-import { timeText } from "./format";
+import WorkerAdjustmentDetails from "./WorkerAdjustmentDetails";
 
 function CapacityRow({
   item,
@@ -180,17 +180,7 @@ export default function SharedWorkers({
                 </div>
                 <div className={styles.workerEventList}>
                   {events.slice((current - 1) * 5, current * 5).map((event) => (
-                    <details className={styles.workerEvent} key={event.id}>
-                      <summary className={styles.workerEventSummary}>
-                        <strong>{event.decision_reason || "未记录原因"}</strong>
-                        <span>
-                          {event.provider_id}/{event.model_id} ·{" "}
-                          {event.previous_workers} → {event.effective_workers}
-                        </span>
-                        <em>{timeText(event.created_at)}</em>
-                      </summary>
-                      <pre>{JSON.stringify(event, null, 2)}</pre>
-                    </details>
+                    <WorkerAdjustmentDetails key={event.id} item={event} />
                   ))}
                 </div>
                 <Pagination

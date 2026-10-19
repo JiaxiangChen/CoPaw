@@ -141,3 +141,146 @@ async def test_zero_member_batch_is_received_but_invalid_manifest_is_unavailable
     )
     with pytest.raises(ManagedBoardUnavailable):
         await service.batches("bank", status="completed")
+
+
+@pytest.mark.asyncio
+async def test_board_display_fields_use_current_execution_and_exact_history(
+    callback_setup,
+):
+    from monitor.app.services.cron.managed_board import ManagedBoardQuery
+    from scheduler.app.services.cron.managed.batch_retry import (
+        BatchRetryService,
+    )
+
+    db = callback_setup[0]
+    caller, batch = await failed_batch(callback_setup)
+    db.conn.execute(
+        "UPDATE swe_cron_executions SET error_message='workflow secret value missing: auth_token'",
+    )
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET provider_id='frozen-provider',model_id='frozen-model'",
+    )
+    db.conn.execute(
+        "UPDATE swe_cron_job_states SET dispatch_state='batch_paused'",
+    )
+    detail = await ManagedBoardQuery(db).detail("bank", batch)
+    item = detail["batch"]
+    assert (item["provider_id"], item["model_id"]) == (
+        "frozen-provider",
+        "frozen-model",
+    )
+    assert item["dispatch_paused"] is True
+    assert item["success_count"] == item["skipped_count"] == 0
+    assert item["lock_owner"] is None
+    assert (
+        detail["members"][0]["error_message"]
+        == "workflow secret value missing: auth_token"
+    )
+    preview = await BatchRetryService(db).preview(caller, batch)
+    assert (
+        preview["items"][0]["error_message"]
+        == detail["members"][0]["error_message"]
+    )
+    assert "dispatch_owner" not in str(detail)
+
+    db.conn.execute(
+        "UPDATE swe_cron_executions SET tenant_id='foreign-user',error_message='foreign-secret'",
+    )
+    detail = await ManagedBoardQuery(db).detail("bank", batch)
+    preview = await BatchRetryService(db).preview(caller, batch)
+    assert detail["members"][0]["error_message"] == "cron_execution_failed"
+    assert preview["items"][0]["error_message"] == "cron_execution_failed"
+    assert "foreign-secret" not in str([detail, preview])
+
+
+@pytest.mark.parametrize(
+    "status, settled, success, skipped",
+    [
+        ("success", "success", 1, 0),
+        ("skipped", None, 0, 1),
+        ("cancelled", None, 0, 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_board_result_counts_do_not_treat_skip_as_success(
+    callback_setup,
+    status,
+    settled,
+    success,
+    skipped,
+):
+    from monitor.app.services.cron.managed_board import ManagedBoardQuery
+
+    db = callback_setup[0]
+    _, batch = await failed_batch(callback_setup)
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET status=?,settled_status=?,error_code=NULL",
+        (status, settled),
+    )
+    detail = await ManagedBoardQuery(db).detail("bank", batch)
+    assert detail["batch"]["success_count"] == success
+    assert detail["batch"]["skipped_count"] == skipped
+    assert detail["batch"]["done_count"] == 1
+    if status == "success":
+        assert detail["members"][0]["error_message"] == ""
+
+
+@pytest.mark.parametrize(
+    "metadata, expected",
+    [
+        (
+            '{"error_detail":"配置失效","private":"must-not-expose"}',
+            "配置失效",
+        ),
+        ("{invalid", "cron_execution_failed"),
+        ("[]", "cron_execution_failed"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_board_missing_history_uses_only_error_summary(
+    callback_setup,
+    metadata,
+    expected,
+):
+    from monitor.app.services.cron.managed_board import ManagedBoardQuery
+    from scheduler.app.services.cron.managed.batch_retry import (
+        BatchRetryService,
+    )
+
+    db = callback_setup[0]
+    caller, batch = await failed_batch(callback_setup)
+    db.conn.execute("DELETE FROM swe_cron_executions")
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET result_json=?",
+        (metadata,),
+    )
+    detail = await ManagedBoardQuery(db).detail("bank", batch)
+    preview = await BatchRetryService(db).preview(caller, batch)
+    assert detail["members"][0]["error_message"] == expected
+    assert preview["items"][0]["error_message"] == expected
+    assert "must-not-expose" not in str([detail, preview])
+
+
+@pytest.mark.asyncio
+async def test_async_child_failure_has_readable_message_without_inventing_detail(
+    callback_setup,
+):
+    from monitor.app.services.cron.managed_board import ManagedBoardQuery
+    from scheduler.app.services.cron.managed.batch_retry import (
+        BatchRetryService,
+    )
+
+    db = callback_setup[0]
+    caller, batch = await failed_batch(callback_setup)
+    db.conn.execute("UPDATE swe_cron_executions SET error_message=''")
+    db.conn.execute(
+        "UPDATE swe_cron_execution_runs SET status='success',error_code=NULL,settled_status='error',settled_error_code='cron_async_subtasks_failed'",
+    )
+    detail = await ManagedBoardQuery(db).detail("bank", batch)
+    preview = await BatchRetryService(db).preview(caller, batch)
+    assert detail["members"][0]["error_message"] == "子任务执行失败"
+    assert preview["items"][0]["error_message"] == "子任务执行失败"
+    assert (
+        detail["members"][0]["settled_error_code"]
+        == "cron_async_subtasks_failed"
+    )

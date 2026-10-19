@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from .managed_results import ExecutionOutcome, TERMINAL
 from .models import CronJobSpec
-from .managed_failure import error_metadata
+from .managed_failure import error_metadata, public_failure_detail
 
 logger = logging.getLogger(__name__)
 
@@ -19,15 +19,19 @@ def _failure_outcome(error):
         status, code = "cancelled", "cron_execution_cancelled"
     elif isinstance(error, (TimeoutError, asyncio.TimeoutError)):
         code = "cron_execution_timeout"
+    metadata = (
+        error_metadata(error)
+        if status == "error"
+        else getattr(error, "cron_execution_meta", None)
+    )
     return ExecutionOutcome(
         status,
         error_code=code,
         trace_id=str(getattr(error, "cron_trace_id", "")),
-        execution_meta=(
-            error_metadata(error)
-            if status == "error"
-            else getattr(error, "cron_execution_meta", None)
-        ),
+        execution_meta={
+            **(metadata if isinstance(metadata, dict) else {}),
+            "error_detail": public_failure_detail(error),
+        },
     )
 
 

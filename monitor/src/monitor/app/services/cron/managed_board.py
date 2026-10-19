@@ -24,11 +24,18 @@ def batch_item(row):
         "member_count",
         "done_count",
         "failed_count",
+        "success_count",
+        "skipped_count",
+        "provider_id",
+        "model_id",
         "active_count",
         "waiting_count",
         "status",
     )
     result = {name: row[name] for name in fields}
+    result["dispatch_paused"] = bool(row["dispatch_paused"])
+    # 新协议没有批次级Owner；dispatch_owner是派发令牌，不能暴露。
+    result["lock_owner"] = None
     result.update(
         {
             name: sql.time_text(row[name])
@@ -86,9 +93,34 @@ def member_item(row):
             "bbk_id": spec.get("bbk_id"),
             "dispatch_priority": meta.get("dispatch_priority"),
             "viewer_heat_score": meta.get("viewer_heat_score"),
+            "error_message": member_error_message(row),
         },
     )
     return result
+
+
+def member_error_message(row):
+    code = row.get("settled_error_code") or row.get("error_code")
+    if code == "cron_async_subtasks_failed":
+        code = "子任务执行失败"
+    if (
+        row.get("status") not in {"error", "dispatch_failed"}
+        and row.get(
+            "settled_status",
+        )
+        != "error"
+    ):
+        return ""
+    try:
+        meta = json.loads(row.get("result_json") or "{}")
+    except (ValueError, TypeError):
+        meta = {}
+    detail = meta.get("error_detail") if isinstance(meta, dict) else None
+    # 只返回现有摘要字段，不展开整个结果或异常链。
+    for value in (row.get("history_error_message"), detail, code):
+        if isinstance(value, str) and value.strip():
+            return value[:2048]
+    return ""
 
 
 class ManagedBoardQuery:
@@ -203,8 +235,9 @@ class ManagedBoardQuery:
             tuple(params),
         )
         rows = await self.db.fetch_all(
-            "SELECT r.*,m.member_id,m.business_attempt,m.member_role,m.dispatch_order AS member_order,d.definition_version AS current_definition_version,s.management_status,s.dispatch_state "
+            "SELECT r.*,h.error_message AS history_error_message,m.member_id,m.business_attempt,m.member_role,m.dispatch_order AS member_order,d.definition_version AS current_definition_version,s.management_status,s.dispatch_state "
             + sql.MEMBER_FROM
+            + "LEFT JOIN swe_cron_executions h ON h.id=r.history_execution_id AND h.tenant_id=r.tenant_id AND h.tenant_id COLLATE utf8mb4_bin=r.tenant_id AND h.job_id=r.job_id AND h.job_id COLLATE utf8mb4_bin=r.job_id "
             + f" WHERE {where} ORDER BY m.dispatch_order,m.member_id LIMIT %s OFFSET %s",
             (*params, limit, (page - 1) * limit),
         )

@@ -1,7 +1,46 @@
 # -*- coding: utf-8 -*-
-"""在异常仍可见时只生成公开分类，不持久化原始异常文本。"""
+"""保留旧版执行失败说明，并保存重试分类及脱敏摘要。"""
 
 import asyncio
+import json
+import re
+
+from ..runner.model_call_error_detail import redact_sensitive_fragments
+
+ERROR_DETAIL_LIMIT = 2048
+LEGACY_ERROR_MESSAGE_LIMIT = 200
+_TOKEN_ASSIGNMENT = re.compile(
+    r"""(?i)(["']?\btoken["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)""",
+)
+
+
+def public_failure_detail(error):
+    """与旧版 str(error)[:200] 一致，但先脱敏、不展开异常链。"""
+    detail = (
+        "Job was cancelled"
+        if isinstance(error, asyncio.CancelledError)
+        else str(error)
+    )
+    detail = _TOKEN_ASSIGNMENT.sub(r"\1[REDACTED]", detail)
+    return redact_sensitive_fragments(detail)[:LEGACY_ERROR_MESSAGE_LIMIT]
+
+
+def public_error_message(error_code, metadata):
+    """新记录用脱敏异常说明，旧记录或空异常仍回退稳定错误码。"""
+    if not error_code:
+        return None
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    detail = (
+        metadata.get("error_detail") if isinstance(metadata, dict) else None
+    )
+    if isinstance(detail, str) and detail.strip():
+        return redact_sensitive_fragments(detail)[:ERROR_DETAIL_LIMIT]
+    return error_code
+
 
 RULES = (
     ("auth_expired", ("cron auth user_info is expired",)),

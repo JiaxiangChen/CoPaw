@@ -6,6 +6,7 @@ from datetime import timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from ..runner.model_call_error_detail import redact_sensitive_fragments
+from .managed_failure import public_error_message
 from ..source_system_config.runtime import (
     get_current_source_system_config,
     resolve_cron_notification_config,
@@ -146,10 +147,15 @@ def history_values(run, outcome, now, *, deleted=False):
         "end_time": end.astimezone(beijing).replace(tzinfo=None),
         "duration_ms": max(int((end - started).total_seconds() * 1000), 0),
         "status": outcome.status,
-        "error_message": outcome.error_code or "",
+        "error_message": public_error_message(
+            outcome.error_code,
+            outcome.execution_meta,
+        )
+        or "",
         "instance_id": str(run.get("run_owner") or "")[:64],
         "executor_leader": outcome.executor_leader[:64],
         "is_manual": int(run["kind"] == "manual"),
+        "is_final": 1,
         "trace_id": outcome.trace_id[:64],
         "session_id": spec.get("meta", {}).get("task_session_id", "")[:64],
         "input_snapshot": bounded_json(outcome.input_snapshot, 16000),

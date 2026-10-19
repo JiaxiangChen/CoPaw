@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from .managed_history import history_values, safe_metadata
 from .managed_events import append_run_event
+from .managed_failure import public_error_message
 from ..source_system_config.runtime import (
     get_current_source_system_config,
     resolve_cron_unread_auto_pause_config,
@@ -285,6 +286,7 @@ class ExecutionWriter:
                 deleted=bool(definition["deleted_at"]),
             ),
         )
+        await self._finalize_previous_history(run)
         await self._change(
             run,
             {
@@ -312,6 +314,36 @@ class ExecutionWriter:
         else:
             await self._release_stale_running(run, outcome)
 
+    async def _finalize_previous_history(self, run):
+        """与新历史同事务替换业务重试结果，不影响其他任务或其他批次。"""
+        meta = json.loads(run["dispatch_meta_json"])
+        previous_id = meta.get("previous_execution_id")
+        if run["kind"] != "batch" or not previous_id:
+            return
+        key = tuple(run[name] for name in KEYS)
+        previous = await self.db.fetch_one(
+            f"SELECT history_execution_id, dispatch_meta_json, kind FROM {TABLE} "
+            f"WHERE execution_id=%s AND {WHERE} FOR UPDATE",
+            (previous_id, *key),
+        )
+        if previous is None or previous["kind"] != "batch":
+            raise ValueError("cron_retry_history_identity_invalid")
+        prior_meta = json.loads(previous["dispatch_meta_json"])
+        if not meta.get("batch_id") or meta["batch_id"] != prior_meta.get(
+            "batch_id",
+        ):
+            raise ValueError("cron_retry_history_batch_invalid")
+        if previous["history_execution_id"] is not None:
+            await self.db.execute(
+                "UPDATE swe_cron_executions SET is_final=0 "
+                "WHERE id=%s AND job_id=%s AND tenant_id=%s",
+                (
+                    previous["history_execution_id"],
+                    run["job_id"],
+                    run["tenant_id"],
+                ),
+            )
+
     async def _runtime_values(self, key, outcome):
         active = await self.db.fetch_one(
             f"SELECT COUNT(*) AS count FROM {TABLE} WHERE {WHERE} AND status='running'",
@@ -320,14 +352,22 @@ class ExecutionWriter:
         if active["count"]:
             return {"last_status": "running"}
         latest = await self.db.fetch_one(
-            f"SELECT status, error_code FROM {TABLE} WHERE {WHERE} AND started_at IS NOT NULL "
+            f"SELECT status, error_code, result_json FROM {TABLE} WHERE {WHERE} AND started_at IS NOT NULL "
             "ORDER BY started_order DESC, execution_id DESC LIMIT 1",
             key,
         )
         return {
             "last_status": latest["status"] if latest else outcome.status,
             "last_error": (
-                latest["error_code"] if latest else outcome.error_code
+                public_error_message(
+                    latest["error_code"],
+                    latest.get("result_json"),
+                )
+                if latest
+                else public_error_message(
+                    outcome.error_code,
+                    outcome.execution_meta,
+                )
             ),
         }
 

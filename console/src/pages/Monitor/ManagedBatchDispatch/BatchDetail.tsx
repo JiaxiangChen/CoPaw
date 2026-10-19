@@ -20,17 +20,15 @@ import styles from "../CronBatchDispatch/index.module.less";
 import { labels, statusTag, timeText } from "./format";
 import { useBoardResource } from "./useBoardResource";
 import FailurePanel from "./FailurePanel";
+import PriorityOrder from "./PriorityOrder";
+import { getBbkDisplayName } from "../../../constants/bbk";
 
 const memberColumns: ColumnsType<ManagedBatchMember> = [
   {
     title: "顺位",
     dataIndex: "member_order",
     width: 60,
-    render: (value) => (
-      <Tooltip title="受理时冻结的批内计划顺位，不代表实际开始先后">
-        {value + 1}
-      </Tooltip>
-    ),
+    render: (_, item) => <PriorityOrder item={item} />,
   },
   {
     title: "角色 / 用户",
@@ -41,7 +39,9 @@ const memberColumns: ColumnsType<ManagedBatchMember> = [
           {item.member_role === "parent" ? "父任务" : "子任务"} ·{" "}
           {item.tenant_id}
         </strong>
-        <span>{item.bbk_id || "未记录分行"}</span>
+        <span>
+          {item.bbk_id ? getBbkDisplayName(item.bbk_id) : "未记录分行"}
+        </span>
       </div>
     ),
   },
@@ -77,38 +77,47 @@ const memberColumns: ColumnsType<ManagedBatchMember> = [
     ),
   },
   {
-    title: "模型 / 优先信息",
+    title: "模型 / 热度",
     width: 180,
     render: (_, item) => (
       <div className={styles.stackCell}>
         <strong>
-          {item.provider_id} / {item.model_id}
+          {item.provider_id || "-"} / {item.model_id || "-"}
         </strong>
         <span>热度 {item.viewer_heat_score ?? "未记录"}</span>
-        <Tooltip title={JSON.stringify(item.dispatch_priority)}>
-          <span>
-            优先信息{" "}
-            {item.dispatch_priority
-              ? JSON.stringify(item.dispatch_priority)
-              : "未记录"}
-          </span>
-        </Tooltip>
       </div>
     ),
   },
   {
-    title: "时间 / 公开错误码",
+    title: "时间",
     width: 245,
     render: (_, item) => (
       <div className={styles.stackCell}>
         <span>最早 {timeText(item.not_before_at)}</span>
         <span>开始 {timeText(item.started_at)}</span>
         <span>完成 {timeText(item.finished_at)}</span>
-        <span className={styles.errorText}>
-          {item.settled_error_code || item.error_code || "-"}
-        </span>
       </div>
     ),
+  },
+  {
+    title: "结果 / 错误",
+    width: 200,
+    render: (_, item) => {
+      const failed =
+        ["error", "dispatch_failed"].includes(item.status) ||
+        item.settled_status === "error";
+      const message = failed
+        ? item.error_message ||
+          item.settled_error_code ||
+          item.error_code ||
+          "-"
+        : "-";
+      return (
+        <Tooltip title={message}>
+          <span className={styles.errorText}>{message}</span>
+        </Tooltip>
+      );
+    },
   },
 ];
 
@@ -144,20 +153,30 @@ export default function BatchDetail({
   );
   const detail = useBoardResource(load);
   const data = detail.value;
+  const current = data?.batch || batch;
   return (
     <div className={styles.detailContent}>
       <div className={styles.detailHead}>
         <div>
           <h2>{batch.job_name || "未命名定时任务"}</h2>
-          <p className={styles.mono}>{batch.batch_id}</p>
+          <p>
+            <Tooltip title={batch.batch_id}>
+              <span className={styles.mono}>{batch.batch_id}</span>
+            </Tooltip>
+            <span title="父任务本次执行的冻结模型；各成员模型见成员列表">
+              {current.provider_id || "-"} / {current.model_id || "-"}
+            </span>
+          </p>
         </div>
         {statusTag(data?.batch.status || batch.status)}
       </div>
-      <div className={styles.detailMeta}>
+      <div
+        className={styles.detailMeta}
+        style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+      >
         <span>父任务 {batch.job_id}</span>
         <span>计划 {timeText(batch.logical_fire_at)}</span>
         <span>回调 {timeText(batch.created_at)}</span>
-        <span>Owner 未记录</span>
       </div>
       {detail.error && <Alert type="error" showIcon message={detail.error} />}
       <Tabs
@@ -244,7 +263,7 @@ export default function BatchDetail({
                   columns={memberColumns}
                   dataSource={data?.members || []}
                   pagination={false}
-                  scroll={{ x: 1210, y: 292 }}
+                  scroll={{ x: 1410, y: 292 }}
                   expandable={{
                     expandedRowRender: (item) => (
                       <div>

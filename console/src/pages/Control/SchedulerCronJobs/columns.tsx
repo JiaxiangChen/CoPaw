@@ -3,6 +3,7 @@ import type { ColumnsType } from "antd/es/table";
 import { Button, Dropdown, Modal } from "@agentscope-ai/design";
 import { MoreOutlined } from "@ant-design/icons";
 import type { TFunction } from "i18next";
+import type { ReactNode } from "react";
 import type { CronJobSpecOutput } from "@/api/types";
 import type { ManagedJob } from "@/api/types/schedulerCron";
 import type { ExecutionModelOption } from "@/hooks/useExecutionModelOptions";
@@ -77,6 +78,32 @@ export function createManagedColumns({
                 </span>
               </Tooltip>
             ),
+          }
+        : column.key === "last_status"
+        ? {
+            ...column,
+            render: (value: unknown, job: ManagedJob, index: number) => {
+              const status = column.render?.(value, job, index) as ReactNode;
+              if (job.task?.is_running || job.state?.last_status !== "error")
+                return status;
+              return (
+                <Tooltip
+                  title={
+                    <span
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {job.state.last_error?.trim() ||
+                        "暂无失败详情，请查看执行日志"}
+                    </span>
+                  }
+                >
+                  <span>{status}</span>
+                </Tooltip>
+              );
+            },
           }
         : column,
     ) as ColumnsType<ManagedJob>;

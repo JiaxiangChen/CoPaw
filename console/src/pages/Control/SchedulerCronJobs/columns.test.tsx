@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { ColumnType } from "antd/es/table";
@@ -69,3 +69,35 @@ it("增加执行时间标识不移除任务名旁的分发子任务标签", () =
   expect(screen.getByText("任务")).toBeVisible();
   expect(screen.getByText("分发子任务")).toBeVisible();
 });
+
+it.each(["技能任务执行失败 [workflow=http_status, HTTP=502]", ""])(
+  "新版error悬浮展示当前失败详情或明确缺失提示：%s",
+  async (detail) => {
+    const record = {
+      ...job("ordinary", false),
+      state: { last_status: "error", last_error: detail },
+    } as ManagedJob;
+    render(<>{column("last_status").render?.(null, record, 0)}</>);
+    fireEvent.mouseEnter(screen.getByText("error"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      detail || "暂无失败详情，请查看执行日志",
+    );
+  },
+);
+
+it.each([false, true])(
+  "成功或正在运行时不展示旧错误，运行优先=%s",
+  (running) => {
+    const record = {
+      ...job("ordinary", false),
+      state: {
+        last_status: running ? "error" : "success",
+        last_error: "过期错误",
+      },
+      task: { is_running: running },
+    } as ManagedJob;
+    render(<>{column("last_status").render?.(null, record, 0)}</>);
+    fireEvent.mouseEnter(screen.getByText(running ? "running" : "success"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  },
+);
