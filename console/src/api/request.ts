@@ -128,10 +128,11 @@ function throwExternalAuthError(): never {
 export async function request<T = unknown>(
   path: string,
   options: RequestInit = {},
+  disDefaultHeaders?: boolean,
 ): Promise<T> {
   const url = getApiUrl(path);
   const method = options.method || "GET";
-  const headers = buildHeaders(method, options.headers, options.body);
+  const headers = disDefaultHeaders?{"Content-Type":"application/json"}:buildHeaders(method, options.headers, options.body);
 
   const response = await fetch(url, {
     ...options,

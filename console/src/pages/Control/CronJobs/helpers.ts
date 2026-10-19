@@ -14,8 +14,13 @@ import {
   toNotificationDelayMinutes,
   type NotificationDelayUnit,
 } from "@/utils/cron";
-import type { CronParts } from "@/utils/parseCron";
-import { parseCron, serializeCron } from "@/utils/parseCron";
+import type { CronParts } from "./components/parseCron";
+import {
+  parseCron,
+  serializeCron,
+  CronType,
+} from "./components/parseCron";
+
 
 const MAX_SKILL_IDS_LENGTH = 200;
 
@@ -59,8 +64,8 @@ export function normalizeSkillIdsInput(value?: unknown): string | undefined {
   const rawSkillIds = Array.isArray(value)
     ? value
     : typeof value === "string"
-    ? value.trim().split(/[,\s]+/)
-    : [];
+      ? value.trim().split(/[,\s]+/)
+      : [];
 
   if (!rawSkillIds.length) {
     return undefined;
@@ -106,24 +111,25 @@ export function buildCronJobFormValues(
     cronType: cronParts.type,
     skillIds: job.skill_ids
       ? job.skill_ids
-          .split(",")
-          .map((skillId) => skillId.trim())
-          .filter(Boolean)
+        .split(",")
+        .map((skillId) => skillId.trim())
+        .filter(Boolean)
       : [],
     execution_model_key: buildExecutionModelKey(job.model_slot),
     notificationDelayValue: notificationDelay.value,
     notificationDelayUnit: notificationDelay.unit,
   };
 
-  if (cronParts.type === "daily" || cronParts.type === "weekly") {
+
+  if (cronParts.type === CronType.daily || cronParts.type === CronType.weekly) {
     formValues.cronTime = dayjs()
       .hour(cronParts.hour ?? 9)
       .minute(cronParts.minute ?? 0);
   }
-  if (cronParts.type === "weekly" && cronParts.daysOfWeek) {
+  if (cronParts.type === CronType.weekly && cronParts.daysOfWeek) {
     formValues.cronDaysOfWeek = cronParts.daysOfWeek;
   }
-  if (cronParts.type === "custom" && cronParts.rawCron) {
+  if (cronParts.type === CronType.custom && cronParts.rawCron) {
     formValues.cronCustom = cronParts.rawCron;
   }
   return formValues;

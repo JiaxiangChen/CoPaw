@@ -103,6 +103,14 @@ function FilePreviewModal(props: FilePreviewModalProps) {
   } = props;
   const iframeState = useIframeStore((state) => state);
   const { userId, bbk, pageSource, platformSource } = iframeState;
+  // 从当前页面 url 上获取 actvId（活动ID）
+  const {actvId, actvTyp} = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      actvId: params.get("actvId") || "",
+      actvTyp: params.get("actvTyp") || "",
+    }
+  }, []);
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(presentation === "modal");
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -307,6 +315,10 @@ function FilePreviewModal(props: FilePreviewModalProps) {
         sapId: urlParams?.sapId || userId || "",
         bbkOrgId: urlParams?.bbkOrgId || bbk || "",
         custUid,
+        pageSource: pageSource || "default",
+        platformSource: platformSource || "default",
+        actvId: actvId || "",
+        actvTyp: actvTyp || "",
       });
       if (res.data?.length) {
         const sorted = [...res.data].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -334,7 +346,7 @@ function FilePreviewModal(props: FilePreviewModalProps) {
       setClawPlanLoading(false);
       clawPlanInitializedRef.current = true;
     }
-  }, [custUid, templateId, userId, bbk]);
+  }, [custUid, templateId, userId, bbk, pageSource, platformSource, actvId, actvTyp]);
 
   useEffect(() => {
     fetchClawFilePlan();
