@@ -245,10 +245,10 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 创建计划的经营场景可见范围
 
-- `src/swe/app/wealth_plans/router.py` 的 `_fetch_external_scene_skills()` 调用外部 `POST /api/agent/workspace/skill-config/list`，只传当前请求分行 `bbkId` 和 `category`；产品大类为空表示全部。
+- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用原生 fetch 直接请求同源 `POST /api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理或统一 request。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；仅显式设置 JSON Content-Type，沿用默认同源 Cookie。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 8 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
 - 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
 - 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
-- 排查入口：父系统 `iframeContext.bbk` → `X-Bbk-Id` → `request.state.bbk_id`；场景卡片来源文案 `skillBbkLabel` 只用于展示。
+- 排查入口：场景查询为父系统 `iframeContext.bbk` → POST body 的 `bbkId`；规划提交/校验仍为 `X-Bbk-Id` → `request.state.bbk_id`。场景卡片来源文案 `skillBbkLabel` 只用于展示。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/test_router.py -q`。
 
 ## 财富工作台岗位角色映射
@@ -258,7 +258,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富规划任务类型与技能/MCP 下发
 
-- `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
+- `POST /api/agent/workspace/skill-config/list` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
 - `src/swe/app/wealth_plans/publish.py` 的 `_build_job_spec` 按场景判断：空数组创建 `workflow`，非空数组保持 `agent`。只判断数组是否为空，`["    "]` 仍按非空处理。
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
 - 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`、`enable_offset=False`、`offset_window_hours=0`；首次分发完成后启用父任务批调度并同步子任务。父批调度在外部平台的注册时间与目标子任务均使用规划原排程，不按默认 4 小时窗口提前或错峰。窗口变化时，即使父任务已启用批调度，重新分发也会更新窗口和外部平台任务。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
