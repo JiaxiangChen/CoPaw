@@ -1,4 +1,5 @@
 import React from "react";
+import { tagTask, taskIdentityKey } from "@/api/modules/cronTaskSources";
 import {
   cleanup,
   fireEvent,
@@ -9,6 +10,33 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CronJobSpecOutput } from "@/api/types";
 import ChatTaskList from ".";
+import { formatListTime } from "../../listTimeFormat";
+
+it("新版手动历史展示最近运行时间和未读次数，不依赖自动结果标志", () => {
+  const task = tagTask(
+    taskJob({
+      state: { last_run_at: "2026-10-19 05:18:00", last_status: "success" },
+      task: {
+        visible_in_my_tasks: true,
+        has_scheduled_result: false,
+        latest_scheduled_preview: "",
+        unread_execution_count: 2,
+        is_running: false,
+        is_paused: false,
+      },
+    }),
+    "scheduler",
+    { actor_id: "u", tenant_id: "u", source_id: "s", agent_id: "a" },
+  );
+  const { container } = render(<ChatTaskList tasks={[task]} />);
+  expect(
+    screen.getByText(formatListTime("2026-10-19T05:18:00Z")),
+  ).toBeVisible();
+  expect(
+    container.querySelector(".chat-task-list-item-badge"),
+  ).toHaveTextContent("2");
+  expect(screen.getByText("已完成")).toBeVisible();
+});
 
 function taskJob(
   overrides: Partial<CronJobSpecOutput> = {},
@@ -69,6 +97,30 @@ function pausedTask(
 }
 
 describe("ChatTaskList actions", () => {
+  it("新旧同 ID 任务不共享选中状态或 React key，动作保留真实来源", () => {
+    const context = {
+      actor_id: "u",
+      tenant_id: "u",
+      source_id: "s",
+      agent_id: "a",
+    };
+    const oldTask = tagTask(taskJob({ name: "旧任务" }), "legacy", context);
+    const newTask = tagTask(taskJob({ name: "新任务" }), "scheduler", context);
+    const clicked = vi.fn();
+    render(
+      <ChatTaskList
+        tasks={[oldTask, newTask]}
+        selectedTaskId={taskIdentityKey(newTask)}
+        onTaskClick={clicked}
+      />,
+    );
+    const oldRow = screen.getByText("旧任务").closest(".chat-task-list-item");
+    const newRow = screen.getByText("新任务").closest(".chat-task-list-item");
+    expect(oldRow).not.toHaveClass("chat-task-list-item--selected");
+    expect(newRow).toHaveClass("chat-task-list-item--selected");
+    fireEvent.click(newRow!);
+    expect(clicked).toHaveBeenCalledWith(newTask);
+  });
   afterEach(() => {
     cleanup();
   });

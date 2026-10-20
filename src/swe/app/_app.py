@@ -773,6 +773,7 @@ async def _start_lifespan_background_services(
     # )
     cron_notification_worker = CronNotificationWorker(
         multi_agent_manager=multi_agent_manager,
+        db=app.state.db_connection,
     )
     app.state.cron_notification_worker = cron_notification_worker
     cron_notification_worker.start()

@@ -11,6 +11,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CronJobSpecOutput } from "@/api/types";
 import ExpandablePanel from ".";
 import type { HistorySession } from "../historySessions";
+import { tagTask } from "@/api/modules/cronTaskSources";
+import { formatListTime } from "../../../listTimeFormat";
+
+it("浮动任务面板同样展示新版手动运行时间和次数红点", () => {
+  const original = taskJob("manual-history", { unreadCount: 3 });
+  original.state = {
+    last_run_at: "2026-10-19T05:18:00",
+    last_status: "success",
+  };
+  const task = tagTask(original, "scheduler", {
+    actor_id: "u",
+    tenant_id: "u",
+    source_id: "s",
+    agent_id: "a",
+  });
+  const { container } = render(
+    <ExpandablePanel
+      visible
+      type="tasks"
+      onClose={vi.fn()}
+      tasks={[task]}
+      sessions={[]}
+      onTaskClick={vi.fn()}
+      toolbarRef={{ current: document.createElement("div") }}
+    />,
+  );
+  expect(
+    screen.getByText(formatListTime("2026-10-19T05:18:00Z")),
+  ).toBeVisible();
+  expect(
+    container.querySelector(".expandable-panel-task-badge"),
+  ).toHaveTextContent("3");
+  expect(screen.getByText("已完成")).toBeVisible();
+});
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),

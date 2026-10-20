@@ -9,6 +9,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPage from "./index";
+import { schedulerCronApi } from "@/api/modules/schedulerCron";
+import type { ManagedJob } from "@/api/types/schedulerCron";
 
 type MockSessionApi = {
   preferredChatId: string;
@@ -34,6 +36,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     capturedOptions: null as Record<string, any> | null,
+    taskInfo: vi.fn(),
     planModeEnabledHistory: [] as boolean[],
     showContentOnly: false,
     isOriginY: false,
@@ -260,7 +263,7 @@ vi.mock("../../hooks/useAppMessage", () => ({
       error: vi.fn(),
       success: vi.fn(),
       warning: vi.fn(),
-      info: vi.fn(),
+      info: mocks.taskInfo,
     },
   }),
 }));
@@ -278,11 +281,13 @@ vi.mock("../../contexts/BrandThemeContext", () => ({
   }),
 }));
 
-vi.mock("../../stores/agentStore", () => ({
-  useAgentStore: () => ({
-    selectedAgent: null,
-  }),
-}));
+vi.mock("../../stores/agentStore", () => {
+  const state = { selectedAgent: "default" };
+  const useAgentStore = (selector?: (value: typeof state) => unknown) =>
+    selector ? selector(state) : state;
+  useAgentStore.getState = () => state;
+  return { useAgentStore };
+});
 
 vi.mock("../../stores/chatPresentationStore", () => ({
   useChatPresentationStore: (
@@ -640,6 +645,8 @@ vi.mock("@/api/modules/scenarioPreset", () => ({
 
 describe("ChatPage plan mode wiring", () => {
   beforeEach(() => {
+    mocks.taskInfo.mockClear();
+    vi.spyOn(schedulerCronApi, "listAll").mockResolvedValue([]);
     mocks.capturedOptions = null;
     mocks.planModeEnabledHistory = [];
     mocks.showContentOnly = false;
@@ -700,7 +707,67 @@ describe("ChatPage plan mode wiring", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
+
+  it.each([true, false])(
+    "新版手动记录存在=%s 时正确判断是否尚未启动",
+    async (hasRun) => {
+      vi.spyOn(schedulerCronApi, "listAll").mockImplementation(
+        async (context) => [
+          {
+            id: "manual-current",
+            name: "Manual Current",
+            enabled: true,
+            tenant_id: context.tenant_id,
+            source_id: context.source_id,
+            agent_id: context.agent_id,
+            management_owner: "scheduler",
+            definition_version: 1,
+            management_version: 1,
+            management_status: "ready",
+            dispatch_state: "ordinary",
+            deleted: false,
+            schedule: {
+              type: "cron",
+              cron: "0 9 * * *",
+              timezone: "Asia/Shanghai",
+            },
+            task_type: "text",
+            text: "手动结果",
+            dispatch: {
+              type: "channel",
+              channel: "console",
+              target: { user_id: context.actor_id, session_id: "chat-1" },
+            },
+            state: {
+              last_run_at: hasRun ? "2026-10-19T05:18:00Z" : null,
+              last_status: hasRun ? "success" : "idle",
+            },
+            task: {
+              visible_in_my_tasks: true,
+              chat_id: "chat-1",
+              is_paused: false,
+              is_running: false,
+              has_scheduled_result: false,
+              latest_scheduled_preview: "",
+              unread_execution_count: 0,
+            },
+          } as ManagedJob,
+        ],
+      );
+      render(<ChatPage />);
+      await screen.findByRole("button", { name: "Open Manual Current" });
+      if (hasRun)
+        expect(mocks.taskInfo).not.toHaveBeenCalledWith(
+          "当前任务暂未启动，等下次收到提醒再来看看哟~",
+        );
+      else
+        expect(mocks.taskInfo).toHaveBeenCalledWith(
+          "当前任务暂未启动，等下次收到提醒再来看看哟~",
+        );
+    },
+  );
 
   it("renders the subagent monitor outside the composer beforeUI", () => {
     render(<ChatPage />);

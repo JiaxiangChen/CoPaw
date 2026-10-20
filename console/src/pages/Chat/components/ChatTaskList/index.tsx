@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useId } from "react";
 import type { CronJobSpecOutput } from "@/api/types";
+import { taskIdentityKey } from "@/api/modules/cronTaskSources";
 import Style from "./style";
 import { TasksIconSmall } from "../ChatSidebar/CollapsedToolbar/icons";
 import {
@@ -7,8 +8,8 @@ import {
   getTaskNextRunTooltipTimes,
   getTaskPauseStatusText,
   getTaskSidebarMeta,
+  getTaskLastRunDisplay,
   partitionTasksByPauseState,
-  TASK_COMPLETED_STATUS_TEXT,
 } from "../../taskJobs";
 import { formatListTime } from "../../listTimeFormat";
 import TaskActionMenu from "../TaskActionMenu";
@@ -63,7 +64,7 @@ export default function ChatTaskList(props: ChatTaskListProps) {
   const pausedRegionId = useId();
   const { runnableTasks, pausedTasks } = partitionTasksByPauseState(tasks);
   const selectedTaskIsPaused = pausedTasks.some(
-    (task) => task.id === selectedTaskId,
+    (task) => taskIdentityKey(task) === selectedTaskId,
   );
 
   useEffect(() => {
@@ -85,15 +86,18 @@ export default function ChatTaskList(props: ChatTaskListProps) {
 
   const renderTask = (task: CronJobSpecOutput) => {
     const sidebarMeta = getTaskSidebarMeta(task);
+    const lastRun = getTaskLastRunDisplay(task);
     const pauseStatusText = getTaskPauseStatusText(sidebarMeta);
     const nextRunText = getTaskNextRunText(task);
     const nextRunTooltipTimes = getTaskNextRunTooltipTimes(task);
 
     return (
       <div
-        key={task.id}
+        key={taskIdentityKey(task)}
         className={`chat-task-list-item${
-          task.id === selectedTaskId ? " chat-task-list-item--selected" : ""
+          taskIdentityKey(task) === selectedTaskId
+            ? " chat-task-list-item--selected"
+            : ""
         }${
           sidebarMeta.state !== "active" && sidebarMeta.state !== "running"
             ? " chat-task-list-item--paused"
@@ -151,15 +155,14 @@ export default function ChatTaskList(props: ChatTaskListProps) {
             {pauseStatusText}
           </div>
         )}
-        {(task.task?.latest_scheduled_preview ||
-          task.task?.last_scheduled_run_at) && (
+        {lastRun && (
           <div className="chat-task-list-item-subtitle">
-            {task.task?.last_scheduled_run_at && (
+            {lastRun.at && (
               <span className="chat-task-list-item-time">
-                {formatListTime(task.task.last_scheduled_run_at)}
+                {formatListTime(lastRun.at)}
               </span>
             )}
-            {TASK_COMPLETED_STATUS_TEXT}
+            {lastRun.statusText}
           </div>
         )}
         {nextRunText && (

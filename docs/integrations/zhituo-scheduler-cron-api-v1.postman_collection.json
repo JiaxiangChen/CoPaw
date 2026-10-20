@@ -1,0 +1,1570 @@
+{
+  "info": {
+    "_postman_id": "5fd66d30-8338-44cd-8cb6-c5020f2a170a",
+    "name": "智拓 Scheduler 定时任务接口 V1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "2026-10-16 本地实现对接版，仍需部署及联调。管理、查询、同步批量删除已实现；分发和调度模式的接口及持久处理器已实现，后台已装配，仍需表结构和既有配置就绪及环境验收。仅导入，不要一键运行全部请求：包含真实写入/删除。先填真实地址、身份、技能绑定。默认新建 batch_paused。固定 request_id 仅为示例；同次重试保留，新业务动作手工换唯一值。接口不会在新接口失败时回退 SWE 旧管理接口。"
+  },
+  "variable": [
+    {
+      "key": "scheduler_base_url",
+      "value": "http://localhost:9100",
+      "type": "string"
+    },
+    {
+      "key": "swe_base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "replace-real-user",
+      "type": "string"
+    },
+    {
+      "key": "tenant_id",
+      "value": "replace-real-user",
+      "type": "string"
+    },
+    {
+      "key": "source_id",
+      "value": "replace-real-source",
+      "type": "string"
+    },
+    {
+      "key": "agent_id",
+      "value": "default",
+      "type": "string"
+    },
+    {
+      "key": "bbk_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_name_encoded",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_role",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "plan_id",
+      "value": "plan-example",
+      "type": "string"
+    },
+    {
+      "key": "skill_id",
+      "value": "replace-real-skill",
+      "type": "string"
+    },
+    {
+      "key": "workflow_binding_id",
+      "value": "replace-with-binding-id",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "replace-with-job-id",
+      "type": "string"
+    },
+    {
+      "key": "definition_version",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "operation_id",
+      "value": "replace-with-operation-id",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "replace-with-broadcast-task-id",
+      "type": "string"
+    },
+    {
+      "key": "dispatch_version",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "target_tenant_id",
+      "value": "replace-real-recipient",
+      "type": "string"
+    },
+    {
+      "key": "target_tenant_name",
+      "value": "接收方姓名",
+      "type": "string"
+    },
+    {
+      "key": "target_bbk_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "create_request_id",
+      "value": "replace-create-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "update_request_id",
+      "value": "replace-update-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "delete_request_id",
+      "value": "replace-delete-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "broadcast_request_id",
+      "value": "replace-broadcast-round-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "retime_request_id",
+      "value": "replace-retime-round-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "mode_request_id",
+      "value": "replace-mode-unique-id",
+      "type": "string"
+    },
+    {
+      "key": "cursor",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "broadcast_cursor",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "batch_delete_request_id",
+      "value": "replace-with-stable-batch-delete-request-id",
+      "type": "string"
+    },
+    {
+      "key": "child_job_id",
+      "value": "replace-with-selected-child-job-id",
+      "type": "string"
+    },
+    {
+      "key": "child_agent_id",
+      "value": "default",
+      "type": "string"
+    },
+    {
+      "key": "child_definition_version",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "08 存量 SWE：按 skill_id 查 Workflow 绑定（建议先查）",
+      "item": [
+        {
+          "name": "查询 Workflow 绑定（要求真实 manager/admin）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{swe_base_url}}/api/cron/workflow-bindings/{{skill_id}}",
+            "description": "存量接口，返回 binding_id，不是统一 workflow_id。先按真实网关授权启用角色/认证 Header；不要伪造角色。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (typeof data.binding_id === 'string') pm.collectionVariables.set('workflow_binding_id', data.binding_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 创建定时任务",
+      "item": [
+        {
+          "name": "创建 Workflow 源任务（批入口暂停）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs",
+            "description": "本地管理核心已实现，尚未完成实际执行验收。先取得真实 Workflow 绑定。完成返回 201 包装 operation；部分失败也可能已建任务，请保存操作 ID。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{create_request_id}}\",\n  \"dispatch_state\": \"batch_paused\",\n  \"spec\": {\n    \"name\": \"智拓经营规划示例\",\n    \"enabled\": true,\n    \"task_type\": \"workflow\",\n    \"plan_id\": \"{{plan_id}}\",\n    \"skill_ids\": \"{{skill_id}}\",\n    \"workflow_binding_id\": \"{{workflow_binding_id}}\",\n    \"schedule\": {\n      \"cron\": \"0 9 * * *\",\n      \"timezone\": \"Asia/Shanghai\"\n    },\n    \"meta\": {\n      \"wealth_plan_id\": \"{{plan_id}}\",\n      \"wealth_scene_id\": \"{{skill_id}}\",\n      \"wealth_item_id\": \"item-example\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data; try { data = pm.response.json(); } catch (_) {}",
+                  "if (data && data.operation) {",
+                  "  const op = data.operation;",
+                  "  if (typeof op.job_id === 'string') pm.collectionVariables.set('job_id', op.job_id);",
+                  "  if (typeof op.operation_id === 'string') pm.collectionVariables.set('operation_id', op.operation_id);",
+                  "}",
+                  "// 失败操作也可能已写库，保存返回的操作 ID；不要自动换 request_id。",
+                  "// operation.version 不是 definition_version，后者请重新 GET 详情。"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 更新定时任务",
+      "item": [
+        {
+          "name": "完整更新定义",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}",
+            "description": "先 GET 详情更新 definition_version。PUT 完整替换业务定义，保留自身启停和运行状态；存在未删除子任务或活动分发时不允许修改源内容。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{update_request_id}}\",\n  \"expected_definition_version\": {{definition_version}},\n  \"spec\": {\n    \"name\": \"智拓经营规划示例 更新\",\n    \"enabled\": true,\n    \"task_type\": \"workflow\",\n    \"plan_id\": \"{{plan_id}}\",\n    \"skill_ids\": \"{{skill_id}}\",\n    \"workflow_binding_id\": \"{{workflow_binding_id}}\",\n    \"schedule\": {\n      \"cron\": \"0 9 * * *\",\n      \"timezone\": \"Asia/Shanghai\"\n    },\n    \"meta\": {\n      \"wealth_plan_id\": \"{{plan_id}}\",\n      \"wealth_scene_id\": \"{{skill_id}}\",\n      \"wealth_item_id\": \"item-example\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data; try { data = pm.response.json(); } catch (_) {}",
+                  "if (data && data.operation) {",
+                  "  const op = data.operation;",
+                  "  if (typeof op.job_id === 'string') pm.collectionVariables.set('job_id', op.job_id);",
+                  "  if (typeof op.operation_id === 'string') pm.collectionVariables.set('operation_id', op.operation_id);",
+                  "}",
+                  "// 失败操作也可能已写库，保存返回的操作 ID；不要自动换 request_id。",
+                  "// operation.version 不是 definition_version，后者请重新 GET 详情。"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 删除定时任务（会写入）",
+      "item": [
+        {
+          "name": "删除指定任务（不级联）",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}",
+            "description": "先 GET 详情取版本。DELETE 带 JSON Body。先逻辑删除再清理；503 可能已经删除；202 cleanup_waiting 表示等待在途执行。删除子任务时使用子任务自身 tenant/source/agent，真实操作人不变。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{delete_request_id}}\",\n  \"expected_definition_version\": {{definition_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data; try { data = pm.response.json(); } catch (_) {}",
+                  "if (data && data.operation) {",
+                  "  const op = data.operation;",
+                  "  if (typeof op.job_id === 'string') pm.collectionVariables.set('job_id', op.job_id);",
+                  "  if (typeof op.operation_id === 'string') pm.collectionVariables.set('operation_id', op.operation_id);",
+                  "}",
+                  "// 失败操作也可能已写库，保存返回的操作 ID；不要自动换 request_id。",
+                  "// operation.version 不是 definition_version，后者请重新 GET 详情。"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 查询定时任务",
+      "item": [
+        {
+          "name": "查询详情并保存 definition_version",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}",
+            "description": "详情有 spec 包装；仅 Scheduler 管理的新任务，不包含 legacy 导入快照。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (Number.isInteger(data.definition_version)) pm.collectionVariables.set('definition_version', String(data.definition_version));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询当前身份列表（第一页）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs?limit=50",
+            "description": "items 平铺 spec 字段。若 next_cursor 非空必须继续分页；没有 plan_id 专用过滤。"
+          }
+        },
+        {
+          "name": "查询列表下一页",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs?limit=50&cursor={{cursor}}",
+            "description": "将上一页 next_cursor 填入 cursor，其他 Header 和筛选不变。"
+          }
+        },
+        {
+          "name": "查询删除记录详情",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}?include_deleted=true",
+            "description": "授权范围内复核逻辑删除，不表示恢复任务。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 异步分发（后台已装配，待部署验收）",
+      "item": [
+        {
+          "name": "提交异步分发（后台已装配，待部署验收）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast",
+            "description": "接口及持久处理器已实现，后台已装配，待部署验收。targets 0～1000，source 继承源；分发不携带调度模式。新轮新 request_id，旧轮失败不提供续办。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{broadcast_request_id}}\",\n  \"expected_definition_version\": {{definition_version}},\n  \"targets\": [\n    {\n      \"tenant_id\": \"{{target_tenant_id}}\",\n      \"tenant_name\": \"{{target_tenant_name}}\",\n      \"bbk_id\": \"{{target_bbk_id}}\",\n      \"agent_id\": \"{{agent_id}}\"\n    }\n  ],\n  \"enable_offset\": false,\n  \"offset_window_hours\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (typeof data.task_id === 'string') pm.collectionVariables.set('task_id', data.task_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0 人仅改既有子任务散列（后台已装配，待部署验收）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast",
+            "description": "接口及持久处理器已实现，后台已装配，待部署验收。调整全部未删除子任务排程，包括停用对象；不改正文/模型/技能，不恢复启用。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{retime_request_id}}\",\n  \"expected_definition_version\": {{definition_version}},\n  \"targets\": [],\n  \"enable_offset\": true,\n  \"offset_window_hours\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (typeof data.task_id === 'string') pm.collectionVariables.set('task_id', data.task_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查指定分发",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/tasks/{{task_id}}?limit=50",
+            "description": "202 受理不等于完成。轮询明确 task_id，status 与 sync_status 均须核对。results 分页而 counts 为全局。"
+          }
+        },
+        {
+          "name": "指定分发下一页",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/tasks/{{task_id}}?limit=50&cursor={{broadcast_cursor}}",
+            "description": "broadcast_cursor 来自同一轮上一页 next_cursor。"
+          }
+        },
+        {
+          "name": "查最近一轮 current",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/tasks/current?limit=50",
+            "description": "返回 {\"task\":对象} 或 {\"task\":null}；按创建顺序最近，不是最近完成。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 调度模式（后台已装配，待部署验收）",
+      "item": [
+        {
+          "name": "查调度状态并保存版本",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/dispatch-state",
+            "description": "version 是模式版本，不是 definition_version。切换中 effective_state 可为 mixed。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (Number.isInteger(data.version)) pm.collectionVariables.set('dispatch_version', String(data.version));",
+                  "  if (typeof data.operation_id === 'string') pm.collectionVariables.set('operation_id', data.operation_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "开启批调度（后台已装配，待部署验收）",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/dispatch-state",
+            "description": "接口及持久处理器已实现，后台已装配，待部署验收。state 可换 batch_paused/ordinary，但当前切换未完成前不能改目标。202 后轮询 GET，失败显式重试原操作；不取消已有队列。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{mode_request_id}}\",\n  \"state\": \"batch_enabled\",\n  \"expected_version\": {{dispatch_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code >= 200 && pm.response.code < 300) {",
+                  "  const data = pm.response.json();",
+                  "  if (typeof data.operation_id === 'string') pm.collectionVariables.set('operation_id', data.operation_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 查看父任务下的分发子任务",
+      "item": [
+        {
+          "name": "查询全部有效子任务（分页）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/children?limit=50",
+            "description": "使用父任务身份。必须读完 next_cursor；子任务详情和写入使用返回的 tenant/source/agent，X-User-Id 保持真实操作人。"
+          }
+        },
+        {
+          "name": "按接收方筛选（重复 tenant_ids 参数）",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/children?limit=50&tenant_ids={{target_tenant_id}}",
+            "description": "多接收方重复追加 tenant_ids，不用逗号拼接。"
+          }
+        },
+        {
+          "name": "含删除子任务",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/children?limit=50&include_deleted=true",
+            "description": "复核删除、清理与历史关联。"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 同步批量删除选中子任务（会写入）",
+      "item": [
+        {
+          "name": "同步删除明确选中的子任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "X-User-Id", "value": "{{user_id}}"},
+              {"key": "X-Tenant-Id", "value": "{{tenant_id}}"},
+              {"key": "X-Source-Id", "value": "{{source_id}}"},
+              {"key": "X-Agent-Id", "value": "{{agent_id}}"},
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{access_token}}", "disabled": true},
+              {"key": "X-User-Role", "value": "{{user_role}}", "disabled": true}
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/broadcast/children/batch-delete",
+            "description": "Header 使用父任务身份及真实操作人。先完整分页选出子任务，再填实际 child_job_id、target_tenant_id、child_agent_id 和 child_definition_version。1～1000 项，空数组不删除全部。HTTP 200 仍须检查每项状态；重提原请求复用结果，清理失败使用返回的子 operation_id 显式重试。本请求不会保存子操作 ID 到父 job_id/operation_id 变量，避免误覆盖身份。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{batch_delete_request_id}}\",\n  \"items\": [\n    {\n      \"job_id\": \"{{child_job_id}}\",\n      \"tenant_id\": \"{{target_tenant_id}}\",\n      \"agent_id\": \"{{child_agent_id}}\",\n      \"expected_definition_version\": {{child_definition_version}}\n    }\n  ]\n}",
+              "options": {"raw": {"language": "json"}}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "辅助：管理进度与人工续办",
+      "item": [
+        {
+          "name": "找回当前未完成操作",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/operations/pending",
+            "description": "返回 {\"operation\":对象或null}；没有未完成操作不代表任务不存在。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data; try { data = pm.response.json(); } catch (_) {}",
+                  "if (data && data.operation) {",
+                  "  const op = data.operation;",
+                  "  if (typeof op.job_id === 'string') pm.collectionVariables.set('job_id', op.job_id);",
+                  "  if (typeof op.operation_id === 'string') pm.collectionVariables.set('operation_id', op.operation_id);",
+                  "}",
+                  "// 失败操作也可能已写库，保存返回的操作 ID；不要自动换 request_id。",
+                  "// operation.version 不是 definition_version，后者请重新 GET 详情。"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询管理操作",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/operations/{{operation_id}}",
+            "description": "返回裸 operation 对象。"
+          }
+        },
+        {
+          "name": "人工重试原管理操作",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{user_id}}"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{tenant_id}}"
+              },
+              {
+                "key": "X-Source-Id",
+                "value": "{{source_id}}"
+              },
+              {
+                "key": "X-Agent-Id",
+                "value": "{{agent_id}}"
+              },
+              {
+                "key": "X-Bbk-Id",
+                "value": "{{bbk_id}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Name",
+                "value": "{{user_name_encoded}}",
+                "disabled": true
+              },
+              {
+                "key": "X-User-Role",
+                "value": "{{user_role}}",
+                "disabled": true,
+                "description": "仅在真实网关身份有该角色时启用，不能伪造角色。存量 Workflow 绑定查询要求真实 manager/admin。"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "disabled": true,
+                "description": "按实际网关认证启用并替换；不需要新设 SWE_INTERNAL_TOKEN。"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{scheduler_base_url}}/api/scheduler/cron/jobs/{{job_id}}/operations/{{operation_id}}/retry",
+            "description": "仅重试原操作，不换 request_id、不重复已完成步骤。旧异步分发不在此续办。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data; try { data = pm.response.json(); } catch (_) {}",
+                  "if (data && data.operation) {",
+                  "  const op = data.operation;",
+                  "  if (typeof op.job_id === 'string') pm.collectionVariables.set('job_id', op.job_id);",
+                  "  if (typeof op.operation_id === 'string') pm.collectionVariables.set('operation_id', op.operation_id);",
+                  "}",
+                  "// 失败操作也可能已写库，保存返回的操作 ID；不要自动换 request_id。",
+                  "// operation.version 不是 definition_version，后者请重新 GET 详情。"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

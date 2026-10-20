@@ -1,14 +1,48 @@
+# -*- coding: utf-8 -*-
 """Capacity reservation on the existing model-scope lease row."""
 
 from typing import Mapping
 from datetime import datetime
+from .managed.run_accounting import occupied_run_sql
+
+# 仅由新版后台在完整表结构校验后启用，不是新增运维配置。
+# 旧部署没有新表时沿用原统计，不探测或自动创建业务表。
+MANAGED_CAPACITY_ACCOUNTING = False
+
+
+def enable_managed_capacity_accounting():
+    """新运行时已就绪后，将其持久在途占位纳入共用模型池。"""
+    global MANAGED_CAPACITY_ACCOUNTING
+    MANAGED_CAPACITY_ACCOUNTING = True
+
+
+async def _managed_occupants(cur, scope, exclude_execution_id=None):
+    await cur.execute(
+        "SELECT COUNT(*) AS count FROM swe_cron_execution_runs "
+        "WHERE source_id=%s AND provider_id=%s AND model_id=%s "
+        f"AND {occupied_run_sql()} "
+        "AND execution_id<>%s "
+        "AND JSON_UNQUOTE(JSON_EXTRACT(dispatch_meta_json,'$.protocol'))="
+        "'scheduler_managed_v1'",
+        (*scope, exclude_execution_id or ""),
+    )
+    rows = await cur.fetchall()
+    return int(row_values(rows[0], ("count",))[0])
 
 
 def row_values(row, names):
     return [row[name] for name in names] if isinstance(row, Mapping) else row
 
 
-async def available_capacity(cur, scope, owner, now, policy):
+async def available_capacity(
+    cur,
+    scope,
+    owner,
+    now,
+    policy,
+    *,
+    exclude_execution_id=None,
+):
     await cur.execute(
         "SELECT lock_owner, lease_expires_at "
         "FROM swe_cron_dispatch_scope_leases "
@@ -19,7 +53,8 @@ async def available_capacity(cur, scope, owner, now, policy):
     if not rows:
         return 0
     lock_owner, expires = row_values(
-        rows[0], ("lock_owner", "lease_expires_at")
+        rows[0],
+        ("lock_owner", "lease_expires_at"),
     )
     if isinstance(expires, str):
         expires = datetime.fromisoformat(expires)
@@ -50,7 +85,14 @@ async def available_capacity(cur, scope, owner, now, policy):
         "AND status IN ('claimed','acknowledged','dispatched')",
         scope,
     )
-    return max(0, capacity - len(await cur.fetchall()))
+    legacy = len(await cur.fetchall())
+    # 与旧领取事务共用同一 scope 行锁；统计失败必须阻止领取，不能当作零占用。
+    managed = (
+        await _managed_occupants(cur, scope, exclude_execution_id)
+        if MANAGED_CAPACITY_ACCOUNTING
+        else 0
+    )
+    return max(0, capacity - legacy - managed)
 
 
 async def write_capacity(db, sql, params):

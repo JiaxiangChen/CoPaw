@@ -1,8 +1,11 @@
 import React, { createContext, useContext } from "react";
+import type { CronTaskOrigin } from "@/api/types/cronTaskSource";
 
 export interface HtmlPreviewTrackingContextValue {
   cronTaskId?: string | null;
   cronTaskName?: string | null;
+  /** 由当前任务会话绑定提供，仅用于已读接口分流，不发送给埋点接口。 */
+  cronTaskOrigin?: CronTaskOrigin | null;
   disableEventRecording?: boolean;
 }
 

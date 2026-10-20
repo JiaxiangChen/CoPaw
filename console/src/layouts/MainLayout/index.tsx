@@ -15,6 +15,7 @@ import Chat from "../../pages/Chat";
 import ChannelsPage from "../../pages/Control/Channels";
 import SessionsPage from "../../pages/Control/Sessions";
 import CronJobsPage from "../../pages/Control/CronJobs";
+import SchedulerCronJobsPage from "../../pages/Control/SchedulerCronJobs";
 import FeaturedCasesPage from "../../pages/Control/FeaturedCases";
 import ScenarioPresetsPage from "../../pages/Control/ScenarioPresets";
 import GreetingPage from "../../pages/Control/Greeting";
@@ -61,6 +62,7 @@ const pathToKey: Record<string, string> = {
   "/channels": "channels",
   "/sessions": "sessions",
   "/cron-jobs": "cron-jobs",
+  "/scheduler-cron-jobs": "scheduler-cron-jobs",
   "/greeting-management": "greeting-management",
   "/featured-cases-management": "featured-cases-management",
   "/scenario-presets-management": "scenario-presets-management",
@@ -91,6 +93,7 @@ const pathToKey: Record<string, string> = {
   "/analytics/continuous-governance": "analytics-continuous-governance",
   "/monitor/tasks": "monitor-task-center",
   "/monitor/cron-batch-dispatch": "monitor-cron-batch-dispatch",
+  "/monitor/cron-batch-dispatch-new": "monitor-cron-batch-dispatch-new",
   "/instance/overview": "instance-overview",
   "/instance/instances": "instance-instances",
   "/instance/allocations": "instance-allocations",
@@ -174,6 +177,10 @@ export default function MainLayout() {
               <Route path="/channels" element={<ChannelsPage />} />
               <Route path="/sessions" element={<SessionsPage />} />
               <Route path="/cron-jobs" element={<CronJobsPage />} />
+              <Route
+                path="/scheduler-cron-jobs"
+                element={<SchedulerCronJobsPage />}
+              />
               <Route path="/greeting-management" element={<GreetingPage />} />
               <Route
                 path="/featured-cases-management"

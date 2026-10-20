@@ -1,5 +1,13 @@
 # 定位路径
 
+## 定时任务第一阶段全量快照迁移
+
+- 一次提交：`POST /api/internal/cron/migration/tasks`，operation 为 preview/import/verify；后台自动翻页，不必人工传递游标。只写新定义/状态业务表，旧 CRUD、文件、内存及执行入口不切换，独立系统任务不迁移。
+- 任务编排与持久进度：`src/swe/app/crons/migration_tasks.py`，复用既有 `swe_async_tasks`、`swe_async_task_items`。查询 `GET /tasks/{task_id}` 可跨实例；`pages` 是逐页诊断，`after_page` 只控制诊断读取，不驱动迁移。
+- `partial_failed` 表示失败/冲突，核对时也涵盖缺失/差异/来源丢失。内存缺失另看 `progress.memory_incomplete`，全量文件扫描不代表集群内存齐全。
+- 停止用 `POST /tasks/{task_id}/stop`，当前批结束后生效。停止 Postman 请求不等于停止后台 worker。没有重启自动续跑；疑似中断先确认实例，再同范围重新提交安全重跑。
+- Postman、认证、已有进度表前提和保护上限见 [迁移操作说明](../../docs/deploy/cron-phase1-snapshot-migration.md)；原同步分页接口仍保留。
+
 ## W+ SOP active-session 空结果
 
 - 接口：`src/swe/app/wplus_sop/router.py` 的 `get_active_wplus_sop_session`。Chat 存在且归属匹配、但没有活动 SOP 时返回 `200` 和 JSON `null`；Chat 不存在或身份、归属校验失败仍返回 `404`。

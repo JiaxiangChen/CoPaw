@@ -16,6 +16,10 @@ from zoneinfo import ZoneInfo
 from ...config.context import resolve_runtime_tenant_id
 from ...config.utils import load_config
 from .monitor_sync_client import MonitorSyncClient, get_monitor_sync_client
+from .managed_notifications import (
+    load_notification_spec,
+    notification_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +42,10 @@ class CronNotificationWorker:
         batch_size: Optional[int] = None,
         max_attempts: Optional[int] = None,
         app_timezone: Optional[str] = None,
+        db: Any = None,
     ) -> None:
         self._multi_agent_manager = multi_agent_manager
+        self._db = db
         self._monitor_client = monitor_client or get_monitor_sync_client()
         self._interval_seconds = interval_seconds or _get_int_env(
             SCAN_INTERVAL_ENV,
@@ -138,20 +144,7 @@ class CronNotificationWorker:
     async def _send_one(self, row: dict[str, Any]) -> bool:
         execution_id = int(row.get("id"))
         try:
-            tenant_id = str(row.get("tenant_id") or "")
-            source_id = str(row.get("source_id") or "")
-            job_id = str(row.get("job_id") or "")
-            runtime_tenant_id = resolve_runtime_tenant_id(
-                tenant_id or None,
-                source_id or None,
-            )
-            workspace = await self._multi_agent_manager.get_agent(
-                "default",
-                tenant_id=runtime_tenant_id,
-            )
-            if workspace.cron_manager is None:
-                raise RuntimeError(f"cron manager unavailable: {tenant_id}")
-            await workspace.cron_manager.send_task_success_notification(job_id)
+            await self._send_notification(row)
             await self._monitor_client.mark_notification_sent(
                 execution_id=execution_id,
                 sent_at=self._now_utc(),
@@ -164,6 +157,36 @@ class CronNotificationWorker:
                 max_attempts=self._max_attempts,
             )
             return False
+
+    async def _send_notification(self, row: dict[str, Any]) -> None:
+        """按执行历史的管理归属分流，不以旧仓库查不到作为新版判断。"""
+        metadata = notification_metadata(row)
+        job = None
+        agent_id = "default"
+        source_id = str(row.get("source_id") or "")
+        tenant_id = str(row.get("tenant_id") or "")
+        job_id = str(row.get("job_id") or "")
+        if metadata.get("management_owner") == "scheduler":
+            job = await load_notification_spec(self._db, row, metadata)
+            agent_id = metadata["agent_id"]
+            source_id = job.source_id
+        runtime_tenant_id = resolve_runtime_tenant_id(
+            tenant_id or None,
+            source_id or None,
+        )
+        workspace = await self._multi_agent_manager.get_agent(
+            agent_id,
+            tenant_id=runtime_tenant_id,
+        )
+        if workspace.cron_manager is None:
+            raise RuntimeError(f"cron manager unavailable: {tenant_id}")
+        if job is None:
+            await workspace.cron_manager.send_task_success_notification(job_id)
+        else:
+            await workspace.cron_manager.send_task_success_notification(
+                job_id,
+                job=job,
+            )
 
     def _now_utc(self) -> datetime:
         try:
