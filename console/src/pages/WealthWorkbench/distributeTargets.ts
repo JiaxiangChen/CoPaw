@@ -17,10 +17,8 @@ export interface DistributeBranch {
   leaf: boolean;
 }
 
-const USER_POSITION_PATH =
-  "/xcapi-auth/wmadm/services/v1/wmutadm/getUserPostionByBrn";
-const BRANCH_TREE_PATH =
-  "/xcapi-auth/wmadm/services/v1/wmadm/combox/BranchTreeInfoService";
+const USER_POSITION_PATH = "/zt/wealth/wmadm/branchTreeInfo"
+const BRANCH_TREE_PATH = "/zt/wealth/wmadm/getUserPostionByBrn"
 
 /** 网关凭证由 Nginx 附加，浏览器沿用默认同源 Cookie。 */
 async function fetchDistributionData<T>(
@@ -57,8 +55,8 @@ export async function fetchDistributeBranches(
   if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return branch ? null : [];
   try {
     return await fetchDistributionData<DistributeBranch[]>(BRANCH_TREE_PATH, {
-      mOrgCode,
-      mOrgLvl,
+      mmOrgCode: mOrgCode,
+      mmOrgLvl: mOrgLvl,
       sysId,
     });
   } catch (error) {
@@ -98,8 +96,8 @@ export async function fetchDistributeTargets(
       USER_POSITION_PATH,
       {
         bbkOrgId: bbk,
-        mOrgCode,
-        mOrgLvl,
+        mmOrgCode: mOrgCode,
+        mmOrgLvl: mOrgLvl,
       },
     );
     if (response.code !== "success") return [];
