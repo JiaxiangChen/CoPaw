@@ -57,6 +57,19 @@ def canonical(value):
     )
 
 
+def profile_columns(spec):
+    """从同一份定义提取查询副本，完整定义仍保留在 JSON 中。"""
+    skills = spec.get("skill_ids") or ""
+    if isinstance(skills, list):
+        skills = ",".join(str(item) for item in skills)
+    return {
+        "tenant_name": spec.get("tenant_name") or "",
+        "bbk_id": spec.get("bbk_id") or "",
+        "skill_ids": skills,
+        "workflow_binding_id": spec.get("workflow_binding_id") or None,
+    }
+
+
 def request_hash(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 

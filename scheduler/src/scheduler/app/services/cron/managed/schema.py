@@ -4,6 +4,7 @@
 REQUIRED_COLUMNS = {
     "swe_cron_jobs_v2": (
         "tenant_id source_id agent_id job_id scope_id name task_type "
+        "tenant_name bbk_id skill_ids workflow_binding_id "
         "enabled cron_expr timezone spec_json offset_minutes "
         "offset_window_hours enable_offset management_owner "
         "creator_user_id definition_version deleted_at parent_tenant_id "

@@ -17,6 +17,14 @@ FROM (
   UNION ALL
   SELECT 'swe_cron_jobs_v2' AS table_name, 'name' AS column_name
   UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'tenant_name' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'bbk_id' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'skill_ids' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'workflow_binding_id' AS column_name
+  UNION ALL
   SELECT 'swe_cron_jobs_v2' AS table_name, 'task_type' AS column_name
   UNION ALL
   SELECT 'swe_cron_jobs_v2' AS table_name, 'enabled' AS column_name

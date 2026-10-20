@@ -4,6 +4,8 @@
 -- 缺少整张新版表：使用 cron_phase2_manual_create.sql 中对应 CREATE。
 -- 不在本文件补写任何执行成功、管理归属或历史执行水位。
 -- 不修改原 swe_cron_executions 表结构。
+-- 四个新增查询副本列见 cron_profile_columns_manual_upgrade.sql，须在发布新版写入代码前补齐。
+-- 已有定义回填见 cron_profile_columns_manual_backfill.sql，按预览结果人工决定执行。
 
 -- 一、此前执行登记草案缺少整轮收敛字段时，分别补齐，未知结果保持 NULL。
 ALTER TABLE swe_cron_execution_runs
