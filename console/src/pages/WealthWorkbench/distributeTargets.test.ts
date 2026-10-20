@@ -42,11 +42,11 @@ describe("机构岗位人员分发目标", () => {
     mockRequest.mockResolvedValueOnce(branches);
     expect(await fetchDistributeBranches()).toEqual(branches);
     expect(fetch).toHaveBeenCalledWith(
-      "/xcapi-auth/wmadm/services/v1/wmadm/combox/BranchTreeInfoService",
+      "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mOrgCode: "755", mOrgLvl: 70, sysId: "retail" }),
+        body: JSON.stringify({ mmOrgCode: "755", mmOrgLvl: 70, sysId: "retail" }),
         signal: expect.any(AbortSignal),
       },
     );
@@ -76,7 +76,7 @@ describe("机构岗位人员分发目标", () => {
     expect(await fetchDistributeTargets()).toEqual([]);
   });
 
-  it("30 秒超时中止两个接口并清理定时器", async () => {
+  it("60 秒超时中止两个接口并清理定时器", async () => {
     vi.useFakeTimers();
     useIframeStore.getState().setContext({ sysId: "retail" });
     vi.mocked(fetch).mockImplementation(
@@ -89,7 +89,7 @@ describe("机构岗位人员分发目标", () => {
     );
     const branches = fetchDistributeBranches();
     const targets = fetchDistributeTargets();
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(60000);
     expect(await branches).toBeNull();
     expect(await targets).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
@@ -124,15 +124,15 @@ describe("机构岗位人员分发目标", () => {
     ]);
     expect(request).not.toHaveBeenCalled();
     expect(mockRequest).toHaveBeenCalledWith(
-      "/xcapi-auth/wmadm/services/v1/wmutadm/getUserPostionByBrn",
+      "/zt/wealth/wmadm/branchTreeInfo",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",
-          mOrgCode: "755480",
-          mOrgLvl: 70,
+          mmOrgCode: "755480",
+          mmOrgLvl: 70,
         }),
       },
     );
