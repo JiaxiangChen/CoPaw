@@ -328,7 +328,7 @@ describe("usePlanStats", () => {
     rerender({ version: 1 });
     expect(fetchSkillStats).toHaveBeenCalledTimes(2);
   });
-  it("统计请求15秒超时后释放加载状态，手动重试成功后旧响应不覆盖", async () => {
+  it("统计请求60秒超时后释放加载状态，手动重试成功后旧响应不覆盖", async () => {
     vi.useFakeTimers();
     const plans = [plan("a")];
     const old = deferred();
@@ -344,7 +344,7 @@ describe("usePlanStats", () => {
       ({ version }) => usePlanStats(plans, plans, "rm", version),
       { initialProps: { version: 0 } },
     );
-    await act(async () => vi.advanceTimersByTimeAsync(15000));
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
     expect(signal.aborted).toBe(true);
     expect(result.current).toMatchObject({
       sceneStats: null,
@@ -373,7 +373,7 @@ describe("usePlanStats", () => {
     );
     await act(async () => {});
     rerender({ version: 1 });
-    await act(async () => vi.advanceTimersByTimeAsync(15000));
+    await act(async () => vi.advanceTimersByTimeAsync(60000));
     expect(result.current).toMatchObject({
       sceneStats: stats,
       statsLoading: false,

@@ -17,13 +17,13 @@ const mockRequest = vi.mocked(request);
 const planView = {
   id: "edit-plan",
   name: "待修改规划",
-  publish_status: "published",
-  board_status: "已自动下发",
+  publishStatus: "published",
+  boardStatus: "已自动下发",
   editable: true,
   scenes: [],
   targets: [
-    { sap_id: "0001", name: "张三" },
-    { sap_id: "0002", name: "李四" },
+    { sapId: "0001", name: "张三" },
+    { sapId: "0002", name: "李四" },
   ],
 };
 
@@ -33,17 +33,17 @@ beforeEach(() => {
     "fetch",
     vi.fn(
       async (path: string, options?: RequestInit) =>
-        new Response(JSON.stringify(await mockRequest(path, options))),
+        new Response(
+          JSON.stringify(await mockRequest(path.split("?")[0], options)),
+        ),
     ),
   );
-  useIframeStore
-    .getState()
-    .setContext({
-      bbk: "755",
-      orgCode: "755480",
-      orgLvl: "70",
-      sysId: "retail",
-    });
+  useIframeStore.getState().setContext({
+    bbk: "755",
+    orgCode: "755480",
+    orgLvl: "70",
+    sysId: "retail",
+  });
   useWealthStore.setState({
     accountId: "middle",
     plans: [],
@@ -61,7 +61,10 @@ afterEach(() => {
 });
 
 async function openEditPlan() {
-  mockRequest.mockResolvedValueOnce({ items: [planView] });
+  mockRequest.mockResolvedValueOnce({
+    code: "200",
+    data: { items: [planView] },
+  });
   const { plans } = await fetchBootstrap("middle");
   useWealthStore.setState({ plans });
   useWealthStore.getState().editPlan("edit-plan");

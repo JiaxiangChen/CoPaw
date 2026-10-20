@@ -1,6 +1,6 @@
 /**
  * 智能财富工作台 —— 信息播报滚动条
- * 对应原型 .wealth-ticker：hover/聚焦/暂停时停止滚动，prefers-reduced-motion 时静态展示。
+ * 悬停播报文字或手动暂停时停止滚动，prefers-reduced-motion 时静态展示。
  */
 import { useState } from "react";
 import cx from "classnames";
