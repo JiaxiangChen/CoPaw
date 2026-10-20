@@ -26,14 +26,11 @@ LEGACY_SKILL_JOB_SQL = (
     "AND deleted_at IS NULL AND status != 'deleted' "
     "ORDER BY created_at DESC, id DESC LIMIT 1"
 )
-# 新表没有 skill_ids、bbk_id 列，两者都在完整定义的 spec_json 顶层。
+# 新表直接使用与完整定义同步保存的展开列，不再解析 spec_json。
 MANAGED_SKILL_JOB_SQL = (
-    "SELECT job_id, "
-    "JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.bbk_id')) AS bbk_id "
-    "FROM swe_cron_jobs_v2 "
+    "SELECT job_id, bbk_id FROM swe_cron_jobs_v2 "
     "WHERE tenant_id = %s AND source_id = %s AND agent_id = %s "
-    "AND FIND_IN_SET(%s, "
-    "JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.skill_ids'))) > 0 "
+    "AND FIND_IN_SET(%s, skill_ids) > 0 "
     "AND deleted_at IS NULL "
     "ORDER BY created_at DESC, job_id DESC LIMIT 1"
 )
@@ -146,8 +143,8 @@ async def get_managed_job_by_skill(
 ) -> ManagedSkillJobBinding:
     """从 swe_cron_jobs_v2 取绑定该技能的最新未删除任务标识。
 
-    新表按 tenant_id、source_id、agent_id、job_id 区分任务，技能和分行都从
-    spec_json 顶层读取；同样在命中多行时取最新创建的一条。
+    新表按 tenant_id、source_id、agent_id、job_id 区分任务，技能和分行直接
+    读取 skill_ids、bbk_id 列；同样在命中多行时取最新创建的一条。
     """
     db = _database(request)
     row = await _fetch_one(
