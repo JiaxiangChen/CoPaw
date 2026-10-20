@@ -1,5 +1,13 @@
 # 定位路径
 
+## 定时任务第一阶段全量快照迁移
+
+- 一次提交：`POST /api/internal/cron/migration/tasks`，operation 为 preview/import/verify；后台自动翻页，不必人工传递游标。只写新定义/状态业务表，旧 CRUD、文件、内存及执行入口不切换，独立系统任务不迁移。
+- 任务编排与持久进度：`src/swe/app/crons/migration_tasks.py`，复用既有 `swe_async_tasks`、`swe_async_task_items`。查询 `GET /tasks/{task_id}` 可跨实例；`pages` 是逐页诊断，`after_page` 只控制诊断读取，不驱动迁移。
+- `partial_failed` 表示失败/冲突，核对时也涵盖缺失/差异/来源丢失。内存缺失另看 `progress.memory_incomplete`，全量文件扫描不代表集群内存齐全。
+- 停止用 `POST /tasks/{task_id}/stop`，当前批结束后生效。停止 Postman 请求不等于停止后台 worker。没有重启自动续跑；疑似中断先确认实例，再同范围重新提交安全重跑。
+- Postman、认证、已有进度表前提和保护上限见 [迁移操作说明](../../docs/deploy/cron-phase1-snapshot-migration.md)；原同步分页接口仍保留。
+
 ## W+ SOP active-session 空结果
 
 - 接口：`src/swe/app/wplus_sop/router.py` 的 `get_active_wplus_sop_session`。Chat 存在且归属匹配、但没有活动 SOP 时返回 `200` 和 JSON `null`；Chat 不存在或身份、归属校验失败仍返回 `404`。
@@ -245,10 +253,10 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 创建计划的经营场景可见范围
 
-- `src/swe/app/wealth_plans/router.py` 的 `_fetch_external_scene_skills()` 调用外部 `POST /api/agent/workspace/skill-config/list`，只传当前请求分行 `bbkId` 和 `category`；产品大类为空表示全部。
+- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用原生 fetch 直接请求同源 `POST /api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理或统一 request。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；仅显式设置 JSON Content-Type，沿用默认同源 Cookie。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 60 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
 - 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
 - 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
-- 排查入口：父系统 `iframeContext.bbk` → `X-Bbk-Id` → `request.state.bbk_id`；场景卡片来源文案 `skillBbkLabel` 只用于展示。
+- 排查入口：场景查询为父系统 `iframeContext.bbk` → POST body 的 `bbkId`；规划提交/校验仍为 `X-Bbk-Id` → `request.state.bbk_id`。场景卡片来源文案 `skillBbkLabel` 只用于展示。
 - 回归入口：`venv/bin/python -m pytest tests/unit/app/wealth_plans/test_router.py -q`。
 
 ## 财富工作台岗位角色映射
@@ -258,7 +266,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富规划任务类型与技能/MCP 下发
 
-- `GET /wealth/scene-skills` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
+- `POST /api/agent/workspace/skill-config/list` 返回的 `mcpRelationList` 经 Console 映射为规划场景的 `mcp_relations`。
 - `src/swe/app/wealth_plans/publish.py` 的 `_build_job_spec` 按场景判断：空数组创建 `workflow`，非空数组保持 `agent`。只判断数组是否为空，`["    "]` 仍按非空处理。
 - `src/swe/app/wealth_plans/market_dispatch.py` 的 `collect_distribution_items` 只汇总非空 MCP 关联数组场景的技能 item 和 MCP item；全是 workflow 场景时不调用 market 下发接口，混合规划只下发 agent 场景。
 - 财富规划的 `_broadcast_scene_job` 复用 `crons.api.broadcast_job`，显式传 `enable_batch_dispatch=True`、`enable_offset=False`、`offset_window_hours=0`；首次分发完成后启用父任务批调度并同步子任务。父批调度在外部平台的注册时间与目标子任务均使用规划原排程，不按默认 4 小时窗口提前或错峰。窗口变化时，即使父任务已启用批调度，重新分发也会更新窗口和外部平台任务。仅创建人本人为目标时仍跳过广播、沿用本人源任务。
@@ -272,15 +280,15 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台看板与列表标题
 
-- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留后端 `board_status` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
+- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留Java `boardStatus` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
 
 - 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，周视图卡片标题使用规划名，下方显示“经营场景：”并汇总该规划的 `PlanItem.sceneName`，多项场景用中文逗号连接，最多两行，超出省略。月视图标题同样使用规划名，名称后用纯数字表示该规划关联的全部技能数量，不新增场景正文；两种视图统一使用 Ant Design Tooltip，悬停或键盘聚焦时分行展示完整规划名、经营场景与状态，长名称自动换行；移除原生 `title`，避免重复提示。
 - 列表的“规划周期”按所选日期范围与规划 `start/end` 的闭区间交集筛选，不按 `Plan.period` 类型筛选。“自定义”显示日期范围选择器，默认本月，切换快捷周期后保留此前选定的范围；来源分类和概览统计使用同一筛选结果，日历仍使用自身的周/月区间。
 - 日历按各场景排程筛选当天执行的技能，点击卡片仍传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
 - 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样由前端直接查询 `/api/agent/workspace/skill-stats`，请求 `planIds` 为规划 ID 数组，由 Nginx 转发；按返回项 `planId` 读取 `targetCustomerCount` 和 `targetTaskCount`，不再按场景或日期区间求和。未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
 
-- 周/月切换仅本地筛选规划，不按周重新请求 `/wealth/plans`。统计由 `Board/usePlanStats.ts` 按账户和去重排序后的规划 ID 集合缓存；相同在途请求合并，规划状态轮询不会清空缓存。成功与失败响应缓存 30 秒，到期后在下一次周期/筛选变化或规划轮询时后台更新；页面静止时不定时刷新。后台更新保留已有数字，失败提示暂显示上次数据；无已有数据时显示 `--`；加载/后台更新仅通过刷新图标旋转和禁用反馈，失败仍提示统计不可用或暂显示上次数据。发布/分发从进行中结束时使统计失效并主动查询，若请求在途则返回后串行补查；切换账户清空缓存，过期响应不覆盖当前周期。回归入口为 `Board/usePlanStats.test.ts`。
-- 看板仅在存在发布中/分发中规划时自动查询：`Board/useBoardRefresh.ts` 在上一轮完成后等待 5 秒再查询，每次连续处理周期最多 3 分钟；到期静默暂停，手动“刷新看板”不会重新启动自动轮询。看板的规划与统计单次请求均由 `Board/requestTimeout.ts` 限制为 15 秒：超时取消底层请求并释放等待，保留已有数据；离开看板会立即取消在途规划请求；被取消的规划请求即使晚返回也不更新 store。自动与手动规划刷新共用在途请求，刷新入口使用图标按钮（无障碍名称“刷新看板”），在规划或统计请求期间旋转并禁用；手动成功刷新会绕过统计有效期更新当前统计。看板刷新使用严格读取，接口失败保留规划，不额外展示暂停或规划刷新失败文案，其他读取仍保持原有容错行为。回归入口：`Board/useBoardRefresh.test.ts`。
+- 周/月切换仅本地筛选规划，不按周重新请求 `/zt/wealth/plans`。统计由 `Board/usePlanStats.ts` 按账户和去重排序后的规划 ID 集合缓存；相同在途请求合并，规划状态轮询不会清空缓存。成功与失败响应缓存 30 秒，到期后在下一次周期/筛选变化或规划轮询时后台更新；页面静止时不定时刷新。后台更新保留已有数字，失败提示暂显示上次数据；无已有数据时显示 `--`；加载/后台更新仅通过刷新图标旋转和禁用反馈，失败仍提示统计不可用或暂显示上次数据。发布/分发从进行中结束时使统计失效并主动查询，若请求在途则返回后串行补查；切换账户清空缓存，过期响应不覆盖当前周期。回归入口为 `Board/usePlanStats.test.ts`。
+- 看板仅在存在发布中/分发中规划时自动查询：`Board/useBoardRefresh.ts` 在上一轮完成后等待 5 秒再查询，每次连续处理周期最多 3 分钟；到期静默暂停，手动“刷新看板”不会重新启动自动轮询。看板的规划与统计单次请求均由 `Board/requestTimeout.ts` 限制为 60 秒：超时取消底层请求并释放等待，保留已有数据；离开看板会立即取消在途规划请求；被取消的规划请求即使晚返回也不更新 store。自动与手动规划刷新共用在途请求，刷新入口使用图标按钮（无障碍名称“刷新看板”），在规划或统计请求期间旋转并禁用；手动成功刷新会绕过统计有效期更新当前统计。看板刷新使用严格读取，接口失败保留规划，不额外展示暂停或规划刷新失败文案，其他读取仍保持原有容错行为。回归入口：`Board/useBoardRefresh.test.ts`。
 
 ## 财富任务名单动态字段
 
@@ -307,16 +315,17 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ### 财富规划分发目标
 
-- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，调用 `POST /user-info/positions/by-branch`。
-- 后端代理：`src/swe/app/routers/user_info.py::query_user_positions`，POST 到网关 `getUserPostionByBrn`；凭证来自环境配置的 `SWE_USER_POSITION_HEADER_KEY` 和 `SWE_USER_POSITION_HEADER_VALUE`，两个环境暂为 `xxx`、`yyyy`，可通过环境变量覆盖。
-- 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值，修改后重启后端生效。
-- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mOrgCode ← orgCode (vorgcode)`、`mOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
+- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，使用原生 fetch 直接 POST 同源网关路径 `/zt/wealth/wmadm/branchTreeInfo`（人员，`USER_POSITION_PATH`）与 `/zt/wealth/wmadm/getUserPostionByBrn`（支行，`BRANCH_TREE_PATH`），不再调用 `/api/user-info/*/by-branch` 或统一 request。仅显式设置 JSON Content-Type，沿用默认同源 Cookie；60 秒超时取消请求，人员失败返回空列表，支行失败返回 null 以保留重试。
+- 部署前端 Nginx 需将上述两个同源路径转发到对应环境的网关，并按原后端 `SWE_USER_POSITION_HEADER_KEY/VALUE` 配置附加网关凭证，保留请求 Cookie；凭证不能放进前端包。原 Python 代理保留兼容。
+- 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值；这些配置仍用于 Python 兼容代理，前端直连需在部署 Nginx 中同步对应环境的目标地址。
+- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mmOrgCode ← orgCode (vorgcode)`、`mmOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
 - 上游成功标记为 `code=success`；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
-- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先调用 `POST /user-info/branches/by-branch`，入参为登录分行 `bbk`、`mOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，每次选择机构后继续用该条目的 `mOrgCode/mOrgLvl` 查询 `BranchTreeInfoService`；每选择一级立即用当前条目的 `mOrgCode/mOrgLvl` 查询人员，同时独立查询下级机构；有下级就展开下一列，但可停留在当前级选择人员。返回空数组才确认末级，不依赖 `leaf` 字段判定末级。
+- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先直连上述 `BranchTreeInfoService`，入参为 `mmOrgCode=bbk`、`mmOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，每次选择机构后继续用该条目的 `mOrgCode/mOrgLvl` 查询 `BranchTreeInfoService`；每选择一级立即用当前条目的 `mOrgCode/mOrgLvl` 查询人员，同时独立查询下级机构；有下级就展开下一列，但可停留在当前级选择人员。返回空数组才确认末级，不依赖 `leaf` 字段判定末级。
+- 两个前端分发接口请求体统一使用 `mmOrgCode/mmOrgLvl`；选择机构后仍取返回条目的 `mOrgCode/mOrgLvl`，只转换请求字段名，值及类型保持不变，`bbkOrgId/sysId` 保持原样。
 - 支行上游 `BranchTreeInfoService` 地址由 `SWE_BRANCH_TREE_API_URL` 在 dev/prd 中配置，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `wmcomsrvgatewayxc.paas.cmbchina.cn`，复用人员接口的 header 凭证配置。
 - 中台可跨支行累计选择人员；当前候选列表与全选操作仅针对当前支行，已选人员信息保留用于发布及移除。快速切换支行时过期响应不更新当前列表。
 
-- 两个外部接口均透传 `Cookie`：优先使用前端统一请求层的 `x-header-cookie`（保留切换用户后的上下文），为空时读取请求 `Cookie`；每次独立组装 header，不修改共享凭证字典。
+- 直连请求不再使用统一请求层的 `x-header-cookie`；浏览器自动携带同源 Cookie，机构参数仍从 iframeStore 取得。Python 兼容代理继续优先读取 `x-header-cookie`，其次读取请求 Cookie。回归入口：`distributeTargets.test.ts`、`TargetPicker.branches.test.tsx`、`TargetPicker.edit.test.tsx`。
 - 中台支行级联选择器支持前端模糊搜索，对已加载的机构按支行名称或机构编码进行包含匹配，忽略英文大小写和搜索词首尾空格；搜索不额外请求支行接口，也不改变跨支行累计选择。
 
 - 级联查询失败时显示重试，不当作末级，也不阻塞当前级人员查询和选择；切换机构清空当前候选人员并使旧请求失效，立即查询新选机构的人员，但保留跨支行累计的人员选择。子支行按需加载并缓存，搜索范围仅包含已经加载的机构。
@@ -333,6 +342,18 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台嵌入头部控制
 
-- 父应用通过 iframe URL 的 `hideLogo=true` 隐藏整个财富工作台头部（品牌及标题），例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
+- 父应用通过 iframe URL 的 `hideLogo=true` 同时隐藏整个财富工作台头部（品牌及标题）、信息播报与侧栏，例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
 - 入口与参数延续逻辑位于 `console/src/pages/WealthWorkbench/index.tsx`。内部导航省略参数时补回入口隐藏设置并保留其他查询参数，支持导航后刷新；不写入 sessionStorage，不影响独立打开的工作台。
-- `.root.withoutHeader` 位于同目录 `index.module.less`，同步调整信息播报、侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。
+- `.root.withoutHeader` 位于同目录 `index.module.less`，同步消除头部和播报占位，调整侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。
+
+- `hideLogo=true` 对所有角色统一隐藏整个侧栏（包含规划入口及任务导航）并移除占位，正文填满可用宽度；不带该参数时侧栏行为保持不变。内部导航仅延续隐藏设置，不额外补回 `origin=Y`，身份初始化保持原有行为。
+- 父应用直达：`/wealth/board?origin=Y&hideLogo=true` 为看板，`/wealth/create?origin=Y&hideLogo=true` 为新建。部署在 `/console` 下时各地址加此前缀。
+- 编辑仅由工作台内部触发：看板列表或日历操作调用 `editPlan(id)` 回填草稿和分发目标，再跳转 `/wealth/create`。父应用不提供编辑链接，不引入 `planId` URL 参数；编辑态沿用原有内存机制。
+
+## 财富规划 Java 网关迁移
+
+- 2026-10-20 浏览器规划路径统一增加 `/zt` 前缀；需同步网关 location 和测试夹具。Java 上游仍是 `/wealth/plans` 时由网关剥离 `/zt`；Java 同时有此前缀时原样转发。不修改工作台页面路由或其他接口前缀。
+
+- 规划请求在 `console/src/pages/WealthWorkbench/api.ts` 使用同源原生 fetch `/zt/wealth/plans`，不走全局 request/baseUrl，也不拼接 `/api`。网关负责转 Java；创建后的任务编排、资源处理与状态回写由 Java 负责。
+- 列表通过 Query 传 sapId/role/bbkId；创建/更新通过 camelCase JSON 传身份和业务数据；删除通过 DELETE Body 传 sapId。响应解包 code/message/data，HTTP 200 的非 200 业务码也上抛。
+- 场景、名单、统计、机构人员、签名保持各自已有同源路径；不回退 Python 工作台 handler。网关必须优先匹配规划接口并透传 DELETE Body，避免 SPA 返回 HTML。具体评估与配置见 [Java 网关接入](../../docs/api/wealth-plans-java-gateway.md)，回归入口为 `planGateway.test.ts`、`store.test.ts`。

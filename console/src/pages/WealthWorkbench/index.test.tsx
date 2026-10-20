@@ -12,8 +12,13 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WealthWorkbench from "./index";
+
+const access = vi.hoisted(() => ({ tasks: true }));
+beforeEach(() => {
+  access.tasks = true;
+});
 
 vi.mock("./useVisibilityRefresh", () => ({ useVisibilityRefresh: vi.fn() }));
 vi.mock("./store", () => ({
@@ -23,7 +28,7 @@ vi.mock("./store", () => ({
       accountId: "rm",
       init: vi.fn(),
     }),
-  useCanAccess: () => true,
+  useCanAccess: () => access.tasks,
 }));
 vi.mock("./components/Topbar", () => ({
   Topbar: () => <header>工作台头部</header>,
@@ -79,14 +84,16 @@ describe("财富工作台嵌入头部", () => {
     (query) => {
       mount(`/wealth/board${query}`);
       expect(screen.getByRole("banner")).toBeInTheDocument();
+      expect(screen.getByRole("navigation")).toBeInTheDocument();
+      expect(screen.getByText("信息播报")).toBeInTheDocument();
     },
   );
 
-  it("隐藏整个头部并保留侧栏与播报", () => {
+  it("同时隐藏头部、信息播报与整个侧栏", () => {
     mount("/wealth/board?hideLogo=true");
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
-    expect(screen.getByRole("navigation")).toBeInTheDocument();
-    expect(screen.getByText("信息播报")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByText("信息播报")).not.toBeInTheDocument();
   });
 
   it("内部导航延续隐藏参数并保留其他参数，可显式恢复显示", async () => {
@@ -98,8 +105,11 @@ describe("财富工作台嵌入头部", () => {
       ),
     );
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(screen.queryByText("信息播报")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("显示头部"));
     expect(screen.getByRole("banner")).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toBeInTheDocument();
+    expect(screen.getByText("信息播报")).toBeInTheDocument();
   });
 
   it("默认入口重定向后仍保留隐藏设置", async () => {
@@ -111,4 +121,24 @@ describe("财富工作台嵌入头部", () => {
     );
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
   });
+  it.each([true, false])("隐藏侧栏不依赖任务权限：%s", (tasks) => {
+    access.tasks = tasks;
+    mount("/wealth/board?hideLogo=true");
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+  it.each(["", "&hideLogo=true"])(
+    "内部跳转不额外补回 origin 参数：%s",
+    async (query) => {
+      mount(`/wealth/board?origin=Y${query}`);
+      fireEvent.click(screen.getByText("切换页面"));
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          query
+            ? "/wealth/create?other=kept&hideLogo=true"
+            : "/wealth/create?other=kept",
+        ),
+      );
+      expect(screen.getByRole("status")).not.toHaveTextContent("origin=Y");
+    },
+  );
 });

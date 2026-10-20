@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { convertArchivedPage, SessionApi } from "./index";
+import { useAgentStore } from "@/stores/agentStore";
+import { currentCronContext } from "@/api/cronTaskContext";
 
 const apiMocks = vi.hoisted(() => ({
   listChats: vi.fn(),
@@ -10,6 +12,10 @@ const apiMocks = vi.hoisted(() => ({
 
 const cronJobApiMocks = vi.hoisted(() => ({
   listCronJobs: vi.fn(),
+}));
+const schedulerMocks = vi.hoisted(() => ({ listAll: vi.fn() }));
+vi.mock("@/api/modules/schedulerCron", () => ({
+  schedulerCronApi: schedulerMocks,
 }));
 
 vi.mock("../../../api", () => ({
@@ -37,6 +43,9 @@ vi.mock("../../../utils/identity", () => ({
 
 describe("SessionApi identity mapping", () => {
   beforeEach(() => {
+    useAgentStore.setState({ selectedAgent: "default" });
+    schedulerMocks.listAll.mockReset();
+    schedulerMocks.listAll.mockResolvedValue([]);
     apiMocks.listChats.mockReset();
     apiMocks.listChatsPage.mockReset();
     apiMocks.getChat.mockReset();
@@ -67,6 +76,134 @@ describe("SessionApi identity mapping", () => {
     runtimeWindow.currentUserId = undefined;
     runtimeWindow.currentChannel = undefined;
     runtimeWindow.__env__ = {};
+  });
+
+  it("新版任务会话不因为旧文件清单为空被隐藏", async () => {
+    const context = currentCronContext();
+    schedulerMocks.listAll.mockResolvedValue([
+      {
+        id: "new-job",
+        management_owner: "scheduler",
+        definition_version: 1,
+        tenant_id: context.tenant_id,
+        source_id: context.source_id,
+        agent_id: context.agent_id,
+      },
+    ]);
+    apiMocks.listChats.mockResolvedValue([
+      {
+        id: "new-chat",
+        session_id: "s",
+        user_id: "user-1",
+        channel: "console",
+        name: "new task",
+        meta: {
+          session_kind: "task",
+          task_job_id: "new-job",
+          management_owner: "scheduler",
+        },
+      },
+    ]);
+    const list = await new SessionApi().getSessionList();
+    expect(list.map((session) => session.id)).toEqual(["new-chat"]);
+  });
+
+  it("新来源失败时保留该来源会话，不能当成已删除", async () => {
+    schedulerMocks.listAll.mockRejectedValue(
+      new Error("scheduler unavailable"),
+    );
+    apiMocks.listChats.mockResolvedValue([
+      {
+        id: "known-new",
+        session_id: "s",
+        user_id: "user-1",
+        channel: "console",
+        name: "new task",
+        meta: {
+          session_kind: "task",
+          task_job_id: "new-job",
+          management_owner: "scheduler",
+        },
+      },
+    ]);
+    expect(
+      (await new SessionApi().getSessionList()).map((session) => session.id),
+    ).toEqual(["known-new"]);
+  });
+
+  it("身份重置后旧会话响应迟到不覆盖新列表或清除新请求", async () => {
+    let resolveOld!: (value: unknown) => void;
+    apiMocks.listChatsPage
+      .mockReturnValueOnce(
+        new Promise((done) => {
+          resolveOld = done;
+        }),
+      )
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "new-scope-chat",
+            name: "新工作区",
+            session_id: "new-session",
+            user_id: "user-1",
+            channel: "console",
+            meta: {},
+          },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 100,
+        has_more: false,
+      });
+    const api = new SessionApi();
+    const old = api.getSessionList();
+    useAgentStore.setState({ selectedAgent: "agent-b" });
+    const current = api.getSessionList();
+    const newList = await current;
+    resolveOld({
+      items: [{ id: "old-chat", name: "旧工作区", meta: {} }],
+      total: 1,
+      page: 1,
+      page_size: 100,
+      has_more: false,
+    });
+    expect(newList.map((session) => session.id)).toEqual(["new-scope-chat"]);
+    expect((await old).map((session) => session.id)).toEqual([
+      "new-scope-chat",
+    ]);
+  });
+
+  it("身份切走期间旧请求结束，切回后仍能发起新的刷新", async () => {
+    let resolveOld!: (value: unknown) => void;
+    apiMocks.listChatsPage
+      .mockReturnValueOnce(
+        new Promise((done) => {
+          resolveOld = done;
+        }),
+      )
+      .mockResolvedValueOnce({
+        items: [{ id: "fresh-chat", name: "新查询", meta: {} }],
+        total: 1,
+        page: 1,
+        page_size: 100,
+        has_more: false,
+      });
+    const api = new SessionApi();
+    const old = api.getSessionList();
+    useAgentStore.setState({ selectedAgent: "temporary-agent" });
+    resolveOld({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 100,
+      has_more: false,
+    });
+    await old;
+    useAgentStore.setState({ selectedAgent: "default" });
+    expect((await api.getSessionList()).map((session) => session.id)).toEqual([
+      "fresh-chat",
+    ]);
+    expect(apiMocks.listChatsPage).toHaveBeenCalledTimes(2);
   });
 
   it("converts a terminal recovery snapshot into chat cards", () => {
@@ -1520,12 +1657,12 @@ describe("archived conversation card conversion", () => {
 
     const session = await sessionApi.getSession("chat-real-1");
 
-    expect(session.messages?.map((message) => message.cards?.[0]?.code)).toEqual(
-      [
-        "ConversationCompactionBoundary",
-        "AgentScopeRuntimeRequestCard",
-      ],
-    );
+    expect(
+      session.messages?.map((message) => message.cards?.[0]?.code),
+    ).toEqual([
+      "ConversationCompactionBoundary",
+      "AgentScopeRuntimeRequestCard",
+    ]);
   });
 
   it("places a compaction boundary after the batch it terminates", () => {

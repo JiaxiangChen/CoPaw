@@ -4,7 +4,7 @@
  * 网络不可达全部上抛，由调用方提示，避免「假成功」。
  * request 被文件级 mock，因此本文件独立于 api.test.ts。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { request } from "../../api/request";
 import type { Account, DistributeTarget } from "./types";
@@ -38,6 +38,13 @@ async function publishWithDefaults() {
 describe("WealthWorkbench api 错误传播", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (path: string, options?: RequestInit) =>
+          new Response(JSON.stringify(await mockRequest(path, options))),
+      ),
+    );
     api.resetMockDb();
   });
 
@@ -88,3 +95,5 @@ describe("WealthWorkbench api 错误传播", () => {
     await expect(api.fetchPlanList()).resolves.toEqual([]);
   });
 });
+
+afterEach(() => vi.unstubAllGlobals());

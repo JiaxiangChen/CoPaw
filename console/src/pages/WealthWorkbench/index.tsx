@@ -30,7 +30,7 @@ export default function WealthWorkbench() {
     ? searchParams.get("hideLogo") === "true"
     : entryHideLogo;
 
-  // 内部导航可能省略查询参数；补回入口设置，使刷新后仍保持嵌入布局。
+  // 内部导航可能省略查询参数；补回隐藏设置，使嵌入布局保持一致。
   useEffect(() => {
     if (hideHeader && !searchParams.has("hideLogo")) {
       setSearchParams(
@@ -90,11 +90,13 @@ export default function WealthWorkbench() {
     >
       <IconDefs />
       {!hideHeader && <Topbar />}
-      <Ticker />
-      <Sidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((v) => !v)}
-      />
+      {!hideHeader && <Ticker />}
+      {!hideHeader && (
+        <Sidebar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((v) => !v)}
+        />
+      )}
       <main className={styles.main} id="main">
         <div className={styles.page} key={accountId}>
           <Routes>

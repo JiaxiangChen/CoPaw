@@ -3,11 +3,13 @@
  * ！！！！！！！
  */
 import { parseCron, serializeCron } from "@/utils/parseCron";
-import { request } from "../../api/request";
 import { buildAuthHeaders } from "../../api/authHeaders";
 import { getWPlusCookie } from "../../utils/cookie-utils";
 import { getIframeContext } from "../../stores/iframeStore";
-import { DEFAULT_BBK_ID } from "../../constants/identity";
+import { DEFAULT_BBK_ID, DEFAULT_SOURCE_ID } from "../../constants/identity";
+import { getUserId } from "../../utils/identity";
+import { useAgentStore } from "../../stores/agentStore";
+import { resolveRole } from "./permissions";
 // import { Base64 } from "js-base64";
 import { SCENE_CATEGORIES } from "./mock/data";
 import { DEFAULT_SCHEDULE } from "./utils";
@@ -34,26 +36,26 @@ function clone<T>(value: T): T {
 }
 
 // ---------------------------------------------------------------------------
-// 后端接口契约（与 src/swe/app/wealth_plans/models.py 对齐）
+// Java 规划接口契约（wealth_plans_api.md），视图模型保持不变
 // ---------------------------------------------------------------------------
 
 interface PlanSceneView {
-  scene_id: string;
-  scene_name: string;
+  sceneId: string;
+  sceneName: string;
   category: string;
-  category_label: string;
-  item_id?: string | null;
+  categoryLabel: string;
+  itemId?: string | null;
   direction?: string | null;
   cycle?: string | null;
-  start_date?: string | null;
-  end_date?: string | null;
-  cron_expr: string;
-  cron_example?: string | null;
-  mcp_relations: string[];
+  startDate?: string | null;
+  endDate?: string | null;
+  cronExpr: string;
+  cronExample?: string | null;
+  mcpRelations: string[];
 }
 
 interface PlanTargetView {
-  sap_id: string;
+  sapId: string;
   name?: string | null;
 }
 
@@ -61,11 +63,11 @@ interface PlanView {
   id: string;
   name: string;
   description?: string | null;
-  source_label?: string | null;
-  period_start?: string | null;
-  period_end?: string | null;
-  publish_status: string;
-  board_status: string;
+  sourceLabel?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  publishStatus: string;
+  boardStatus: string;
   editable: boolean;
   scenes: PlanSceneView[];
   targets: PlanTargetView[];
@@ -77,7 +79,7 @@ interface PlanListResponse {
 
 interface PlanCreateResponse {
   id: string;
-  publish_status: string;
+  publishStatus: string;
 }
 
 interface SceneSkillItem {
@@ -93,7 +95,8 @@ interface SceneSkillItem {
 }
 
 interface SceneSkillListResponse {
-  items: SceneSkillItem[];
+  code: string | number;
+  data?: SceneSkillItem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -131,18 +134,18 @@ function mapScene(item: SceneSkillItem): Scene {
 
 function mapSceneItem(scene: PlanSceneView): PlanItem {
   return {
-    id: scene.scene_id,
-    sceneName: scene.scene_name,
-    categoryLabel: scene.category_label,
+    id: scene.sceneId,
+    sceneName: scene.sceneName,
+    categoryLabel: scene.categoryLabel,
     categoryCode: scene.category,
-    itemId: scene.item_id,
-    cronExample: scene.cron_example,
-    mcpRelations: scene.mcp_relations ?? [],
+    itemId: scene.itemId,
+    cronExample: scene.cronExample,
+    mcpRelations: scene.mcpRelations ?? [],
     direction: scene.direction ?? "",
     cycle: scene.cycle ?? "自定义",
-    start: scene.start_date ?? undefined,
-    end: scene.end_date ?? undefined,
-    schedule: parseCron(scene.cron_expr),
+    start: scene.startDate ?? undefined,
+    end: scene.endDate ?? undefined,
+    schedule: parseCron(scene.cronExpr),
   };
 }
 
@@ -153,29 +156,51 @@ function mapPlan(view: PlanView): Plan {
     id: view.id,
     name: view.name,
     desc: view.description ?? items[0]?.direction ?? "",
-    source: view.source_label ?? "我的关注",
+    source: view.sourceLabel ?? "我的关注",
     customers: 0,
     tasks: 0,
     rate: 0,
-    status: view.board_status,
-    publishStatus: view.publish_status,
+    status: view.boardStatus,
+    publishStatus: view.publishStatus,
     editable: view.editable,
     period: cycles.length === 1 ? cycles[0] : "自定义",
-    start: view.period_start ?? "",
-    end: view.period_end ?? "",
+    start: view.periodStart ?? "",
+    end: view.periodEnd ?? "",
     items,
-    targetSapIds: view.targets.map((t) => t.sap_id),
+    targetSapIds: view.targets.map((t) => t.sapId),
     targets: view.targets.map((t) => ({
-      sapId: t.sap_id,
-      name: t.name || t.sap_id,
+      sapId: t.sapId,
+      name: t.name || t.sapId,
       orgName: "",
     })),
   };
 }
 
 // ---------------------------------------------------------------------------
-// 场景查询：/wealth/scene-skills（外部接口代理）
+// 场景查询：同源 skill-config/list，由前端 Nginx 转发
 // ---------------------------------------------------------------------------
+
+async function fetchSceneSkills(category: string): Promise<SceneSkillItem[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const context = getIframeContext();
+    const resp = await fetch("/api/agent/workspace/skill-config/list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bbkId: context.bbk || DEFAULT_BBK_ID, category }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`场景请求失败：HTTP ${resp.status}`);
+    const payload = (await resp.json()) as SceneSkillListResponse;
+    if (String(payload.code) !== "200") {
+      throw new Error(`场景接口返回失败：${payload.code}`);
+    }
+    return (payload.data ?? []).filter((item) => Boolean(item?.skillId));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * 按产品大类查询经营场景；categoryCode 传空串表示查询全部大类。
@@ -185,10 +210,8 @@ export async function fetchScenesByCategory(
   categoryCode: string,
 ): Promise<Scene[]> {
   try {
-    const resp = await request<SceneSkillListResponse>(
-      `/wealth/scene-skills?category=${encodeURIComponent(categoryCode)}`,
-    );
-    return resp.items.map(mapScene);
+    const items = await fetchSceneSkills(categoryCode);
+    return items.map(mapScene);
   } catch (error) {
     console.warn("[Wealth] 场景接口不可用，返回空列表", error);
     return [];
@@ -202,10 +225,8 @@ export async function fetchScenesByCategory(
  */
 export async function fetchAvailableSceneCount(): Promise<number | null> {
   try {
-    const resp = await request<SceneSkillListResponse>(
-      "/wealth/scene-skills?category=",
-    );
-    return resp.items.length;
+    const items = await fetchSceneSkills("");
+    return items.length;
   } catch (error) {
     console.warn("[Wealth] 可用场景总数查询失败", error);
     return null;
@@ -237,7 +258,6 @@ export async function fetchSkillStats(
 ): Promise<Record<string, SkillStat> | null> {
   if (!planIds.length) return {};
   try {
-    const auth = buildAuthHeaders();
     const resp = await fetch("/api/agent/workspace/skill-stats", {
       method: "POST",
       headers: {
@@ -364,7 +384,10 @@ export async function fetchNameList(
     const context = getIframeContext();
     const resp = await fetch("/api/agent/workspace/name-list", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: getWPlusCookie("token") ?? "",
+      },
       body: JSON.stringify({
         skillIds: ids,
         bbkId: context.bbk || DEFAULT_BBK_ID,
@@ -650,7 +673,6 @@ export async function fetchSchemeSignature(
   bbkOrgId: string,
 ): Promise<string> {
   const auth = buildAuthHeaders();
-  console.log("auth", auth);
   const resp = await fetch(`/expert/get-sign`, {
     method: "POST",
     credentials: "include",
@@ -705,50 +727,117 @@ export function buildInsightUrl(
 }
 
 // ---------------------------------------------------------------------------
-// 规划接口：/wealth/plans
+// 规划接口：/zt/wealth/plans
 // ---------------------------------------------------------------------------
 
+// 同源网关将该路径转发至 Java，不能使用 CoPaw 的全局 API base。
+const PLAN_PATH = "/zt/wealth/plans";
+
+interface PlanResult<T> {
+  code: string | number;
+  message?: string;
+  detail?: string;
+  data: T;
+}
+
+function planViewer(): { sapId: string; role: string; bbkId: string } {
+  const context = getIframeContext();
+  return {
+    sapId: getUserId(),
+    role: resolveRole(context.positionId),
+    bbkId: context.bbk || DEFAULT_BBK_ID,
+  };
+}
+
+async function requestPlan<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  options.signal?.throwIfAborted();
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: getWPlusCookie("token") ?? "",
+    },
+  });
+  const payload = (await response
+    .json()
+    .catch(() => null)) as PlanResult<T> | null;
+  options.signal?.throwIfAborted();
+  if (!payload) {
+    throw Object.assign(
+      new Error(`规划接口响应格式错误：HTTP ${response.status}`),
+      {
+        status: response.status,
+      },
+    );
+  }
+  if (!response.ok || String(payload.code) !== "200") {
+    throw Object.assign(
+      new Error(
+        payload.message ||
+          payload.detail ||
+          `规划请求失败：HTTP ${response.status}`,
+      ),
+      {
+        status: response.ok ? Number(payload.code) : response.status,
+        data: payload,
+      },
+    );
+  }
+  if (payload.data == null) throw new Error("规划接口未返回业务数据");
+  return payload.data;
+}
+
 interface PlanScenePayload {
-  scene_id: string;
-  scene_name: string;
+  sceneId: string;
+  sceneName: string;
   category: string;
-  item_id?: string | null;
+  itemId?: string | null;
   direction?: string;
   cycle?: string;
-  start_date?: string;
-  end_date?: string;
-  cron_expr: string;
-  cron_example?: string | null;
-  mcp_relations: string[];
+  startDate?: string;
+  endDate?: string;
+  cronExpr: string;
+  cronExample?: string | null;
+  mcpRelations: string[];
 }
 
 interface PlanUpsertPayload {
+  sapId: string;
+  role: string;
+  bbkId: string;
+  creatorName: string;
+  sourceId: string;
+  agentId: string;
   name: string;
   description?: string;
-  source_label?: string;
+  sourceLabel?: string;
   scenes: PlanScenePayload[];
-  targets: { sap_id: string; name?: string }[];
+  targets: { sapId: string; name?: string }[];
 }
 
 function buildScenePayload(item: PlanItem): PlanScenePayload {
   return {
-    scene_id: item.id,
-    scene_name: item.sceneName,
+    sceneId: item.id,
+    sceneName: item.sceneName,
     category: item.categoryCode,
-    item_id: item.itemId ?? null,
-    cron_example: item.cronExample ?? null,
+    itemId: item.itemId ?? null,
+    cronExample: item.cronExample ?? null,
     direction: item.direction,
     cycle: item.cycle,
-    start_date: item.start,
-    end_date: item.end,
-    cron_expr: serializeCron(item.schedule ?? DEFAULT_SCHEDULE),
-    mcp_relations: item.mcpRelations,
+    startDate: item.start,
+    endDate: item.end,
+    cronExpr: serializeCron(item.schedule ?? DEFAULT_SCHEDULE),
+    mcpRelations: item.mcpRelations,
   };
 }
 
 async function fetchPlans(signal?: AbortSignal): Promise<Plan[]> {
-  const resp = await request<PlanListResponse>(
-    "/wealth/plans",
+  const query = new URLSearchParams(planViewer());
+  const resp = await requestPlan<PlanListResponse>(
+    `${PLAN_PATH}?${query}`,
     signal ? { signal } : undefined,
   );
   return resp.items.map(mapPlan);
@@ -859,19 +948,24 @@ export async function publishPlan(
   editingId: string | null,
   targets: DistributeTarget[],
 ): Promise<PublishResult> {
+  const context = getIframeContext();
   const payload: PlanUpsertPayload = {
+    ...planViewer(),
+    creatorName: context.userName ?? "",
+    sourceId: context.source || DEFAULT_SOURCE_ID,
+    agentId: useAgentStore.getState().selectedAgent || "default",
     name: draft.name.trim(),
-    source_label: account.source,
+    sourceLabel: account.source,
     scenes: draft.items.map(buildScenePayload),
-    targets: targets.map((t) => ({ sap_id: t.sapId, name: t.name })),
+    targets: targets.map((t) => ({ sapId: t.sapId, name: t.name })),
   };
   if (editingId != null) {
-    await request<PlanCreateResponse>(
-      `/wealth/plans/${encodeURIComponent(editingId)}`,
+    await requestPlan<PlanCreateResponse>(
+      `${PLAN_PATH}/${encodeURIComponent(editingId)}`,
       { method: "PUT", body: JSON.stringify(payload) },
     );
   } else {
-    await request<PlanCreateResponse>("/wealth/plans", {
+    await requestPlan<PlanCreateResponse>(PLAN_PATH, {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -881,9 +975,10 @@ export async function publishPlan(
 
 /** 移除规划，返回最新规划列表；任何失败均上抛 */
 export async function removePlan(id: string): Promise<{ plans: Plan[] }> {
-  await request<{ deleted: boolean }>(
-    `/wealth/plans/${encodeURIComponent(id)}`,
-    { method: "DELETE" },
+  const deleted = await requestPlan<boolean>(
+    `${PLAN_PATH}/${encodeURIComponent(id)}`,
+    { method: "DELETE", body: JSON.stringify({ sapId: getUserId() }) },
   );
+  if (!deleted) throw new Error("规划删除未完成");
   return { plans: await fetchPlans() };
 }

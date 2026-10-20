@@ -1,5 +1,6 @@
 import type { CronJobSpecOutput } from "../../api/types";
 import { formatListTime } from "./listTimeFormat.ts";
+import { isSchedulerTask } from "@/api/modules/cronTaskSources";
 
 export interface TaskSidebarMeta {
   state: "active" | "running" | "auto-paused" | "manual-paused";
@@ -19,11 +20,47 @@ export interface TaskGroups {
 const AUTO_PAUSE_REASON = "auto_unread_threshold";
 export const TASK_COMPLETED_STATUS_TEXT = "已完成";
 
+/** 新版已有手动运行时间时，不能因没有自动结果而提示尚未启动。 */
+export function hasTaskRunRecord(job: CronJobSpecOutput): boolean {
+  return Boolean(
+    job.task?.has_scheduled_result ||
+      (isSchedulerTask(job) &&
+        (job.state?.last_run_at || job.task?.last_scheduled_run_at)),
+  );
+}
+
+export function getTaskLastRunDisplay(
+  job: CronJobSpecOutput,
+): { at?: string; statusText: string } | null {
+  const managed = isSchedulerTask(job);
+  const latest = managed ? job.state?.last_run_at : null;
+  let at = latest || job.task?.last_scheduled_run_at || undefined;
+  if (!at && !job.task?.latest_scheduled_preview) return null;
+  // 新状态表按 UTC 保存 DATETIME，接口未带时区时不能按浏览器本地时间解析。
+  if (managed && at && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(at)) {
+    at = at.replace(" ", "T") + "Z";
+  }
+  const states: Record<string, string> = {
+    success: TASK_COMPLETED_STATUS_TEXT,
+    running: "运行中",
+    error: "执行失败",
+    skipped: "已跳过",
+    cancelled: "已取消",
+  };
+  return {
+    at,
+    statusText: latest
+      ? states[job.state?.last_status || ""] || "已运行"
+      : TASK_COMPLETED_STATUS_TEXT,
+  };
+}
+
 export function isVisibleTask(job: CronJobSpecOutput): boolean {
   return Boolean(job.task?.visible_in_my_tasks);
 }
 
 export function getTaskSidebarMeta(job: CronJobSpecOutput): TaskSidebarMeta {
+  if (isSchedulerTask(job)) return managedSidebarMeta(job);
   const unreadCount = Math.max(
     0,
     Number(job.task?.unread_execution_count || 0),
@@ -76,6 +113,35 @@ export function getTaskSidebarMeta(job: CronJobSpecOutput): TaskSidebarMeta {
     canResume: false,
     canDelete: !job.enabled,
     canEdit: !job.enabled,
+  };
+}
+
+/** 新控制协议将停用、在途执行和内容编辑分开，旧任务仍沿用原规则。 */
+function managedSidebarMeta(
+  job: import("@/api/types/cronTaskSource").SourcedManagedTask,
+): TaskSidebarMeta {
+  const unreadCount = Math.max(
+    0,
+    Number(job.task?.unread_execution_count || 0),
+  );
+  const paused =
+    !job.enabled || Boolean(job.task?.is_paused || job.task?.pause_reason);
+  const running = Boolean(job.task?.is_running);
+  const state = running
+    ? "running"
+    : job.task?.pause_reason === AUTO_PAUSE_REASON
+    ? "auto-paused"
+    : paused
+    ? "manual-paused"
+    : "active";
+  return {
+    state,
+    unreadCount,
+    canPause: !job.deleted && !paused,
+    canRun: !job.deleted && !paused && !running,
+    canResume: !job.deleted && paused,
+    canDelete: !job.deleted,
+    canEdit: !job.deleted && job.management_status === "ready",
   };
 }
 
@@ -184,8 +250,24 @@ export function deriveChatTaskState(
 } {
   return {
     tasks: jobs.filter(isVisibleTask),
-    currentTask: chatId
-      ? jobs.find((job) => job.task?.chat_id === chatId) || null
-      : null,
+    currentTask: currentTaskForChat(jobs, chatId),
   };
+}
+
+/** 裸 ID 不能在新旧来源撞号时静默选中其中一个。 */
+export function uniqueTaskForId(
+  jobs: CronJobSpecOutput[],
+  id: string,
+): CronJobSpecOutput | null {
+  const matches = jobs.filter((job) => job.id === id);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function currentTaskForChat(
+  jobs: CronJobSpecOutput[],
+  chatId: string | undefined,
+): CronJobSpecOutput | null {
+  if (!chatId) return null;
+  const matches = jobs.filter((job) => job.task?.chat_id === chatId);
+  return matches.length === 1 ? matches[0] : null;
 }

@@ -2339,8 +2339,7 @@
   .tickerControl:hover {
     background: #e3efff;
   }
-  .wealthTicker:hover .tickerTrack,
-  .wealthTicker:focus-within .tickerTrack,
+  .tickerWindow:hover .tickerTrack,
   .wealthTicker.paused .tickerTrack {
     animation-play-state: paused;
   }
@@ -4052,23 +4051,22 @@
   overflow-wrap: anywhere;
 }
 
-// 嵌入入口 hideLogo=true：移除整个品牌头部及其占位，保留信息播报。
+// 嵌入入口 hideLogo=true：移除品牌头部、信息播报及其占位。
 .root.withoutHeader {
-  .wealthTicker {
+  --sidebar: 0px;
+
+  .sidebar {
     top: 0;
   }
-  .sidebar {
-    top: 42px;
-  }
   .main {
-    padding-top: 62px;
+    padding-top: 20px;
   }
   .formSection {
-    scroll-margin-top: 60px;
+    scroll-margin-top: 18px;
   }
   @media (max-width: 950px) {
     .main {
-      padding-top: 59px;
+      padding-top: 17px;
     }
   }
 }

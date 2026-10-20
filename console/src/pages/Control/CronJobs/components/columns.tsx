@@ -5,7 +5,7 @@ import { Popover, Tag } from "antd";
 import type { CronJobSpecOutput } from "../../../../api/types";
 import { CopyOutlined, MoreOutlined } from "@ant-design/icons";
 import { TFunction } from "i18next";
-import { parseCron } from "../../../../utils/parseCron";
+import { parseCron, CronType } from "./parseCron";
 import { copyToClipboard } from "../../../../utils/clipboard";
 import type { ExecutionModelOption } from "@/hooks/useExecutionModelOptions";
 import { formatExecutionModelLabel } from "@/hooks/useExecutionModelOptions";
@@ -71,9 +71,8 @@ function formatParentUser(info: BroadcastParentInfo): string {
     return "未记录";
   }
   return info.sourceTenantName
-    ? `${info.sourceTenantName}${
-        info.sourceTenantId ? ` (${info.sourceTenantId})` : ""
-      }`
+    ? `${info.sourceTenantName}${info.sourceTenantId ? ` (${info.sourceTenantId})` : ""
+    }`
     : info.sourceTenantId;
 }
 
@@ -148,9 +147,8 @@ export const createColumns = (
       render: (enabled: boolean) => (
         <span className={styles.statusIndicator}>
           <span
-            className={`${styles.statusDot} ${
-              enabled ? styles.enabled : styles.disabled
-            }`}
+            className={`${styles.statusDot} ${enabled ? styles.enabled : styles.disabled
+              }`}
           />
           {enabled
             ? handlers.t("common.enabled")
@@ -171,10 +169,11 @@ export const createColumns = (
           status === "running"
             ? styles.statusDotRunning
             : status === "success"
-            ? styles.statusDotSuccess
-            : status === "error" || status === "cancelled"
-            ? styles.statusDotError
-            : styles.statusDotIdle;
+              ? styles.statusDotSuccess
+              : status === "error" || status === "cancelled"
+                ? styles.statusDotError
+                : styles.statusDotIdle;
+
 
         return (
           <span className={styles.statusIndicator}>
@@ -197,22 +196,24 @@ export const createColumns = (
       key: "cron",
       width: 180,
       render: (cron: string, record: CronJob) => {
-        const batchDispatch = (record);
+        const batchDispatch = isBatchDispatchJob(record);
+
 
         // Parse cron to friendly text
         const cronParts = parseCron(cron || "0 9 * * *");
         let displayText = "";
 
+
         switch (cronParts.type) {
-          case "hourly":
+          case CronType.hourly:
             displayText = handlers.t("cronJobs.cronTypeHourly");
             break;
-          case "daily":
+          case CronType.daily:
             displayText = `${handlers.t("cronJobs.cronTypeDaily")} ${String(
               cronParts.hour,
             ).padStart(2, "0")}:${String(cronParts.minute).padStart(2, "0")}`;
             break;
-          case "weekly": {
+          case CronType.weekly: {
             const dayNames = (cronParts.daysOfWeek || [])
               .map((d) => {
                 const dayMap: Record<string, string> = {
@@ -234,7 +235,25 @@ export const createColumns = (
             ).padStart(2, "0")}`;
             break;
           }
-          case "custom":
+          case CronType.interval:
+            displayText = cronParts.everyMinute || (cronParts.minuteStep ?? 1) === 1
+              ? "每分钟"
+              : `每 ${cronParts.minuteStep ?? 1} 分钟`;
+            break;
+
+
+          case CronType.monthly:
+            displayText = `每月 ${cronParts.day ?? 1} 日 ${String(
+              cronParts.hour,
+            ).padStart(2, "0")}:${String(cronParts.minute).padStart(2, "0")}`;
+            break;
+          case CronType.yearly:
+            displayText = `每年 ${cronParts.month ?? 1} 月 ${cronParts.day ?? 1} 日 ${String(
+              cronParts.hour,
+            ).padStart(2, "0")}:${String(cronParts.minute).padStart(2, "0")}`;
+            break;
+          case CronType.custom:
+          default:
             displayText = cron;
             break;
         }

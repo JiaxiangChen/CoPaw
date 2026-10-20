@@ -1,4 +1,4 @@
-const BOARD_REQUEST_TIMEOUT_MS = 15_000;
+const BOARD_REQUEST_TIMEOUT_MS = 60_000;
 
 /** 超时或外部取消都中止底层请求；即使取消未及时响应，也释放等待。 */
 export async function withBoardRequestTimeout<T>(

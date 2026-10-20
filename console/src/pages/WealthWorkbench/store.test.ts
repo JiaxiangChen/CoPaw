@@ -31,12 +31,20 @@ function mockTransports() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
-      const result = (await mockRequest(path, options)) as {
+      const pathname = path.split("?")[0];
+      const result = (await mockRequest(pathname, options)) as {
         items?: unknown[];
       };
       const { items, ...fields } = result;
       return new Response(
-        JSON.stringify({ code: 200, data: { ...fields, list: items ?? [] } }),
+        JSON.stringify({
+          code: 200,
+          data: pathname.startsWith("/zt/wealth/plans")
+            ? result
+            : path === "/api/agent/workspace/skill-config/list"
+            ? items ?? []
+            : { ...fields, list: items ?? [] },
+        }),
       );
     }),
   );
@@ -67,31 +75,31 @@ const NAME_LIST_FIXTURE = [
   },
 ];
 
-/** 后端 /wealth/plans 的返回形状（PlanView 夹具） */
+/** 后端 /zt/wealth/plans 的返回形状（PlanView 夹具） */
 interface FixturePlanView {
   id: string;
   name: string;
   description?: string | null;
-  source_label?: string | null;
-  period_start?: string | null;
-  period_end?: string | null;
-  publish_status: string;
-  board_status: string;
+  sourceLabel?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  publishStatus: string;
+  boardStatus: string;
   editable: boolean;
   scenes: {
-    scene_id: string;
-    scene_name: string;
+    sceneId: string;
+    sceneName: string;
     category: string;
-    category_label: string;
-    item_id?: string | null;
+    categoryLabel: string;
+    itemId?: string | null;
     direction?: string | null;
     cycle?: string | null;
-    start_date?: string | null;
-    end_date?: string | null;
-    cron_expr: string;
-    mcp_relations: string[];
+    startDate?: string | null;
+    endDate?: string | null;
+    cronExpr: string;
+    mcpRelations: string[];
   }[];
-  targets: { sap_id: string; name?: string | null }[];
+  targets: { sapId: string; name?: string | null }[];
 }
 
 let planViews: FixturePlanView[];
@@ -100,11 +108,11 @@ function makeView(patch: Partial<FixturePlanView> = {}): FixturePlanView {
   return {
     id: "plan-x",
     name: "规划",
-    source_label: "分行关注",
-    period_start: "2026-09-01",
-    period_end: "2026-09-30",
-    publish_status: "published",
-    board_status: "已自动下发",
+    sourceLabel: "分行关注",
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    publishStatus: "published",
+    boardStatus: "已自动下发",
     editable: true,
     scenes: [],
     targets: [],
@@ -118,20 +126,20 @@ function fixturePlanViews(): FixturePlanView[] {
     makeView({
       id: "plan-demo-2",
       name: "产品到期承接",
-      source_label: "行长关注",
+      sourceLabel: "行长关注",
       scenes: [
         {
-          scene_id: FINANCE,
-          scene_name: "产品到期承接",
+          sceneId: FINANCE,
+          sceneName: "产品到期承接",
           category: "finance",
-          category_label: "理财",
-          item_id: "item-wealth-finance-3",
+          categoryLabel: "理财",
+          itemId: "item-wealth-finance-3",
           direction: "优先承接近期到期资金",
           cycle: "本月",
-          start_date: "2026-09-01",
-          end_date: "2026-09-30",
-          cron_expr: "0 9 * * *",
-          mcp_relations: ["mcp-wealth"],
+          startDate: "2026-09-01",
+          endDate: "2026-09-30",
+          cronExpr: "0 9 * * *",
+          mcpRelations: ["mcp-wealth"],
         },
       ],
     }),
@@ -141,8 +149,8 @@ function fixturePlanViews(): FixturePlanView[] {
     makeView({
       id: "plan-demo-6",
       name: "基金定投提升",
-      publish_status: "publishing",
-      board_status: "发布中",
+      publishStatus: "publishing",
+      boardStatus: "发布中",
     }),
   ];
 }
@@ -194,9 +202,8 @@ async function requestHandler(
   options: RequestInit = {},
 ): Promise<unknown> {
   const method = options.method ?? "GET";
-  if (path.startsWith("/wealth/scene-skills")) {
-    const category =
-      new URL(path, "http://test").searchParams.get("category") ?? "";
+  if (path.startsWith("/api/agent/workspace/skill-config/list")) {
+    const category = JSON.parse(String(options.body)).category ?? "";
     return {
       items: category
         ? SCENE_FIXTURES.filter((s) => s.category === category)
@@ -207,27 +214,27 @@ async function requestHandler(
     const skillIds = JSON.parse(String(options.body)).skillIds as string[];
     return { items: skillIds.includes(LOAN) ? NAME_LIST_FIXTURE : [] };
   }
-  if (path === "/wealth/plans" && method === "GET") {
+  if (path === "/zt/wealth/plans" && method === "GET") {
     return { items: planViews };
   }
-  if (path === "/wealth/plans" && method === "POST") {
+  if (path === "/zt/wealth/plans" && method === "POST") {
     const body = JSON.parse(String(options.body));
     const view = makeView({
       id: `plan-new-${planViews.length}`,
       name: body.name,
-      source_label: body.source_label,
-      publish_status: "publishing",
-      board_status: "发布中",
+      sourceLabel: body.sourceLabel,
+      publishStatus: "publishing",
+      boardStatus: "发布中",
       targets: body.targets,
     });
     planViews = [view, ...planViews];
-    return { id: view.id, publish_status: view.publish_status };
+    return { id: view.id, publishStatus: view.publishStatus };
   }
-  const match = /^\/wealth\/plans\/([^/]+)$/.exec(path);
+  const match = /^\/zt\/wealth\/plans\/([^/]+)$/.exec(path);
   if (match && method === "DELETE") {
     const id = decodeURIComponent(match[1]);
     planViews = planViews.filter((p) => p.id !== id);
-    return { deleted: true };
+    return true;
   }
   throw new Error(`未 mock 的请求：${method} ${path}`);
 }
@@ -282,18 +289,18 @@ function makeTodayPlan(): Plan {
 function makeTodayPlanView(): FixturePlanView {
   const today = todayKey();
   return makeView({
-    period_start: today,
-    period_end: today,
+    periodStart: today,
+    periodEnd: today,
     scenes: [
       {
-        scene_id: LOAN,
-        scene_name: "信贷需求挖掘",
+        sceneId: LOAN,
+        sceneName: "信贷需求挖掘",
         category: "loan",
-        category_label: "贷款",
-        start_date: today,
-        end_date: today,
-        cron_expr: "0 9 * * *",
-        mcp_relations: [],
+        categoryLabel: "贷款",
+        startDate: today,
+        endDate: today,
+        cronExpr: "0 9 * * *",
+        mcpRelations: [],
       },
     ],
   });
@@ -439,8 +446,8 @@ describe("WealthWorkbench store", () => {
     planViews = [makeTodayPlanView()];
     planViews[0].scenes.push({
       ...planViews[0].scenes[0],
-      scene_id: FINANCE,
-      scene_name: "理财场景",
+      sceneId: FINANCE,
+      sceneName: "理财场景",
     });
     mockRequest.mockClear();
     await useWealthStore.getState().refreshTaskLists();
@@ -529,7 +536,7 @@ describe("WealthWorkbench store", () => {
   it("loadScenes 按大类查询且每次都取最新；toggleScene 选择/移除场景", async () => {
     const sceneCalls = () =>
       mockRequest.mock.calls.filter(([p]) =>
-        String(p).startsWith("/wealth/scene-skills"),
+        String(p).startsWith("/api/agent/workspace/skill-config/list"),
       ).length;
     await useWealthStore.getState().loadScenes("");
     await useWealthStore.getState().loadScenes(""); // 不做缓存，每次都重新查询
@@ -658,14 +665,14 @@ describe("WealthWorkbench store", () => {
     expect(s.plans).toHaveLength(7);
     expect(s.editingId).toBeNull();
     expect(s.toastText).toContain("规划已发布");
-    // 发布 payload 携带场景技能的 cron_example（后端组装定时任务请求内容用）
+    // 发布 payload 携带场景技能的 cronExample（后端组装定时任务请求内容用）
     const post = mockRequest.mock.calls.find(
       ([p, o]) =>
-        String(p) === "/wealth/plans" &&
+        String(p) === "/zt/wealth/plans" &&
         (o as RequestInit | undefined)?.method === "POST",
     );
     const body = JSON.parse(String((post?.[1] as RequestInit).body));
-    expect(body.scenes[0].cron_example).toBe("每日生成高潜保险客户名单");
+    expect(body.scenes[0].cronExample).toBe("每日生成高潜保险客户名单");
   });
 
   it("publishPlan 客户经理默认分发给自己", async () => {
@@ -705,7 +712,7 @@ describe("WealthWorkbench store", () => {
     expect(await first).toBe(true);
     const posts = mockRequest.mock.calls.filter(
       ([p, o]) =>
-        String(p) === "/wealth/plans" &&
+        String(p) === "/zt/wealth/plans" &&
         (o as RequestInit | undefined)?.method === "POST",
     );
     expect(posts).toHaveLength(1);
@@ -720,7 +727,7 @@ describe("WealthWorkbench store", () => {
     await first;
     const dels = mockRequest.mock.calls.filter(
       ([p, o]) =>
-        String(p).startsWith("/wealth/plans/") &&
+        String(p).startsWith("/zt/wealth/plans/") &&
         (o as RequestInit | undefined)?.method === "DELETE",
     );
     expect(dels).toHaveLength(1);
@@ -817,18 +824,18 @@ describe("WealthWorkbench store", () => {
   it("刷新先等待最新规划，再用新技能查询名单，期间拦截重复刷新", async () => {
     const day = todayKey();
     const latest = makeView({
-      period_start: day,
-      period_end: day,
+      periodStart: day,
+      periodEnd: day,
       scenes: [
         {
-          scene_id: LOAN,
-          scene_name: "新发布的信贷任务",
+          sceneId: LOAN,
+          sceneName: "新发布的信贷任务",
           category: "loan",
-          category_label: "贷款",
-          start_date: day,
-          end_date: day,
-          cron_expr: "0 9 * * *",
-          mcp_relations: [],
+          categoryLabel: "贷款",
+          startDate: day,
+          endDate: day,
+          cronExpr: "0 9 * * *",
+          mcpRelations: [],
         },
       ],
     });
@@ -844,7 +851,7 @@ describe("WealthWorkbench store", () => {
     const refresh = useWealthStore.getState().refreshTodayCustomers("business");
     expect(useWealthStore.getState().customersLoading).toBe(true);
     expect(mockRequest.mock.calls.map(([path]) => path)).toEqual([
-      "/wealth/plans",
+      "/zt/wealth/plans",
     ]);
     await useWealthStore.getState().refreshTodayCustomers("business");
     expect(mockRequest).toHaveBeenCalledTimes(1);
@@ -865,7 +872,7 @@ describe("WealthWorkbench store", () => {
     mockRequest.mockClear();
     await useWealthStore.getState().refreshTodayCustomers("customer");
     expect(mockRequest.mock.calls).toHaveLength(2);
-    expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");
+    expect(mockRequest.mock.calls[0][0]).toBe("/zt/wealth/plans");
     expect(String(mockRequest.mock.calls[1][0])).toContain(
       "/api/agent/workspace/name-list",
     );
@@ -922,7 +929,7 @@ describe("WealthWorkbench store", () => {
     mockRequest.mockClear();
     await useWealthStore.getState().refreshTaskLists();
     const paths = mockRequest.mock.calls.map(([path]) => String(path));
-    expect(paths[0]).toBe("/wealth/plans");
+    expect(paths[0]).toBe("/zt/wealth/plans");
     const lists = mockRequest.mock.calls
       .filter(([path]) =>
         String(path).startsWith("/api/agent/workspace/name-list"),
@@ -976,7 +983,7 @@ describe("WealthWorkbench store", () => {
     mockRequest.mockResolvedValueOnce({ items: [updated[1]] });
     await useWealthStore.getState().refreshTaskLists();
     expect(mockRequest).toHaveBeenCalledTimes(4);
-    expect(mockRequest.mock.calls[0][0]).toBe("/wealth/plans");
+    expect(mockRequest.mock.calls[0][0]).toBe("/zt/wealth/plans");
     expect(useWealthStore.getState().todayCustomerCount).toBe(originalCount);
     expect(useWealthStore.getState().customers[0].name).toBe("最新客户0");
     expect(useWealthStore.getState().pendingCustomers[0].name).toBe(
@@ -1091,8 +1098,11 @@ describe("WealthWorkbench store", () => {
     resolve({ items: [] });
     await rejection;
     expect(useWealthStore.getState().plans).toBe(latest);
-    expect(mockRequest).toHaveBeenCalledWith("/wealth/plans", {
-      signal: controller.signal,
-    });
+    expect(mockRequest).toHaveBeenCalledWith(
+      "/zt/wealth/plans",
+      expect.objectContaining({
+        signal: controller.signal,
+      }),
+    );
   });
 });

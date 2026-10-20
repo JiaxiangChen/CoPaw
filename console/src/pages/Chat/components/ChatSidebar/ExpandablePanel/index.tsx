@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CronJobSpecOutput } from "@/api/types";
+import { taskIdentityKey } from "@/api/modules/cronTaskSources";
 import type { IAgentScopeRuntimeWebUISession } from "@/components/agentscope-chat";
 import { useChatAnywhereSessionsState } from "@/components/agentscope-chat";
 import { TasksIconSmall, HistoryIconSmall } from "../CollapsedToolbar/icons";
@@ -10,8 +11,8 @@ import {
   getTaskNextRunTooltipTimes,
   getTaskPauseStatusText,
   getTaskSidebarMeta,
+  getTaskLastRunDisplay,
   partitionTasksByPauseState,
-  TASK_COMPLETED_STATUS_TEXT,
 } from "../../../taskJobs";
 import { formatListTime } from "../../../listTimeFormat";
 import {
@@ -156,7 +157,7 @@ function TasksContent({
   const pausedRegionId = useId();
   const { runnableTasks, pausedTasks } = partitionTasksByPauseState(tasks);
   const selectedTaskIsPaused = pausedTasks.some(
-    (task) => task.id === selectedTaskId,
+    (task) => taskIdentityKey(task) === selectedTaskId,
   );
 
   useEffect(() => {
@@ -167,15 +168,16 @@ function TasksContent({
 
   const renderTask = (task: CronJobSpecOutput) => {
     const sidebarMeta = getTaskSidebarMeta(task);
+    const lastRun = getTaskLastRunDisplay(task);
     const pauseStatusText = getTaskPauseStatusText(sidebarMeta);
     const nextRunText = getTaskNextRunText(task);
     const nextRunTooltipTimes = getTaskNextRunTooltipTimes(task);
 
     return (
       <div
-        key={task.id}
+        key={taskIdentityKey(task)}
         className={`expandable-panel-task-card${
-          task.id === selectedTaskId
+          taskIdentityKey(task) === selectedTaskId
             ? " expandable-panel-task-card--selected"
             : ""
         }${
@@ -245,15 +247,14 @@ function TasksContent({
             {pauseStatusText}
           </div>
         )}
-        {(task.task?.latest_scheduled_preview ||
-          task.task?.last_scheduled_run_at) && (
+        {lastRun && (
           <div className="expandable-panel-task-subtitle">
-            {task.task?.last_scheduled_run_at && (
+            {lastRun.at && (
               <span className="expandable-panel-task-time">
-                {formatListTime(task.task.last_scheduled_run_at)}
+                {formatListTime(lastRun.at)}
               </span>
             )}
-            {TASK_COMPLETED_STATUS_TEXT}
+            {lastRun.statusText}
           </div>
         )}
         {nextRunText && (

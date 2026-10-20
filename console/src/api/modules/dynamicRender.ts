@@ -3,7 +3,7 @@ import { request } from "../request";
 export interface TemplateInfo {
   templateName: string;
   templateId: number;
-  /** 模板标志: 'main'为普通模版，'no_query'为静态模版（无需获取数据，直接渲染） */
+  /** 模板标志：'main' 为普通模板，'no_query' 为静态模板（无需获取数据，直接渲染） */
   templateFlag?: string;
 }
 
@@ -66,9 +66,24 @@ export const dynamicRenderApi = {
       }),
     }),
 
-  getAllClawFilePlan: (params : { sapId: string; bbkOrgId: string; custUid: string }) =>
-    // TODO: change api
-    request<ClawFilePlanResponse>("/template/claw-file-plan", {
+  // 通过 idKey 获取 resultId
+  queryIdKey: (params: { idKey: string; userId?: string | null; bbkOrgId?: string | null; templateName?: string | null }) =>
+    request<Record<string, unknown>>("/template/query-id-key", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+
+  // 获取客户的所有报告模板列表
+  getAllClawFilePlan: (params: {
+    sapId: string;
+    bbkOrgId: string;
+    custUid: string;
+    pageSource: string;
+    platformSource: string;
+    actvId?: string;
+    actvTyp?: string;
+  }) =>
+    request<ClawFilePlanResponse>("/wpclaw/get-all-claw-file-plan", {
       method: "POST",
       body: JSON.stringify(params),
     }),

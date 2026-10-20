@@ -30,12 +30,20 @@ function mockTransports() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
-      const result = (await mockRequest(path, options)) as {
+      const pathname = path.split("?")[0];
+      const result = (await mockRequest(pathname, options)) as {
         items?: unknown[];
       };
       const { items, ...fields } = result;
       return new Response(
-        JSON.stringify({ code: 200, data: { ...fields, list: items ?? [] } }),
+        JSON.stringify({
+          code: 200,
+          data: pathname.startsWith("/zt/wealth/plans")
+            ? result
+            : path === "/api/agent/workspace/skill-config/list"
+            ? items ?? []
+            : { ...fields, list: items ?? [] },
+        }),
       );
     }),
   );
@@ -77,7 +85,7 @@ beforeEach(() => {
     if (p.startsWith("/api/agent/workspace/name-list")) {
       return { items: NAME_LIST_FIXTURE };
     }
-    if (p.startsWith("/wealth/plans")) {
+    if (p.startsWith("/zt/wealth/plans")) {
       return { items: [] };
     }
     throw new Error(`未 mock 的请求：${p}`);
@@ -359,15 +367,95 @@ describe("WealthWorkbench api", () => {
     });
   });
 
+  it("场景直接 POST 同源接口，传分行与分类并映射外部 data 数组", async () => {
+    useIframeStore.setState({ bbk: "755" });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "200",
+          data: [
+            {
+              skillId: "scene-1",
+              itemId: "item-1",
+              senceName: "理财到期",
+              category: "finance",
+              senceDesc: "到期提醒",
+              cronExample: "每日提醒",
+              mcpRelationList: ["mcp-1"],
+              skillBbkLabel: "总部预置",
+              bbkId: "100",
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(api.fetchScenesByCategory("finance")).resolves.toEqual([
+      {
+        id: "scene-1",
+        itemId: "item-1",
+        name: "理财到期",
+        category: "理财",
+        categoryCode: "finance",
+        icon: "chart",
+        desc: "到期提醒",
+        source: "总部预置",
+        cronExample: "每日提醒",
+        mcpRelations: ["mcp-1"],
+      },
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/agent/workspace/skill-config/list",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bbkId: "755", category: "finance" }),
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(buildAuthHeaders).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["HTTP", () => new Response("error", { status: 500 })],
+    ["业务", () => new Response(JSON.stringify({ code: 500, data: [] }))],
+    ["JSON", () => new Response("invalid json")],
+  ])("场景 %s 失败时列表为空，能力数保持未知", async (_label, response) => {
+    vi.mocked(fetch).mockImplementation(async () => response());
+    await expect(api.fetchScenesByCategory("finance")).resolves.toEqual([]);
+    await expect(api.fetchAvailableSceneCount()).resolves.toBeNull();
+  });
+
+  it("场景超时取消请求并返回空列表", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockImplementation(
+      (_path, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    const result = api.fetchScenesByCategory("");
+    await vi.advanceTimersByTimeAsync(60000);
+    await expect(result).resolves.toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("fetchAvailableSceneCount 返回全部大类场景数；失败返回 null", async () => {
     mockRequest.mockResolvedValueOnce({
       items: [{ skillId: "a" }, { skillId: "b" }, { skillId: "c" }],
     });
     await expect(api.fetchAvailableSceneCount()).resolves.toBe(3);
     expect(String(mockRequest.mock.calls[0]?.[0])).toBe(
-      "/wealth/scene-skills?category=",
+      "/api/agent/workspace/skill-config/list",
     );
 
+    expect(JSON.parse(String(mockRequest.mock.calls[0]?.[1]?.body))).toEqual({
+      bbkId: "",
+      category: "",
+    });
+    expect(request).not.toHaveBeenCalled();
     mockRequest.mockRejectedValueOnce(new Error("boom"));
     await expect(api.fetchAvailableSceneCount()).resolves.toBeNull();
   });

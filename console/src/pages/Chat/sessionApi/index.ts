@@ -13,7 +13,8 @@ import api, {
   type ChatStatus,
   type Message,
 } from "../../../api";
-import { cronJobApi } from "../../../api/modules/cronjob";
+import { listTaskSources, taskPresence } from "@/api/modules/cronTaskSources";
+import { currentCronContext, cronAccessKey } from "@/api/cronTaskContext";
 import type {
   ChatApprovalActionCardData,
   ChatPlanInteractionCardData,
@@ -1183,6 +1184,8 @@ function clearPendingUserMessage(sessionId: string): void {
 // ---------------------------------------------------------------------------
 
 export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
+  private taskLookupScope: string | null = null;
+  private taskLookupGeneration = 0;
   private sessionList: IAgentScopeRuntimeWebUISession[] = [];
   private sessionPage = 0;
   private hasMoreSessionPages = false;
@@ -1227,6 +1230,8 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   > = new Map();
 
   resetForIdentityChange(): void {
+    this.taskLookupScope = null;
+    this.taskLookupGeneration += 1;
     this.sessionList = [];
     this.sessionPage = 0;
     this.hasMoreSessionPages = false;
@@ -1586,7 +1591,38 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
     this.updateWindowVariables(session);
   }
 
+  /** 两份任务清单必须与同一次会话请求使用同一身份，旧响应不可写回新工作区。 */
+  private taskListScope() {
+    const context = currentCronContext();
+    const accessKey = cronAccessKey(context);
+    if (this.taskLookupScope && this.taskLookupScope !== accessKey)
+      this.resetForIdentityChange();
+    this.taskLookupScope = accessKey;
+    return { context, accessKey, generation: this.taskLookupGeneration };
+  }
+
+  private taskListScopeMatches(accessKey: string, generation: number): boolean {
+    return (
+      this.ownsTaskListRequest(accessKey, generation) &&
+      cronAccessKey() === accessKey
+    );
+  }
+
+  private ownsTaskListRequest(accessKey: string, generation: number): boolean {
+    return (
+      this.taskLookupScope === accessKey &&
+      generation === this.taskLookupGeneration
+    );
+  }
+
+  private taskListCurrentSnapshot(): IAgentScopeRuntimeWebUISession[] {
+    return this.taskLookupScope === cronAccessKey()
+      ? [...this.sessionList]
+      : [];
+  }
+
   async getSessionList() {
+    const { context, accessKey, generation } = this.taskListScope();
     if (this.sessionListRequest) return this.sessionListRequest;
 
     this.sessionListRequest = (async () => {
@@ -1599,22 +1635,12 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
             page_size: getSessionPageSize(),
             cursor: null,
           }),
-          cronJobApi.listCronJobs().catch(() => null),
+          listTaskSources(context),
         ]);
         const chats = chatPage.items;
-        const activeTaskJobIds: ReadonlySet<string> | null =
-          jobsResult === null
-            ? null
-            : new Set<string>(
-                jobsResult
-                  .filter(
-                    (job) =>
-                      job.task_type === "agent" ||
-                      job.task_type === "text" ||
-                      job.task_type === "workflow",
-                  )
-                  .map((job) => String(job.id)),
-              );
+        if (!this.taskListScopeMatches(accessKey, generation))
+          return this.taskListCurrentSnapshot();
+        const activeTaskJobIds = taskPresence(jobsResult);
         const newList = chats
           .filter((c) => c.id && c.id !== "undefined" && c.id !== "null")
           .map(chatSpecToSession);
@@ -1737,7 +1763,8 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
 
         return [...this.sessionList];
       } finally {
-        this.sessionListRequest = null;
+        if (this.ownsTaskListRequest(accessKey, generation))
+          this.sessionListRequest = null;
       }
     })();
 
@@ -1753,6 +1780,7 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
   }
 
   loadMoreSessions(): Promise<IAgentScopeRuntimeWebUISession[]> {
+    const { context, accessKey, generation } = this.taskListScope();
     if (this.sessionPageRequest) return this.sessionPageRequest;
     if (!this.hasMoreSessionPages) {
       return Promise.resolve([...this.sessionList]);
@@ -1767,21 +1795,11 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
       try {
         const [chatPage, jobsResult] = await Promise.all([
           api.listChatsPage(paginationParams),
-          cronJobApi.listCronJobs().catch(() => null),
+          listTaskSources(context),
         ]);
-        const activeTaskJobIds: ReadonlySet<string> | null =
-          jobsResult === null
-            ? null
-            : new Set<string>(
-                jobsResult
-                  .filter(
-                    (job) =>
-                      job.task_type === "agent" ||
-                      job.task_type === "text" ||
-                      job.task_type === "workflow",
-                  )
-                  .map((job) => String(job.id)),
-              );
+        if (!this.taskListScopeMatches(accessKey, generation))
+          return this.taskListCurrentSnapshot();
+        const activeTaskJobIds = taskPresence(jobsResult);
         const pendingSessions = this.getPendingSessions();
         const nextSessions = filterStaleTaskSessions(
           chatPage.items
@@ -1831,7 +1849,8 @@ export class SessionApi implements IAgentScopeRuntimeWebUISessionAPI {
         this.sessionTotal = chatPage.total;
         return [...this.sessionList];
       } finally {
-        this.sessionPageRequest = null;
+        if (this.ownsTaskListRequest(accessKey, generation))
+          this.sessionPageRequest = null;
       }
     })();
 

@@ -11,6 +11,26 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("CronJobFormBody", () => {
+  it("新版编辑可以锁定启停字段，旧表单默认不锁定", () => {
+    const Wrapper = ({ disabled }: { disabled: boolean }) => {
+      const [form] = Form.useForm();
+      return (
+        <Form form={form}>
+          <CronJobFormBody
+            form={form}
+            executionModelOptions={[]}
+            executionModelLoading={false}
+            tenantDefaultModelLabel="默认"
+            enabledDisabled={disabled}
+          />
+        </Form>
+      );
+    };
+    const { rerender } = render(<Wrapper disabled />);
+    expect(screen.getByRole("switch")).toBeDisabled();
+    rerender(<Wrapper disabled={false} />);
+    expect(screen.getByRole("switch")).not.toBeDisabled();
+  });
   it("does not render the batch dispatch switch in the create/edit form", () => {
     const Wrapper = () => {
       const [form] = Form.useForm();

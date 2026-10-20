@@ -779,9 +779,23 @@
 - **典型来源**：持久化的 AgentScope 消息使用 `file_url`、`image_url`、`audio_url` 或 `video_url` 等扁平字段，而聊天历史转换只读取 `source.url`，导致恢复出的附件 URL 为空。
 - **第一落点**：检查 `src/swe/app/runner/utils.py` 的 `agentscope_msg_to_message` 是否同时兼容扁平字段和 `source` 结构，并验证 `/chats/{id}` 返回的用户消息仍包含附件 URL。
 
+## 新版定时任务通知报 cron job not found
+
+- 新版执行历史的 `meta.management_owner=scheduler`，同时携带新版执行 ID、source 和 Agent；归属不按 ID 格式、创建日期或“旧文件里查不到”判断。
+- `notification_worker.py` 对新版读取共库中与数字历史 ID 绑定的冻结执行快照，核对完整 tenant/source/Agent/job 及定义归属后，复用既有通知发送；旧任务继续查询 jobs.json。
+- 检查 `_app.py` 是否给 worker 注入共用数据库连接，以及 managed 元数据、执行快照和历史绑定是否完整。数据库不可用或身份不匹配不能回退旧文件通知同名任务。
+- 本次修复不重置已经 failed 的通知、不补发历史，也不恢复写 jobs.json 或修改通知时间、渠道与重试配置。
+- 回归入口：`tests/unit/app/test_managed_cron_notifications.py` 与原 `test_cron_notification_worker.py`。
+
 ## 财富规划看板「已生成任务」数量不准确
 
 - **口径**：前端直接 POST 同源 `/api/agent/workspace/skill-stats`，请求体的 `planIds` 为当前范围内去重的规划 ID 数组，不再传 `skills` 或日期区间。按返回项 `planId` 关联规划，`targetCustomerCount` 展示目标客户，`targetTaskCount` 映射为展示模型的 `generatedTaskCount`；规划概览累加当前周期内各规划的结果，不再按场景累加。
 - **请求参数**：所有角色的统计请求体都只传 `planIds`，不传 `bbkId` 或 `sapId`；登录态与上下文仍通过统一请求头携带。
 - **第一落点**：检查 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSkillStats()` 与 `Board/usePlanStats.ts`；该请求不经过 CoPaw 后端，需要 Nginx 将上述路径转发到外部服务。保留外部响应封装 `code: 200, data: { items: [...] }`，请求携带登录态及机构上下文。
 - **不可用处理**：请求失败或该规划未返回统计时显示 `--`，真实零值显示 `0`；后台更新失败保留已有成功数据。不要回退为规划分发记录或本地估算值。
+
+## 工作台信息播报关闭详情或点击继续后停止滚动
+
+- **典型来源**：原生 `dialog` 关闭会将焦点还给「查看全部」按钮；`:focus-within` 会导致持续暂停。整个播报条的 `:hover` 也会覆盖「继续」操作：按钮状态已恢复，但鼠标停在按钮上时动画仍暂停。改成 `:has(:focus-visible)` 仍无法解决悬停冲突和键盘操作后继续的问题。
+- **第一落点**：`console/src/pages/WealthWorkbench/index.module.less` 的播报暂停选择器。仅在 `.tickerWindow` 文字区域悬停或手动暂停时停止动画，不因操作按钮的悬停或焦点暂停；键盘用户通过同一暂停/继续按钮控制，减少动态效果偏好仍保持静态展示。
+- **回归**：鼠标点击暂停再点击继续，鼠标留在按钮上也应滚动；键盘激活暂停/继续时保持焦点并验证动画状态；关闭按钮、Esc、遮罩关闭详情后均应恢复原播放状态；手动暂停不应被关闭弹窗重置。浏览器验证应读取实际 `animation-play-state` 和 `transform`，不能只检查按钮文案或点击外部区域后再判断。

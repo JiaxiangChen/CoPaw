@@ -11,7 +11,7 @@ import logging
 import os
 import socket
 from datetime import datetime, timedelta, timezone
-from typing import Any, Mapping, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Optional
 from uuid import uuid4
 
 import httpx
@@ -34,6 +34,9 @@ from .dispatch_intent_service import (
     get_cron_dispatch_intent_service,
 )
 from .workflow_binding import resolve_workflow_batch_jobs
+
+if TYPE_CHECKING:
+    from .managed.feedback import ManagedCapacityFeedback
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +164,7 @@ def _callback_skip_outcome(response: httpx.Response) -> str | None:
     if skipped:
         raise SweCronCallbackOutcomeUnknownError(
             httpx.RemoteProtocolError(
-                "Unrecognized SWE callback skip outcome"
+                "Unrecognized SWE callback skip outcome",
             ),
         )
     return None
@@ -278,6 +281,7 @@ class CronSchedulingService:
         self._dispatch_store = (
             dispatch_store or get_cron_dispatch_intent_service()
         )
+        self._managed_feedback: ManagedCapacityFeedback | None = None
         self._callback_client = callback_client or SweCronCallbackClient()
         self._worker_id = worker_id or _default_worker_id()
         self._fallback_strategy = WorkerStrategy(
@@ -315,6 +319,92 @@ class CronSchedulingService:
     def effective_workers(self) -> int:
         return self._last_effective_workers
 
+    def bind_managed_feedback(self, feedback: ManagedCapacityFeedback) -> None:
+        """新结构只读校验完成后接入共库反馈，仍只使用本容量调整器。"""
+        self._managed_feedback = feedback
+        logger.info("新旧执行反馈已接入同一模型池容量调整器")
+
+    async def _managed_capacity_call(self, name: str, **kwargs: Any) -> Any:
+        try:
+            return await getattr(self._managed_feedback, name)(**kwargs)
+        except Exception as exc:
+            logger.warning(
+                "新执行容量反馈未确认，保留已有容量 operation=%s error_type=%s",
+                name,
+                type(exc).__name__,
+            )
+            raise RuntimeError("cron_managed_feedback_unavailable") from None
+
+    async def _capacity_scopes(self, now: datetime) -> list[WorkerScope]:
+        scopes = await self._list_dispatch_scopes(
+            now,
+            None,
+            include_fallback=False,
+        )
+        if self._managed_feedback is None:
+            return scopes
+        raw = await self._managed_capacity_call("scopes", now_utc=now)
+        seen = {
+            (scope.source_id, scope.provider_id, scope.model_id)
+            for scope in scopes
+        }
+        for item in raw:
+            scope = WorkerScope.model_validate(item)
+            key = (scope.source_id, scope.provider_id, scope.model_id)
+            if key not in seen:
+                seen.add(key)
+                scopes.append(scope)
+        return scopes
+
+    async def _capacity_feedback(
+        self,
+        since: datetime,
+        now: datetime,
+        scope: WorkerScope,
+    ) -> dict[str, Any]:
+        old_request = (
+            self._dispatch_store.summarize_recent_completion_feedback(
+                since=since,
+                now_utc=now,
+                scope=scope.model_dump(),
+            )
+        )
+        if self._managed_feedback is None:
+            return await old_request
+        tasks = [
+            asyncio.create_task(old_request),
+            asyncio.create_task(
+                self._managed_capacity_call(
+                    "summarize",
+                    since=since,
+                    now_utc=now,
+                    scope=scope.model_dump(),
+                ),
+            ),
+        ]
+        try:
+            old, new = await asyncio.gather(*tasks)
+        finally:
+            # 一边失败或外层取消后收拢另一边，不能让数据库读取遗留到连接池关闭之后。
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        names = (
+            "pending_count",
+            "claimed_count",
+            "running_count",
+            "success_count",
+            "failure_count",
+        )
+        return {
+            **{
+                name: int(old.get(name) or 0) + int(new.get(name) or 0)
+                for name in names
+            },
+            "latency_p95_ms": int(old.get("latency_p95_ms") or 0),
+        }
+
     async def handle_parent_callback(
         self,
         *,
@@ -340,25 +430,25 @@ class CronSchedulingService:
             "batch_dispatch_priority",
             {},
         )
-        batch_data = dict(
-            batch_id=batch_id,
-            parent_job_id=context.job_id,
-            parent_external_job_id=str(
+        batch_data = {
+            "batch_id": batch_id,
+            "parent_job_id": context.job_id,
+            "parent_external_job_id": str(
                 context.parent_meta.get("external_job_id") or "",
             ),
-            tenant_id=str(
+            "tenant_id": str(
                 context.parent.get("tenant_id") or context.tenant_id or "",
             ),
-            source_id=str(
+            "source_id": str(
                 context.parent.get("source_id") or context.source_id or "",
             ),
-            agent_id=str(context.parent.get("agent_id") or "default"),
-            provider_id=context.provider_id,
-            model_id=context.model_id,
-            scheduled_fire_at=context.scheduled_fire_at,
-            callback_received_at=context.now,
-            callback_metadata=callback_metadata,
-        )
+            "agent_id": str(context.parent.get("agent_id") or "default"),
+            "provider_id": context.provider_id,
+            "model_id": context.model_id,
+            "scheduled_fire_at": context.scheduled_fire_at,
+            "callback_received_at": context.now,
+            "callback_metadata": callback_metadata,
+        }
         _apply_swe_server_domain(context.parent, context.params)
         jobs = _build_execution_intent_jobs(
             context.parent,
@@ -581,7 +671,9 @@ class CronSchedulingService:
     async def _dispatch_one(self, row: Any, now_utc: datetime) -> bool:
         try:
             outcome = await self._dispatch_store.prepare_handoff(
-                row, self._worker_id, now_utc
+                row,
+                self._worker_id,
+                now_utc,
             )
         except Exception:
             logger.warning(
@@ -624,7 +716,8 @@ class CronSchedulingService:
         )
         if failed and batch_id:
             await self._dispatch_store.update_batch_counts(
-                batch_id=batch_id, updated_at=now_utc
+                batch_id=batch_id,
+                updated_at=now_utc,
             )
         return False
 
@@ -642,7 +735,7 @@ class CronSchedulingService:
             callback_kwargs["passthrough_headers"] = passthrough_headers
         try:
             skipped = await self._callback_client.dispatch_job(
-                **callback_kwargs
+                **callback_kwargs,
             )
         except SweCronCallbackOutcomeUnknownError as exc:
             details = _dispatch_mark_details(callback_kwargs)
@@ -678,7 +771,9 @@ class CronSchedulingService:
             return await self._record_callback_rejection(row, now_utc, exc)
         if skipped == "job_disabled":
             await self._dispatch_store.settle_callback_skip(
-                row, self._worker_id, now_utc
+                row,
+                self._worker_id,
+                now_utc,
             )
             return False
         await self._dispatch_store.mark_intent_dispatched(
@@ -741,11 +836,9 @@ class CronSchedulingService:
         """Adjust worker capacity when each scope's strategy interval elapsed."""
         now = _ensure_aware_utc(now_utc or datetime.now(timezone.utc))
         adjusted = False
-        scopes = await self._list_dispatch_scopes(
-            now,
-            None,
-            include_fallback=False,
-        )
+        if self._managed_feedback is not None:
+            await self._managed_capacity_call("tick")
+        scopes = await self._capacity_scopes(now)
         for scope in scopes:
             strategy = await self._resolve_worker_strategy(scope, now)
             latest = await self._dispatch_store.get_latest_worker_capacity(
@@ -764,11 +857,7 @@ class CronSchedulingService:
                 continue
             previous = _capacity_effective_workers(latest, strategy)
             since = now - timedelta(seconds=strategy.feedback_window_seconds)
-            feedback = await self._dispatch_store.summarize_recent_completion_feedback(
-                since=since,
-                now_utc=now,
-                scope=scope.model_dump(),
-            )
+            feedback = await self._capacity_feedback(since, now, scope)
             success_count = int(feedback.get("success_count") or 0)
             failure_count = int(feedback.get("failure_count") or 0)
             terminal_count = success_count + failure_count

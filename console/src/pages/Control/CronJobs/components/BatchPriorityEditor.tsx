@@ -27,12 +27,15 @@ export default function BatchPriorityEditor({
   disabled = false,
   onSaved,
   onDirtyChange,
+  savePriority,
 }: {
   jobId: string;
   initial: unknown;
   disabled?: boolean;
   onSaved?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** 新页注入独立管理接口；未传入时保留原页面协议。 */
+  savePriority?: (priority: BatchPriority) => Promise<unknown>;
 }) {
   const fieldId = useId();
   const [priority, setPriority] = useState(() => readBatchPriority(initial));
@@ -66,7 +69,8 @@ export default function BatchPriorityEditor({
     setSaving(true);
     setNotice(null);
     try {
-      await batchOperations.savePriority(jobId, priority);
+      if (savePriority) await savePriority(priority);
+      else await batchOperations.savePriority(jobId, priority);
       setSavedPriority(JSON.stringify(priority));
       setNotice({ type: "success", text: "优先策略已保存，从新批次生效" });
       onSaved?.();
