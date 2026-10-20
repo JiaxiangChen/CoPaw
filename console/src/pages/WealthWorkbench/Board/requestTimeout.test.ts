@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { withBoardRequestTimeout } from "./requestTimeout";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
-it("15秒边界取消请求，底层忽略取消时仍释放等待", async () => {
+it("60秒边界取消请求，底层忽略取消时仍释放等待", async () => {
   let signal!: AbortSignal;
   const pending = withBoardRequestTimeout((input) => {
     signal = input;
@@ -11,7 +11,7 @@ it("15秒边界取消请求，底层忽略取消时仍释放等待", async () =>
   const rejection = expect(pending).rejects.toMatchObject({
     name: "TimeoutError",
   });
-  await vi.advanceTimersByTimeAsync(14999);
+  await vi.advanceTimersByTimeAsync(59999);
   expect(signal.aborted).toBe(false);
   await vi.advanceTimersByTimeAsync(1);
   await rejection;
@@ -27,7 +27,7 @@ it("正常完成后清理超时定时器，不取消成功请求", async () => {
     }),
   ).resolves.toBe(12);
   expect(vi.getTimerCount()).toBe(0);
-  await vi.advanceTimersByTimeAsync(15000);
+  await vi.advanceTimersByTimeAsync(60000);
   expect(signal.aborted).toBe(false);
 });
 
