@@ -462,8 +462,8 @@ class QueryService:
         )
         return True
 
-    async def _get_success_execution_candidates(self) -> list[dict]:
-        """Get executions that are ready to become async success."""
+    async def _get_completed_execution_candidates(self) -> list[dict]:
+        """Get pending executions whose subtasks have all completed."""
         query = """
             SELECT
                 e.id AS execution_id,
@@ -483,11 +483,6 @@ class QueryService:
                   SELECT 1 FROM swe_cron_subtasks s
                   WHERE s.trace_id = e.trace_id
                   AND (s.status IS NULL OR s.status = '')
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM swe_cron_subtasks s
-                  WHERE s.trace_id = e.trace_id
-                  AND s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT')
               )
         """
         return await self.db.fetch_all(query)
@@ -1209,13 +1204,20 @@ class QueryService:
         if not self.db:
             return 0, 0, 0, []
 
-        success_executions = await self._get_success_execution_candidates()
+        completed_executions = await self._get_completed_execution_candidates()
+        if not completed_executions:
+            return 0, 0, 0, []
+
+        execution_ids = [
+            execution["execution_id"] for execution in completed_executions
+        ]
+        execution_placeholders = ", ".join(["%s"] * len(execution_ids))
 
         # 更新 success：没有 pending 子任务且没有 error 子任务
         # 同时设置 need_notification：
         # - 无子任务时设为 1
         # - 有子任务时取 task_type='list' 的 need_notification 值
-        success_query = """
+        success_query = f"""
             UPDATE swe_cron_executions e
             SET
                 async_status = 'success',
@@ -1231,28 +1233,21 @@ class QueryService:
                 )
             WHERE (e.async_status IS NULL OR e.async_status = '')
             AND e.status = 'success'
+            AND e.id IN ({execution_placeholders})
             AND NOT EXISTS (
                 SELECT 1 FROM swe_cron_subtasks s
                 WHERE s.trace_id = e.trace_id
-                AND (s.status IS NULL OR s.status = '')
-            )
-            AND NOT EXISTS (
-                SELECT 1 FROM swe_cron_subtasks s
-                WHERE s.trace_id = e.trace_id
-                AND s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT')
+                AND (s.status IS NULL OR s.status = '' OR s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT'))
             )
         """
-        success_count = await self.db.execute(success_query)
-        (
-            indexed_count,
-            indexed_users,
-        ) = await self._index_success_execution_results(
-            success_executions,
+        success_count = await self.db.execute(
+            success_query,
+            tuple(execution_ids),
         )
 
         # 更新 error：有 error 子任务且没有 pending 子任务
         # 同时设置 need_notification 同上逻辑
-        error_query = """
+        error_query = f"""
             UPDATE swe_cron_executions e
             SET
                 async_status = 'error',
@@ -1267,6 +1262,7 @@ class QueryService:
                     1
                 )
             WHERE (e.async_status IS NULL OR e.async_status = '')
+            AND e.id IN ({execution_placeholders})
             AND EXISTS (
                 SELECT 1 FROM swe_cron_subtasks s
                 WHERE s.trace_id = e.trace_id
@@ -1278,7 +1274,16 @@ class QueryService:
                 AND (s.status IS NULL OR s.status = '')
             )
         """
-        error_count = await self.db.execute(error_query)
+        error_count = await self.db.execute(
+            error_query,
+            tuple(execution_ids),
+        )
+        (
+            indexed_count,
+            indexed_users,
+        ) = await self._index_success_execution_results(
+            completed_executions,
+        )
 
         logger.info(
             "Batch updated execution async_status and need_notification: "

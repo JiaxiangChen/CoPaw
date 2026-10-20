@@ -12,13 +12,20 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..models.subtask import (
+    ExecutionAsyncStatusResponse,
+    FailedExecutionRerunRequest,
+    FailedExecutionRerunResponse,
     SubtaskCreateRequest,
     SubtaskCreateResponse,
     SubtaskSyncStatusResponse,
-    ExecutionAsyncStatusResponse,
 )
-from ..services.subtask import get_query_service, get_sync_service
+from ..services.subtask import (
+    get_query_service,
+    get_rerun_service,
+    get_sync_service,
+)
 from ..services.subtask.query_service import QueryService
+from ..services.subtask.rerun_service import RerunService
 from ..services.subtask.sync_service import SyncService
 
 logger = logging.getLogger(__name__)
@@ -117,4 +124,21 @@ async def sync_execution_async_status(
         return await sync_service.sync_execution_async_status()
     except Exception as e:
         logger.error("Failed to sync execution async_status: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/executions/rerun-failed",
+    response_model=FailedExecutionRerunResponse,
+)
+async def rerun_failed_executions(
+    request: FailedExecutionRerunRequest,
+    rerun_service: RerunService = Depends(get_rerun_service),
+) -> FailedExecutionRerunResponse:
+    """Rerun jobs whose latest execution today failed asynchronously."""
+    tenant_ids = list(dict.fromkeys(request.tenant_ids))
+    try:
+        return await rerun_service.rerun_failed_executions(tenant_ids)
+    except Exception as e:
+        logger.error("Failed to rerun async-failed executions: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

@@ -3,7 +3,7 @@
  *
  * 只承载跨页共享的领域数据（账户 / 场景池 / 规划 / 客户 / 草稿）与全局 UI（弹窗、Toast）。
  * 页面内视图状态（筛选、分页、日历锚点等）留在组件内 useState。
- * 规划与场景经由 api.ts 的真实接口（/wealth/plans、/wealth/scene-skills），
+ * 规划与场景经由 api.ts 的真实接口（/zt/wealth/plans、/wealth/scene-skills），
  * 接口不可达时读路径返回空、写路径抛错提示，不做假数据兜底。
  */
 import { create } from "zustand";

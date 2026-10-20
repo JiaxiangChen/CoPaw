@@ -28,7 +28,7 @@ async function fetchDistributionData<T>(
   body: Record<string, string | number>,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const response = await fetch(path, {
       method: "POST",

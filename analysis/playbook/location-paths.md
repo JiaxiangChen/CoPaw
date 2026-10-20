@@ -253,7 +253,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 创建计划的经营场景可见范围
 
-- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用原生 fetch 直接请求同源 `POST /api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理或统一 request。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；仅显式设置 JSON Content-Type，沿用默认同源 Cookie。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 8 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
+- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用原生 fetch 直接请求同源 `POST /api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理或统一 request。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；仅显式设置 JSON Content-Type，沿用默认同源 Cookie。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 60 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
 - 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
 - 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
 - 排查入口：场景查询为父系统 `iframeContext.bbk` → POST body 的 `bbkId`；规划提交/校验仍为 `X-Bbk-Id` → `request.state.bbk_id`。场景卡片来源文案 `skillBbkLabel` 只用于展示。
@@ -280,15 +280,15 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台看板与列表标题
 
-- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留后端 `board_status` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
+- 规划列表、日历提示与详情主状态通过 `utils.ts` 的 `planPublishLabel` 按 `publishStatus` 展示“发布中 / 发布成功 / 发布失败”，缺失或未知值展示“状态未知”。列表、日历提示和详情均不展示分发结果。`Plan.status` 仍保留Java `boardStatus` 聚合结果，继续供自动轮询和统计失效判断使用；不要用展示文案替换底层分发状态。
 
 - 列表入口为 `console/src/pages/WealthWorkbench/Board/index.tsx`，标题使用 `Plan.name`（规划名称）。日历入口为同目录的 `Calendar.tsx`，周视图卡片标题使用规划名，下方显示“经营场景：”并汇总该规划的 `PlanItem.sceneName`，多项场景用中文逗号连接，最多两行，超出省略。月视图标题同样使用规划名，名称后用纯数字表示该规划关联的全部技能数量，不新增场景正文；两种视图统一使用 Ant Design Tooltip，悬停或键盘聚焦时分行展示完整规划名、经营场景与状态，长名称自动换行；移除原生 `title`，避免重复提示。
 - 列表的“规划周期”按所选日期范围与规划 `start/end` 的闭区间交集筛选，不按 `Plan.period` 类型筛选。“自定义”显示日期范围选择器，默认本月，切换快捷周期后保留此前选定的范围；来源分类和概览统计使用同一筛选结果，日历仍使用自身的周/月区间。
 - 日历按各场景排程筛选当天执行的技能，点击卡片仍传递日期与规划 ID；回归测试见 `Board/Calendar.test.tsx`，覆盖周、月两种维度。
 - 日历的目标客户与已生成任务复用 `Board` 的 `planStat`，与列表一样由前端直接查询 `/api/agent/workspace/skill-stats`，请求 `planIds` 为规划 ID 数组，由 Nginx 转发；按返回项 `planId` 读取 `targetCustomerCount` 和 `targetTaskCount`，不再按场景或日期区间求和。未返回或接口不可用时显示 `--`，真实零值显示 `0`。不要直接使用规划映射中初始化为零的 `Plan.customers/tasks`；回归测试见 `Board/index.test.tsx`。
 
-- 周/月切换仅本地筛选规划，不按周重新请求 `/wealth/plans`。统计由 `Board/usePlanStats.ts` 按账户和去重排序后的规划 ID 集合缓存；相同在途请求合并，规划状态轮询不会清空缓存。成功与失败响应缓存 30 秒，到期后在下一次周期/筛选变化或规划轮询时后台更新；页面静止时不定时刷新。后台更新保留已有数字，失败提示暂显示上次数据；无已有数据时显示 `--`；加载/后台更新仅通过刷新图标旋转和禁用反馈，失败仍提示统计不可用或暂显示上次数据。发布/分发从进行中结束时使统计失效并主动查询，若请求在途则返回后串行补查；切换账户清空缓存，过期响应不覆盖当前周期。回归入口为 `Board/usePlanStats.test.ts`。
-- 看板仅在存在发布中/分发中规划时自动查询：`Board/useBoardRefresh.ts` 在上一轮完成后等待 5 秒再查询，每次连续处理周期最多 3 分钟；到期静默暂停，手动“刷新看板”不会重新启动自动轮询。看板的规划与统计单次请求均由 `Board/requestTimeout.ts` 限制为 15 秒：超时取消底层请求并释放等待，保留已有数据；离开看板会立即取消在途规划请求；被取消的规划请求即使晚返回也不更新 store。自动与手动规划刷新共用在途请求，刷新入口使用图标按钮（无障碍名称“刷新看板”），在规划或统计请求期间旋转并禁用；手动成功刷新会绕过统计有效期更新当前统计。看板刷新使用严格读取，接口失败保留规划，不额外展示暂停或规划刷新失败文案，其他读取仍保持原有容错行为。回归入口：`Board/useBoardRefresh.test.ts`。
+- 周/月切换仅本地筛选规划，不按周重新请求 `/zt/wealth/plans`。统计由 `Board/usePlanStats.ts` 按账户和去重排序后的规划 ID 集合缓存；相同在途请求合并，规划状态轮询不会清空缓存。成功与失败响应缓存 30 秒，到期后在下一次周期/筛选变化或规划轮询时后台更新；页面静止时不定时刷新。后台更新保留已有数字，失败提示暂显示上次数据；无已有数据时显示 `--`；加载/后台更新仅通过刷新图标旋转和禁用反馈，失败仍提示统计不可用或暂显示上次数据。发布/分发从进行中结束时使统计失效并主动查询，若请求在途则返回后串行补查；切换账户清空缓存，过期响应不覆盖当前周期。回归入口为 `Board/usePlanStats.test.ts`。
+- 看板仅在存在发布中/分发中规划时自动查询：`Board/useBoardRefresh.ts` 在上一轮完成后等待 5 秒再查询，每次连续处理周期最多 3 分钟；到期静默暂停，手动“刷新看板”不会重新启动自动轮询。看板的规划与统计单次请求均由 `Board/requestTimeout.ts` 限制为 60 秒：超时取消底层请求并释放等待，保留已有数据；离开看板会立即取消在途规划请求；被取消的规划请求即使晚返回也不更新 store。自动与手动规划刷新共用在途请求，刷新入口使用图标按钮（无障碍名称“刷新看板”），在规划或统计请求期间旋转并禁用；手动成功刷新会绕过统计有效期更新当前统计。看板刷新使用严格读取，接口失败保留规划，不额外展示暂停或规划刷新失败文案，其他读取仍保持原有容错行为。回归入口：`Board/useBoardRefresh.test.ts`。
 
 ## 财富任务名单动态字段
 
@@ -344,3 +344,11 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 父应用通过 iframe URL 的 `hideLogo=true` 隐藏整个财富工作台头部（品牌及标题），例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
 - 入口与参数延续逻辑位于 `console/src/pages/WealthWorkbench/index.tsx`。内部导航省略参数时补回入口隐藏设置并保留其他查询参数，支持导航后刷新；不写入 sessionStorage，不影响独立打开的工作台。
 - `.root.withoutHeader` 位于同目录 `index.module.less`，同步调整信息播报、侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。
+
+## 财富规划 Java 网关迁移
+
+- 2026-10-20 浏览器规划路径统一增加 `/zt` 前缀；需同步网关 location 和测试夹具。Java 上游仍是 `/wealth/plans` 时由网关剥离 `/zt`；Java 同时有此前缀时原样转发。不修改工作台页面路由或其他接口前缀。
+
+- 规划请求在 `console/src/pages/WealthWorkbench/api.ts` 使用同源原生 fetch `/zt/wealth/plans`，不走全局 request/baseUrl，也不拼接 `/api`。网关负责转 Java；创建后的任务编排、资源处理与状态回写由 Java 负责。
+- 列表通过 Query 传 sapId/role/bbkId；创建/更新通过 camelCase JSON 传身份和业务数据；删除通过 DELETE Body 传 sapId。响应解包 code/message/data，HTTP 200 的非 200 业务码也上抛。
+- 场景、名单、统计、机构人员、签名保持各自已有同源路径；不回退 Python 工作台 handler。网关必须优先匹配规划接口并透传 DELETE Body，避免 SPA 返回 HTML。具体评估与配置见 [Java 网关接入](../../docs/api/wealth-plans-java-gateway.md)，回归入口为 `planGateway.test.ts`、`store.test.ts`。

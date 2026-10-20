@@ -2,7 +2,7 @@
  * 智能财富工作台 —— 领域类型定义
  * 移植自单文件原型「智能财富工作台.html」。
  * 第二阶段起与后端接口契约对齐：场景来自 /wealth/scene-skills，
- * 规划来自 /wealth/plans，id 均为字符串，排程与控制台定时任务同模型。
+ * 规划来自 /zt/wealth/plans，id 均为字符串，排程与控制台定时任务同模型。
  */
 import type { CronParts } from "@/utils/parseCron";
 import type { WealthRole } from "./permissions";

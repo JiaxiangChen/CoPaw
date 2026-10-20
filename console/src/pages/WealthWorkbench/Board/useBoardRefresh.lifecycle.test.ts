@@ -6,7 +6,10 @@ import type { Plan } from "../types";
 import { useBoardRefresh } from "./useBoardRefresh";
 
 vi.mock("../../../api/request", () => ({ request: vi.fn() }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 it("离开看板立即取消旧刷新，即使旧响应晚返回也不覆盖后续规划", async () => {
   let resolve!: (value: unknown) => void;
@@ -14,6 +17,15 @@ it("离开看板立即取消旧刷新，即使旧响应晚返回也不覆盖后�
     new Promise((done) => {
       resolve = done;
     }),
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (path: string, options?: RequestInit) =>
+        new Response(
+          JSON.stringify({ code: "200", data: await request(path, options) }),
+        ),
+    ),
   );
   const action = useWealthStore.getState().refreshPlans;
   const { result, unmount } = renderHook(() => useBoardRefresh(false, action));

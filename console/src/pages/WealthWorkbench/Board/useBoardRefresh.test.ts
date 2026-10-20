@@ -65,9 +65,10 @@ it("超时请求自动释放等待，3分钟后不再安排自动查询", async 
   const { result } = renderHook(() => useBoardRefresh(true, refresh));
   await act(async () => vi.advanceTimersByTimeAsync(180000));
   expect(result.current.paused).toBe(true);
-  expect(result.current.refreshing).toBe(false);
   const calls = refresh.mock.calls.length;
-  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  // 暂停轮询不取消在途请求，等待它按 60 秒请求上限结束。
+  await act(async () => vi.advanceTimersByTimeAsync(60000));
+  expect(result.current.refreshing).toBe(false);
   expect(refresh).toHaveBeenCalledTimes(calls);
 });
 
@@ -103,7 +104,7 @@ it("刷新失败展示失败状态，不触发统计强制刷新，允许重试"
   expect(result.current.statsRefreshVersion).toBe(1);
 });
 
-it("规划请求15秒超时后恢复手动刷新，取消旧请求并允许重试", async () => {
+it("规划请求60秒超时后恢复手动刷新，取消旧请求并允许重试", async () => {
   let signal!: AbortSignal;
   const refresh = vi
     .fn()
@@ -117,7 +118,7 @@ it("规划请求15秒超时后恢复手动刷新，取消旧请求并允许重�
   act(() => {
     pending = result.current.manualRefresh();
   });
-  await act(async () => vi.advanceTimersByTimeAsync(14999));
+  await act(async () => vi.advanceTimersByTimeAsync(59999));
   expect(result.current.refreshing).toBe(true);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1);

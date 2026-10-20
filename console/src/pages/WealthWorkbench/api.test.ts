@@ -30,17 +30,19 @@ function mockTransports() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
-      const result = (await mockRequest(path, options)) as {
+      const pathname = path.split("?")[0];
+      const result = (await mockRequest(pathname, options)) as {
         items?: unknown[];
       };
       const { items, ...fields } = result;
       return new Response(
         JSON.stringify({
           code: 200,
-          data:
-            path === "/api/agent/workspace/skill-config/list"
-              ? items ?? []
-              : { ...fields, list: items ?? [] },
+          data: pathname.startsWith("/zt/wealth/plans")
+            ? result
+            : path === "/api/agent/workspace/skill-config/list"
+            ? items ?? []
+            : { ...fields, list: items ?? [] },
         }),
       );
     }),
@@ -83,7 +85,7 @@ beforeEach(() => {
     if (p.startsWith("/api/agent/workspace/name-list")) {
       return { items: NAME_LIST_FIXTURE };
     }
-    if (p.startsWith("/wealth/plans")) {
+    if (p.startsWith("/zt/wealth/plans")) {
       return { items: [] };
     }
     throw new Error(`未 mock 的请求：${p}`);
@@ -435,7 +437,7 @@ describe("WealthWorkbench api", () => {
         }),
     );
     const result = api.fetchScenesByCategory("");
-    await vi.advanceTimersByTimeAsync(8000);
+    await vi.advanceTimersByTimeAsync(60000);
     await expect(result).resolves.toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
   });
