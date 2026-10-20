@@ -3174,11 +3174,19 @@ class CronManager:  # pylint: disable=too-many-public-methods
             return True, None
         return False, None
 
-    async def send_task_success_notification(self, job_id: str) -> None:
-        """发送指定定时任务的完成通知，供通知 worker 调用。"""
-        job = await self._repo.get_job(job_id)
+    async def send_task_success_notification(
+        self,
+        job_id: str,
+        *,
+        job: CronJobSpec | None = None,
+    ) -> None:
+        """发送完成通知；新版传入已核实快照，旧版默认从文件仓库获取。"""
+        if job is None:
+            job = await self._repo.get_job(job_id)
         if job is None:
             raise ValueError(f"cron job not found: {job_id}")
+        if job.id != job_id:
+            raise ValueError("cron_notification_snapshot_conflict")
         await self._push_task_success_notification(
             job,
             raise_on_error=True,

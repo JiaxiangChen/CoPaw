@@ -779,6 +779,14 @@
 - **典型来源**：持久化的 AgentScope 消息使用 `file_url`、`image_url`、`audio_url` 或 `video_url` 等扁平字段，而聊天历史转换只读取 `source.url`，导致恢复出的附件 URL 为空。
 - **第一落点**：检查 `src/swe/app/runner/utils.py` 的 `agentscope_msg_to_message` 是否同时兼容扁平字段和 `source` 结构，并验证 `/chats/{id}` 返回的用户消息仍包含附件 URL。
 
+## 新版定时任务通知报 cron job not found
+
+- 新版执行历史的 `meta.management_owner=scheduler`，同时携带新版执行 ID、source 和 Agent；归属不按 ID 格式、创建日期或“旧文件里查不到”判断。
+- `notification_worker.py` 对新版读取共库中与数字历史 ID 绑定的冻结执行快照，核对完整 tenant/source/Agent/job 及定义归属后，复用既有通知发送；旧任务继续查询 jobs.json。
+- 检查 `_app.py` 是否给 worker 注入共用数据库连接，以及 managed 元数据、执行快照和历史绑定是否完整。数据库不可用或身份不匹配不能回退旧文件通知同名任务。
+- 本次修复不重置已经 failed 的通知、不补发历史，也不恢复写 jobs.json 或修改通知时间、渠道与重试配置。
+- 回归入口：`tests/unit/app/test_managed_cron_notifications.py` 与原 `test_cron_notification_worker.py`。
+
 ## 财富规划看板「已生成任务」数量不准确
 
 - **口径**：前端直接 POST 同源 `/api/agent/workspace/skill-stats`，请求体的 `planIds` 为当前范围内去重的规划 ID 数组，不再传 `skills` 或日期区间。按返回项 `planId` 关联规划，`targetCustomerCount` 展示目标客户，`targetTaskCount` 映射为展示模型的 `generatedTaskCount`；规划概览累加当前周期内各规划的结果，不再按场景累加。

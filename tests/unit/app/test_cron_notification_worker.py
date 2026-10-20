@@ -2,6 +2,7 @@
 """定时任务通知 worker 测试。"""
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -166,8 +167,10 @@ async def test_failed_writeback_does_not_abort_other_notifications(
     monkeypatch,
     caplog,
 ):
-    """A failed error acknowledgement leaves other claimed rows runnable."""
+    """失败回写异常不影响其余通知，并保留可捕获的错误日志。"""
     monkeypatch.setenv("SWE_CRON_NOTIFICATION_CONCURRENCY", "1")
+    # 生产命名空间关闭传播，测试需显式接入 pytest 的根日志捕获器。
+    monkeypatch.setattr(logging.getLogger("swe"), "propagate", True)
 
     async def send(job_id):
         if job_id == "1":
