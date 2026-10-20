@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS swe_cron_subtasks (
     notification_content_wplus VARCHAR(5000) DEFAULT NULL COMMENT 'W+渠道通知消息内容',
     notification_content_zhaohu VARCHAR(5000) DEFAULT NULL COMMENT '招乎渠道通知消息内容',
     need_notification TINYINT(1) DEFAULT 1 COMMENT '是否需要通知: 0-否, 1-是',
+    has_main_task TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否有关联主任务: 0-否, 1-是',
     status       VARCHAR(16) DEFAULT NULL COMMENT '子任务状态: SUC/FAIL/PART_SUC/TIMEOUT',
     info         VARCHAR(2048) DEFAULT '' COMMENT '预留扩展信息',
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -806,6 +807,13 @@ COMMENT '是否需要通知: 0-否, 1-是'
 AFTER notification_content_zhaohu
 """
 
+ALTER_CRON_SUBTASKS_HAS_MAIN_TASK = """
+ALTER TABLE swe_cron_subtasks
+ADD COLUMN has_main_task TINYINT(1) NOT NULL DEFAULT 1
+COMMENT '是否有关联主任务: 0-否, 1-是'
+AFTER need_notification
+"""
+
 ALTER_CRON_EXECUTIONS_NEED_NOTIFICATION = """
 ALTER TABLE swe_cron_executions
 ADD COLUMN need_notification TINYINT(1) DEFAULT 1
@@ -953,6 +961,7 @@ async def init_database_tables() -> None:
         # 添加 need_notification 字段
         for alter_sql in [
             ALTER_CRON_SUBTASKS_NEED_NOTIFICATION,
+            ALTER_CRON_SUBTASKS_HAS_MAIN_TASK,
             ALTER_CRON_EXECUTIONS_NEED_NOTIFICATION,
         ]:
             try:

@@ -280,12 +280,17 @@ class SyncService:
 
         # 固定 task_id="default" 的子任务直接标记成功
         if subtask.task_id == "default":
-            await self.query_service.update_subtask_status(
-                subtask.task_id,
-                subtask.trace_id,
-                "SUC",
-                "",
-            )
+            if subtask.has_main_task == 0:
+                await self.query_service.complete_standalone_success_subtask(
+                    subtask,
+                )
+            else:
+                await self.query_service.update_subtask_status(
+                    subtask.task_id,
+                    subtask.trace_id,
+                    "SUC",
+                    "",
+                )
             detail.new_status = "SUC"
             logger.info(
                 "Auto-marked default subtask as SUC: trace_id=%s",
@@ -295,13 +300,15 @@ class SyncService:
 
         # 兜底检查：超过2小时的pending子任务标记TIMEOUT
         if self._check_pending_timeout(subtask, now):
+            created_at = subtask.created_at
+            assert created_at is not None
             hours_pending = int(
-                (now - subtask.created_at).total_seconds() / 3600,
+                (now - created_at).total_seconds() / 3600,
             )
             logger.warning(
                 "Subtask pending over %dh, marking TIMEOUT: task_id=%s hours=%d",
                 FALLBACK_TIMEOUT_HOURS,
-                subtask.task_id[:20],
+                subtask.task_id,
                 hours_pending,
             )
             await self.query_service.update_subtask_status(
@@ -322,12 +329,17 @@ class SyncService:
 
         status, error = await self._query_task_status(client, subtask.task_id)
         if status:
-            await self.query_service.update_subtask_status(
-                subtask.task_id,
-                subtask.trace_id,
-                status,
-                error or "",
-            )
+            if status == "SUC" and subtask.has_main_task == 0:
+                await self.query_service.complete_standalone_success_subtask(
+                    subtask,
+                )
+            else:
+                await self.query_service.update_subtask_status(
+                    subtask.task_id,
+                    subtask.trace_id,
+                    status,
+                    error or "",
+                )
             detail.new_status = status
             logger.info(
                 "Synced subtask status: task_id=%s status=%s",
