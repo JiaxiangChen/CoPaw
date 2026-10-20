@@ -91,6 +91,13 @@ def test_batch_update_indexes_success_execution_results():
     success_update_sql = db.execute_calls[0][0]
     assert "async_status = 'success'" in success_update_sql
     assert "AND e.status = 'success'" in success_update_sql
+    assert "AND e.id IN (%s)" in success_update_sql
+    assert db.execute_calls[0][1] == (42,)
+
+    error_update_sql = db.execute_calls[1][0]
+    assert "async_status = 'error'" in error_update_sql
+    assert "AND e.id IN (%s)" in error_update_sql
+    assert db.execute_calls[1][1] == (42,)
 
     insert_calls = _result_index_batch_insert_calls(db)
     assert len(insert_calls) == 1
@@ -121,6 +128,30 @@ def test_batch_update_indexes_success_execution_results():
     assert "bbk_id IN (%s)" in skill_config_sql
     assert "customer_insight_enabled = 1" in skill_config_sql
     assert skill_config_params == ("771",)
+
+
+def test_batch_update_indexes_successful_subtasks_for_failed_execution():
+    db = FakeDb()
+    db.execute = _execute_with_error_result(db)
+
+    success_count, error_count, indexed_count, _ = asyncio.run(
+        QueryService(db=db).batch_update_execution_async_status(),
+    )
+
+    assert (success_count, error_count, indexed_count) == (0, 1, 2)
+    assert len(_result_index_batch_insert_calls(db)) == 1
+
+
+def _execute_with_error_result(db):
+    async def execute(sql, params=None):
+        db.execute_calls.append((sql, params))
+        if "async_status = 'success'" in sql:
+            return 0
+        if "async_status = 'error'" in sql:
+            return 1
+        return 1
+
+    return execute
 
 
 def test_batch_update_deduplicates_successful_subtasks_per_trace_and_customer():
