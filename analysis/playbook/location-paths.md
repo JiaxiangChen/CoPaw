@@ -315,12 +315,13 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ### 财富规划分发目标
 
-- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，使用原生 fetch 直接 POST 同源网关路径 `/xcapi-auth/wmadm/services/v1/wmutadm/getUserPostionByBrn`（人员）与 `/xcapi-auth/wmadm/services/v1/wmadm/combox/BranchTreeInfoService`（支行），不再调用 `/api/user-info/*/by-branch` 或统一 request。仅显式设置 JSON Content-Type，沿用默认同源 Cookie；30 秒超时取消请求，人员失败返回空列表，支行失败返回 null 以保留重试。
+- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，使用原生 fetch 直接 POST 同源网关路径 `/zt/wealth/wmadm/branchTreeInfo`（人员，`USER_POSITION_PATH`）与 `/zt/wealth/wmadm/getUserPostionByBrn`（支行，`BRANCH_TREE_PATH`），不再调用 `/api/user-info/*/by-branch` 或统一 request。仅显式设置 JSON Content-Type，沿用默认同源 Cookie；60 秒超时取消请求，人员失败返回空列表，支行失败返回 null 以保留重试。
 - 部署前端 Nginx 需将上述两个同源路径转发到对应环境的网关，并按原后端 `SWE_USER_POSITION_HEADER_KEY/VALUE` 配置附加网关凭证，保留请求 Cookie；凭证不能放进前端包。原 Python 代理保留兼容。
 - 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值；这些配置仍用于 Python 兼容代理，前端直连需在部署 Nginx 中同步对应环境的目标地址。
-- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mOrgCode ← orgCode (vorgcode)`、`mOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
+- 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mmOrgCode ← orgCode (vorgcode)`、`mmOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
 - 上游成功标记为 `code=success`；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
-- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先直连上述 `BranchTreeInfoService`，入参为登录分行 `bbk`、`mOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，每次选择机构后继续用该条目的 `mOrgCode/mOrgLvl` 查询 `BranchTreeInfoService`；每选择一级立即用当前条目的 `mOrgCode/mOrgLvl` 查询人员，同时独立查询下级机构；有下级就展开下一列，但可停留在当前级选择人员。返回空数组才确认末级，不依赖 `leaf` 字段判定末级。
+- 行长沿用登录支行的 `orgCode/orgLvl` 查询；分行中台先直连上述 `BranchTreeInfoService`，入参为 `mmOrgCode=bbk`、`mmOrgLvl=Number(iframeStore.orgLvl)`（cookie `vorglvl`）、`sysId=iframeStore.sysId`（cookie `sysid`），缺少必要上下文或机构级别无效时不查询，每次选择机构后继续用该条目的 `mOrgCode/mOrgLvl` 查询 `BranchTreeInfoService`；每选择一级立即用当前条目的 `mOrgCode/mOrgLvl` 查询人员，同时独立查询下级机构；有下级就展开下一列，但可停留在当前级选择人员。返回空数组才确认末级，不依赖 `leaf` 字段判定末级。
+- 两个前端分发接口请求体统一使用 `mmOrgCode/mmOrgLvl`；选择机构后仍取返回条目的 `mOrgCode/mOrgLvl`，只转换请求字段名，值及类型保持不变，`bbkOrgId/sysId` 保持原样。
 - 支行上游 `BranchTreeInfoService` 地址由 `SWE_BRANCH_TREE_API_URL` 在 dev/prd 中配置，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `wmcomsrvgatewayxc.paas.cmbchina.cn`，复用人员接口的 header 凭证配置。
 - 中台可跨支行累计选择人员；当前候选列表与全选操作仅针对当前支行，已选人员信息保留用于发布及移除。快速切换支行时过期响应不更新当前列表。
 
@@ -341,9 +342,13 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 财富工作台嵌入头部控制
 
-- 父应用通过 iframe URL 的 `hideLogo=true` 隐藏整个财富工作台头部（品牌及标题），例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
+- 父应用通过 iframe URL 的 `hideLogo=true` 同时隐藏整个财富工作台头部（品牌及标题）、信息播报与侧栏，例如 `/wealth/board?hideLogo=true`；未传或传 `false` 时正常显示。
 - 入口与参数延续逻辑位于 `console/src/pages/WealthWorkbench/index.tsx`。内部导航省略参数时补回入口隐藏设置并保留其他查询参数，支持导航后刷新；不写入 sessionStorage，不影响独立打开的工作台。
-- `.root.withoutHeader` 位于同目录 `index.module.less`，同步调整信息播报、侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。
+- `.root.withoutHeader` 位于同目录 `index.module.less`，同步消除头部和播报占位，调整侧栏、正文与表单锚点偏移；全局 `MainLayout` 的 `hideMenu` 不控制该独立骨架。
+
+- `hideLogo=true` 对所有角色统一隐藏整个侧栏（包含规划入口及任务导航）并移除占位，正文填满可用宽度；不带该参数时侧栏行为保持不变。内部导航仅延续隐藏设置，不额外补回 `origin=Y`，身份初始化保持原有行为。
+- 父应用直达：`/wealth/board?origin=Y&hideLogo=true` 为看板，`/wealth/create?origin=Y&hideLogo=true` 为新建。部署在 `/console` 下时各地址加此前缀。
+- 编辑仅由工作台内部触发：看板列表或日历操作调用 `editPlan(id)` 回填草稿和分发目标，再跳转 `/wealth/create`。父应用不提供编辑链接，不引入 `planId` URL 参数；编辑态沿用原有内存机制。
 
 ## 财富规划 Java 网关迁移
 
