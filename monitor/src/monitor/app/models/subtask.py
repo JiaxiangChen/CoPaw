@@ -197,5 +197,4 @@ class FailedExecutionRerunRequest(BaseModel):
 class FailedExecutionRerunResponse(BaseModel):
     """Result of rerunning failed cron executions."""
 
-    rerun_count: int = Field(default=0, description="发起重跑成功的任务数量")
-    failed_count: int = Field(default=0, description="发起重跑失败的任务数量")
+    rerun_count: int = Field(default=0, description="已提交后台重跑的任务数量")

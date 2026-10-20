@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Rerun cron jobs whose latest execution failed asynchronously."""
 
+import asyncio
 import logging
+from time import perf_counter
 from uuid import uuid4
 
 import httpx
@@ -34,12 +36,14 @@ class RerunService:
         self._authorization = authorization
         self._timeout = timeout
         self._client_factory = client_factory
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def rerun_failed_executions(
         self,
         tenant_ids: list[str],
     ) -> FailedExecutionRerunResponse:
         """Rerun jobs whose latest execution today is an async failure."""
+        total_started_at = perf_counter()
         if not tenant_ids:
             return FailedExecutionRerunResponse()
         if not self.db:
@@ -49,22 +53,57 @@ class RerunService:
                 "MONITOR_SWE_CRON_RERUN_AUTHORIZATION is not configured",
             )
 
+        query_started_at = perf_counter()
         jobs = await self._fetch_failed_jobs(tenant_ids)
-        rerun_count, failed_count = 0, 0
-        async with self._client_factory(timeout=self._timeout) as client:
-            for job in jobs:
-                if await self._rerun_job(
-                    client,
-                    job["job_id"],
-                    job["tenant_id"],
-                ):
-                    rerun_count += 1
-                else:
-                    failed_count += 1
-        return FailedExecutionRerunResponse(
-            rerun_count=rerun_count,
-            failed_count=failed_count,
+        query_elapsed_ms = (perf_counter() - query_started_at) * 1000
+        logger.info(
+            "Fetched async-failed cron jobs: tenant_count=%d job_count=%d "
+            "elapsed_ms=%.2f",
+            len(tenant_ids),
+            len(jobs),
+            query_elapsed_ms,
         )
+
+        if jobs:
+            task = asyncio.create_task(self._rerun_jobs(jobs))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+        logger.info(
+            "Submitted async-failed cron rerun: tenant_count=%d job_count=%d "
+            "elapsed_ms=%.2f",
+            len(tenant_ids),
+            len(jobs),
+            (perf_counter() - total_started_at) * 1000,
+        )
+        return FailedExecutionRerunResponse(rerun_count=len(jobs))
+
+    async def _rerun_jobs(self, jobs: list[dict]) -> None:
+        """Call the gateway sequentially in a background task."""
+        batch_started_at = perf_counter()
+        client_started_at = perf_counter()
+        try:
+            async with self._client_factory(timeout=self._timeout) as client:
+                logger.info(
+                    "Initialized cron rerun HTTP client: elapsed_ms=%.2f",
+                    (perf_counter() - client_started_at) * 1000,
+                )
+                for job in jobs:
+                    await self._rerun_job(
+                        client,
+                        job["job_id"],
+                        job["tenant_id"],
+                    )
+            logger.info(
+                "Completed background cron rerun batch: job_count=%d elapsed_ms=%.2f",
+                len(jobs),
+                (perf_counter() - batch_started_at) * 1000,
+            )
+        except Exception:
+            logger.exception(
+                "Background cron rerun batch failed: job_count=%d elapsed_ms=%.2f",
+                len(jobs),
+                (perf_counter() - batch_started_at) * 1000,
+            )
 
     async def _fetch_failed_jobs(self, tenant_ids: list[str]) -> list[dict]:
         placeholders = ", ".join(["%s"] * len(tenant_ids))
@@ -96,6 +135,7 @@ class RerunService:
         job_id: str,
         tenant_id: str,
     ) -> bool:
+        request_started_at = perf_counter()
         headers = {
             "Content-Type": "application/json",
             "X-User-Id": tenant_id,
@@ -112,9 +152,25 @@ class RerunService:
             )
             response.raise_for_status()
             payload = response.json()
-            return isinstance(payload, dict) and payload.get("started") is True
+            started = (
+                isinstance(payload, dict) and payload.get("started") is True
+            )
+            logger.info(
+                "Completed cron job rerun request: job_id=%s status_code=%d "
+                "started=%s elapsed_ms=%.2f",
+                job_id,
+                response.status_code,
+                started,
+                (perf_counter() - request_started_at) * 1000,
+            )
+            return started
         except (httpx.HTTPError, ValueError) as exc:
-            logger.error("Failed to rerun cron job %s: %s", job_id, exc)
+            logger.error(
+                "Failed to rerun cron job: job_id=%s elapsed_ms=%.2f error=%s",
+                job_id,
+                (perf_counter() - request_started_at) * 1000,
+                exc,
+            )
             return False
 
 

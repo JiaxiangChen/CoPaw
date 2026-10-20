@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 from unittest.mock import AsyncMock
 
 import httpx
@@ -27,7 +28,7 @@ class FakeClient:
 
 
 @pytest.mark.asyncio
-async def test_rerun_failed_executions_counts_only_started_jobs():
+async def test_rerun_failed_executions_returns_submitted_job_count():
     db = AsyncMock()
     db.fetch_all.return_value = [
         {"job_id": "job-1", "tenant_id": "tenant-a"},
@@ -48,8 +49,10 @@ async def test_rerun_failed_executions_counts_only_started_jobs():
     )
 
     result = await service.rerun_failed_executions(["tenant-a", "tenant-b"])
+    tasks = list(service._background_tasks)
 
-    assert result.rerun_count == 1
+    assert result.rerun_count == 2
+    await asyncio.gather(*tasks)
     sql, params = db.fetch_all.await_args.args
     assert "WHERE rn = 1" in sql
     assert "AND status = 'success'" in sql
@@ -61,13 +64,25 @@ async def test_rerun_failed_executions_counts_only_started_jobs():
 
 
 @pytest.mark.asyncio
-async def test_rerun_failed_executions_skips_failed_gateway_call():
+async def test_rerun_failed_executions_returns_before_gateway_finishes():
     db = AsyncMock()
     db.fetch_all.return_value = [
         {"job_id": "missing", "tenant_id": "tenant-a"},
     ]
-    request = httpx.Request("POST", "http://test")
-    client = FakeClient([httpx.Response(404, request=request)])
+    release_request = asyncio.Event()
+    request_started = asyncio.Event()
+    client = FakeClient([])
+
+    async def post(_url, **_kwargs):
+        request_started.set()
+        await release_request.wait()
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "http://test"),
+            json={"started": True},
+        )
+
+    client.post = post
     service = RerunService(
         db=db,
         base_url="http://gateway/api",
@@ -76,8 +91,50 @@ async def test_rerun_failed_executions_skips_failed_gateway_call():
     )
 
     result = await service.rerun_failed_executions(["tenant-a"])
+    tasks = list(service._background_tasks)
 
-    assert result.rerun_count == 0
+    assert result.rerun_count == 1
+    await asyncio.wait_for(request_started.wait(), timeout=0.5)
+    assert service._background_tasks
+    release_request.set()
+    await asyncio.gather(*tasks)
+
+
+@pytest.mark.asyncio
+async def test_rerun_failed_executions_calls_gateway_sequentially():
+    db = AsyncMock()
+    db.fetch_all.return_value = [
+        {"job_id": "job-1", "tenant_id": "tenant-a"},
+        {"job_id": "job-2", "tenant_id": "tenant-b"},
+    ]
+    calls = []
+
+    async def post(_url, **_kwargs):
+        calls.append(_url)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", "http://test"),
+            json={"started": True},
+        )
+
+    client = FakeClient([])
+    client.post = post
+    service = RerunService(
+        db=db,
+        base_url="http://gateway/api",
+        authorization="secret",
+        client_factory=lambda **_kwargs: client,
+    )
+
+    result = await service.rerun_failed_executions(["tenant-a", "tenant-b"])
+    tasks = list(service._background_tasks)
+
+    assert result.rerun_count == 2
+    await asyncio.gather(*tasks)
+    assert calls == [
+        "http://gateway/api/job-1/run",
+        "http://gateway/api/job-2/run",
+    ]
 
 
 @pytest.mark.asyncio
