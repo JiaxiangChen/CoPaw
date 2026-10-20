@@ -50,6 +50,62 @@ def job(**changes):
     return value
 
 
+@pytest.mark.parametrize("with_profile", [False, True])
+def test_snapshot_preserves_profile_columns_and_complete_spec(
+    tmp_path,
+    with_profile,
+):
+    fields = {
+        "tenant_name": "张三",
+        "bbk_id": "100",
+        "skill_ids": "skill-a",
+        "workflow_binding_id": "bind-a",
+    }
+    value = job(task_type="workflow", **fields) if with_profile else job()
+    write_jobs(tmp_path, [value])
+    candidate = candidates(read_source_page(tmp_path, MigrationRequest(), {}))[
+        0
+    ]
+    for field, expected in fields.items():
+        expected = (
+            expected
+            if with_profile
+            else (None if field == "workflow_binding_id" else "")
+        )
+        assert candidate.definition[field] == expected
+        stored = candidate.definition["spec_json"].get(field)
+        assert (
+            stored or (None if field == "workflow_binding_id" else "")
+        ) == expected
+
+
+@pytest.mark.asyncio
+async def test_import_and_repeat_preserve_profile_columns_from_source(
+    tmp_path,
+):
+    from swe.app.crons.migration_repository import MigrationRepository
+    from tests.unit.app.test_cron_migration_repository import FakeDatabase
+
+    fields = {
+        "tenant_name": "张三",
+        "bbk_id": "100",
+        "skill_ids": "skill-a",
+        "workflow_binding_id": "bind-a",
+    }
+    write_jobs(tmp_path, [job(task_type="workflow", **fields)])
+    candidate = candidates(read_source_page(tmp_path, MigrationRequest(), {}))[
+        0
+    ]
+    db = FakeDatabase()
+    repo = MigrationRepository(db)
+    assert (await repo.import_snapshot(candidate)).status == "inserted"
+    assert (await repo.import_snapshot(candidate)).status == "unchanged"
+    stored = db.tables["swe_cron_jobs_v2"][candidate.identity]
+    spec = json.loads(stored["spec_json"])
+    for field, value in fields.items():
+        assert stored[field] == spec[field] == value
+
+
 def candidates(page):
     return [
         item.candidate for item in page.items if item.candidate is not None
@@ -111,8 +167,8 @@ def test_loaded_state_presence_and_zero_values(tmp_path):
                     "task_chat_id": "chat",
                     "external_job_id": "ordinary",
                     "batch_dispatch_external_job_id": "batch",
-                }
-            )
+                },
+            ),
         ],
     )
     states = {
@@ -120,11 +176,11 @@ def test_loaded_state_presence_and_zero_values(tmp_path):
             "job-1": {
                 "last_status": "success",
                 "last_run_at": datetime(2026, 10, 15, tzinfo=timezone.utc),
-            }
-        }
+            },
+        },
     }
     candidate = candidates(
-        read_source_page(tmp_path, MigrationRequest(), states)
+        read_source_page(tmp_path, MigrationRequest(), states),
     )[0]
     assert candidate.memory_available
     assert candidate.state_patch["last_status"] == "success"
@@ -155,7 +211,8 @@ def test_system_tasks_excluded_but_system_origin_business_included(tmp_path):
         ],
     )
     (path.parent / "system_jobs.json").write_text(
-        '{"_heartbeat":"123"}', encoding="utf-8"
+        '{"_heartbeat":"123"}',
+        encoding="utf-8",
     )
     page = read_source_page(tmp_path, MigrationRequest(), {})
     assert [c.identity[-1] for c in candidates(page)] == ["business"]
@@ -174,23 +231,30 @@ def test_cursor_binds_filters_manifest_and_file(tmp_path):
     page = read_source_page(tmp_path, MigrationRequest(limit=1), {})
     assert page.next_cursor
     second = read_source_page(
-        tmp_path, MigrationRequest(limit=1, cursor=page.next_cursor), {}
+        tmp_path,
+        MigrationRequest(limit=1, cursor=page.next_cursor),
+        {},
     )
     assert [c.identity[-1] for c in candidates(second)] == ["b"]
     with pytest.raises(MigrationSourceError):
         read_source_page(
             tmp_path,
             MigrationRequest(
-                limit=1, cursor=page.next_cursor, source_ids=["source-b"]
+                limit=1,
+                cursor=page.next_cursor,
+                source_ids=["source-b"],
             ),
             {},
         )
     path.write_text(
-        json.dumps({"jobs": [job(id="changed")]}), encoding="utf-8"
+        json.dumps({"jobs": [job(id="changed")]}),
+        encoding="utf-8",
     )
     with pytest.raises(MigrationSourceError):
         read_source_page(
-            tmp_path, MigrationRequest(limit=1, cursor=page.next_cursor), {}
+            tmp_path,
+            MigrationRequest(limit=1, cursor=page.next_cursor),
+            {},
         )
 
 
@@ -200,7 +264,9 @@ def test_cursor_rejects_manifest_additions(tmp_path):
     write_jobs(tmp_path, [job(id="c")], agent="another")
     with pytest.raises(MigrationSourceError):
         read_source_page(
-            tmp_path, MigrationRequest(cursor=page.next_cursor), {}
+            tmp_path,
+            MigrationRequest(cursor=page.next_cursor),
+            {},
         )
 
 
@@ -216,14 +282,15 @@ def test_credentials_redacted_without_dropping_model_options(tmp_path):
                 "X-Access-Token": "secret",
                 "X-User-Id": "u",
             },
-        }
+        },
     )
     write_jobs(tmp_path, [value])
     candidate = candidates(read_source_page(tmp_path, MigrationRequest(), {}))[
         0
     ]
     serialized = json.dumps(
-        candidate.definition["spec_json"], ensure_ascii=False
+        candidate.definition["spec_json"],
+        ensure_ascii=False,
     )
     assert "secret" not in serialized
     assert candidate.definition["spec_json"]["meta"]["max_tokens"] == 200
@@ -247,9 +314,9 @@ def test_capture_only_existing_states_and_does_not_start_manager():
     manager = SimpleNamespace(
         agents={
             "scope:default": SimpleNamespace(
-                cron_manager=SimpleNamespace(_states={"job": state})
-            )
-        }
+                cron_manager=SimpleNamespace(_states={"job": state}),
+            ),
+        },
     )
     before = copy.deepcopy(state)
     snapshot = capture_loaded_states(manager)
@@ -260,7 +327,7 @@ def test_capture_only_existing_states_and_does_not_start_manager():
 def test_filters_and_empty_filters(tmp_path):
     write_jobs(tmp_path)
     assert not candidates(
-        read_source_page(tmp_path, MigrationRequest(source_ids=["other"]), {})
+        read_source_page(tmp_path, MigrationRequest(source_ids=["other"]), {}),
     )
     with pytest.raises(ValueError):
         MigrationRequest(source_ids=[])
@@ -335,10 +402,10 @@ def test_profile_agent_id_is_not_assumed_to_equal_directory_name(tmp_path):
                             "id": "research",
                             "workspace_dir": str(path.parent),
                             "enabled": False,
-                        }
-                    }
-                }
-            }
+                        },
+                    },
+                },
+            },
         ),
         encoding="utf-8",
     )
@@ -363,8 +430,8 @@ def test_invalid_loaded_time_list_does_not_clear_existing_times(tmp_path):
     path = write_jobs(tmp_path)
     loaded = {
         f"{path.parents[2].name}:default": {
-            "job-1": {"next_run_times": 5, "last_status": None}
-        }
+            "job-1": {"next_run_times": 5, "last_status": None},
+        },
     }
     value = candidates(read_source_page(tmp_path, MigrationRequest(), loaded))[
         0

@@ -50,6 +50,8 @@ class QueryDatabase:
                 agent_id TEXT COLLATE NOCASE, job_id TEXT COLLATE NOCASE,
                 scope_id TEXT, name TEXT, task_type TEXT, enabled INTEGER,
                 cron_expr TEXT, timezone TEXT, spec_json TEXT,
+                tenant_name TEXT DEFAULT '', bbk_id TEXT DEFAULT '',
+                skill_ids TEXT DEFAULT '', workflow_binding_id TEXT,
                 offset_minutes INTEGER DEFAULT 0,
                 offset_window_hours INTEGER DEFAULT 4,
                 enable_offset INTEGER DEFAULT 0,

@@ -71,7 +71,7 @@ def test_legacy_lookup_returns_404_when_skill_has_no_job():
     assert response.json()["detail"] == skill_job_lookup.SKILL_JOB_NOT_FOUND
 
 
-def test_managed_lookup_defaults_agent_and_reads_fields_from_spec_json():
+def test_managed_lookup_defaults_agent_and_reads_expanded_columns():
     db = FakeDb({"job_id": "job-9", "bbk_id": "2002"})
     response = _client(db).post(
         "/api/cron/skill-jobs/managed",
@@ -85,11 +85,12 @@ def test_managed_lookup_defaults_agent_and_reads_fields_from_spec_json():
     assert response.status_code == 200
     assert response.json() == {"job_id": "job-9", "bbk_id": "2002"}
     sql, params = db.last_call
-    assert "FROM swe_cron_jobs_v2" in sql
-    assert "JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.skill_ids'))" in sql
-    assert "JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.bbk_id'))" in sql
+    assert "SELECT job_id, bbk_id FROM swe_cron_jobs_v2" in sql
+    assert "FIND_IN_SET(%s, skill_ids) > 0" in sql
+    assert "JSON_" not in sql
+    assert "spec_json" not in sql
     assert "deleted_at IS NULL" in sql
-    assert "ORDER BY created_at DESC" in sql
+    assert "ORDER BY created_at DESC, job_id DESC LIMIT 1" in sql
     assert params == ("tenant-1", "source-1", "default", "skill-b")
 
 

@@ -568,6 +568,10 @@ def _snapshot_definition(
         "job_id": model.id,
         "scope_id": spec["scope_id"],
         "name": model.name,
+        "tenant_name": model.tenant_name or "",
+        "bbk_id": model.bbk_id or "",
+        "skill_ids": model.skill_ids,
+        "workflow_binding_id": model.workflow_binding_id,
         "task_type": model.task_type,
         "enabled": model.enabled,
         "cron_expr": model.schedule.cron,
@@ -587,6 +591,10 @@ def _snapshot_definition(
 def _validate_definition(definition: dict) -> None:
     for key, maximum in (
         ("name", 255),
+        ("tenant_name", 255),
+        ("bbk_id", 128),
+        ("skill_ids", 200),
+        ("workflow_binding_id", 128),
         ("cron_expr", 128),
         ("original_cron_expr", 128),
         ("timezone", 64),

@@ -7,7 +7,13 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .contracts import ManagedCronNotFound
-from .definition import canonical, normalize_spec, request_hash, stable_id
+from .definition import (
+    canonical,
+    normalize_spec,
+    profile_columns,
+    request_hash,
+    stable_id,
+)
 from .projection import write_projection
 from .repository import IDENTITY_FIELDS, ManagedCronRepository
 from .storage import insert, transaction, update
@@ -382,6 +388,7 @@ class ManagementStore:
     @staticmethod
     def definition_values(spec):
         return {
+            **profile_columns(spec),
             "name": spec["name"],
             "scope_id": spec["scope_id"],
             "task_type": spec["task_type"],
@@ -520,6 +527,7 @@ class ManagementStore:
                     tx,
                     "swe_cron_jobs_v2",
                     {
+                        **profile_columns(prepared["spec"]),
                         "spec_json": canonical(prepared["spec"]),
                         "updated_at": utc_now(),
                     },
