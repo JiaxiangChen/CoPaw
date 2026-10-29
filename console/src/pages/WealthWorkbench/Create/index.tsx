@@ -40,6 +40,7 @@ import type { PlanItem, Scene } from "../types";
 import { defaultMonitoring, type SceneMonitoring } from "../monitoring";
 
 const PUSH_TIME_LABEL = "名单推送时间";
+const MONITORING_PUSH_TIME_LABEL = "督办推送时间";
 
 const STEP_DEFS = [
   {
@@ -647,11 +648,11 @@ export function MonitoringFields({
           ))}
         </div>
         <div className={styles.scheduleField}>
-          <span>{PUSH_TIME_LABEL}</span>
+          <span>{MONITORING_PUSH_TIME_LABEL}</span>
           <TimeField
             hour={schedule.hour}
             minute={schedule.minute}
-            ariaLabel={`${sceneName}监控${PUSH_TIME_LABEL}`}
+            ariaLabel={`${sceneName}${MONITORING_PUSH_TIME_LABEL}`}
             onChange={(hour, minute) =>
               update({ schedule: { ...schedule, hour, minute } })
             }

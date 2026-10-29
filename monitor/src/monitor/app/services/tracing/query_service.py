@@ -436,7 +436,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 SELECT COUNT(*) AS total
                 FROM swe_cron_executions e
                 INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-                WHERE e.actual_time >= %s AND e.actual_time < %s
+                WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time < %s
                   AND j.status != 'deleted' AND j.deleted_at IS NULL
                   AND j.tenant_id != 'default'
                   AND {('j.source_id NOT IN (%s)' if source_id == 'all' else 'j.source_id = %s')}
@@ -774,7 +774,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                        COUNT(*) AS value
                 FROM swe_cron_executions e
                 INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-                WHERE e.actual_time >= %s AND e.actual_time < %s
+                WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time < %s
                   AND j.status != 'deleted'
                   AND j.deleted_at IS NULL
                   AND j.source_id NOT IN ({cron_exclude_placeholders})
@@ -797,7 +797,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                        COUNT(*) AS value
                 FROM swe_cron_executions e
                 INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-                WHERE e.actual_time >= %s AND e.actual_time < %s
+                WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time < %s
                   AND j.status != 'deleted'
                   AND j.deleted_at IS NULL
                   AND j.tenant_id != 'default'
@@ -983,7 +983,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 COUNT(*) as read_tasks
             FROM swe_cron_executions e
             INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.read_at >= %s AND e.read_at <= %s
+            WHERE e.is_final = 1 AND e.read_at >= %s AND e.read_at <= %s
               AND j.status != 'deleted'
               AND j.deleted_at IS NULL
               AND e.read_at IS NOT NULL
@@ -1185,7 +1185,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 COUNT(*) as read_tasks
             FROM swe_cron_executions e
             INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.read_at >= %s AND e.read_at <= %s
+            WHERE e.is_final = 1 AND e.read_at >= %s AND e.read_at <= %s
               AND j.status != 'deleted'
               AND j.deleted_at IS NULL
               AND e.read_at IS NOT NULL
@@ -1571,7 +1571,11 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
         bbk_ids: Optional[str] = None,
     ) -> tuple[str, list[Any]]:
         """构建 cron 执行统计子查询的 WHERE 条件."""
-        cron_where: list[str] = ["j.status != %s", "j.deleted_at IS NULL"]
+        cron_where: list[str] = [
+            "j.status != %s",
+            "j.deleted_at IS NULL",
+            "e.is_final = 1",
+        ]
         cron_params: list[Any] = ["deleted"]
 
         if start_date:
@@ -1639,7 +1643,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 LEFT JOIN (
                     SELECT j.tenant_id as user_id,
                            COUNT(*) as cron_executions,
-                           SUM(CASE WHEN e.status = 'success' THEN 1 ELSE 0 END) as cron_success,
+                           SUM(CASE WHEN e.status = 'success' AND e.async_status = 'success' THEN 1 ELSE 0 END) as cron_success,
                            SUM(CASE WHEN e.is_read = TRUE THEN 1 ELSE 0 END) as cron_reads
                     FROM swe_cron_executions e
                     INNER JOIN swe_cron_jobs j ON e.job_id = j.id
@@ -1693,7 +1697,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 LEFT JOIN (
                     SELECT j.tenant_id as user_id,
                            COUNT(*) as cron_executions,
-                           SUM(CASE WHEN e.status = 'success' THEN 1 ELSE 0 END) as cron_success,
+                           SUM(CASE WHEN e.status = 'success' AND e.async_status = 'success' THEN 1 ELSE 0 END) as cron_success,
                            SUM(CASE WHEN e.is_read = TRUE THEN 1 ELSE 0 END) as cron_reads
                     FROM swe_cron_executions e
                     INNER JOIN swe_cron_jobs j ON e.job_id = j.id
@@ -1801,6 +1805,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
         params.append("deleted")
         where_clauses.append("j.deleted_at IS NULL")
 
+        where_clauses.append("e.is_final = 1")
         where_sql = " AND ".join(where_clauses)
 
         # 统计总数
@@ -2901,7 +2906,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 SELECT e.status, e.async_status, e.is_read, COUNT(*) AS count
                 FROM swe_cron_executions e
                 INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-                WHERE e.actual_time >= %s AND e.actual_time < %s
+                WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time < %s
                   AND j.status != 'deleted'
                   AND j.deleted_at IS NULL
                   AND j.source_id NOT IN ({exclude_placeholders})
@@ -2920,7 +2925,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 SELECT e.status, e.async_status, e.is_read, COUNT(*) AS count
                 FROM swe_cron_executions e
                 INNER JOIN swe_cron_jobs j ON e.job_id = j.id
-                WHERE e.actual_time >= %s AND e.actual_time < %s
+                WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time < %s
                   AND j.status != 'deleted'
                   AND j.deleted_at IS NULL
                   AND j.tenant_id != 'default'
@@ -5484,7 +5489,9 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
             where_clauses.append("session_id = %s")
             params.append(session_id)
         if exclude_cron_task_sessions:
-            where_clauses.append("(session_id IS NULL OR session_id NOT LIKE %s)")
+            where_clauses.append(
+                "(session_id IS NULL OR session_id NOT LIKE %s)",
+            )
             params.append("cron-task%")
         if query_text:
             where_clauses.append("user_message LIKE %s")

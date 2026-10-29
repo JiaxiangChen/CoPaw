@@ -180,11 +180,13 @@ class TenantInitSourceStore:
         source_id: str,
         *,
         include_templates: bool = False,
+        bbk_id: str | None = None,
     ) -> list[dict]:
         """Query all tenants initialized from a given source.
 
         Args:
             source_id: The source identifier to filter by.
+            bbk_id: Optional BBK identifier for exact matching.
 
         Returns:
             List of dicts with tenant_id, source_id, tenant_name, bbk_id, init_source, created_at.
@@ -196,11 +198,15 @@ class TenantInitSourceStore:
             "tenant_type, created_at FROM swe_tenant_init_source "
             "WHERE source_id = %s "
         )
+        params = (source_id,)
+        if bbk_id is not None:
+            query += "AND bbk_id = %s "
+            params += (bbk_id,)
         if not include_templates:
             query += "AND (tenant_type IS NULL OR tenant_type != 'template') "
         query += "ORDER BY created_at"
         try:
-            rows = await self.db.fetch_all(query, (source_id,))
+            rows = await self.db.fetch_all(query, params)
             return list(rows)
         except Exception as e:
             logger.warning(

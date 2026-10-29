@@ -76,6 +76,7 @@ it("完成率清空后可重新输入，不补前导零，留空失焦时显示0
 it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
   const view = mount();
   expect(screen.getByLabelText("经营场景预期完成率")).toHaveValue(60);
+  expect(screen.getByText("督办推送时间")).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "有效期内" }),
   ).not.toBeInTheDocument();
@@ -86,7 +87,7 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
     ),
   ).toHaveAttribute("aria-pressed", "true");
   expect(
-    screen.getByRole("button", { name: "经营场景监控名单推送时间" }),
+    screen.getByRole("button", { name: "经营场景督办推送时间" }),
   ).toHaveTextContent("09:00");
   fireEvent.change(screen.getByLabelText("经营场景预期完成率"), {
     target: { value: "85" },
@@ -106,9 +107,7 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
   const days = screen.getByRole("group", { name: "经营场景监控日" });
   fireEvent.click(within(days).getByRole("button", { name: "星期二" }));
   fireEvent.click(within(days).getByRole("button", { name: "星期一" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "经营场景监控名单推送时间" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "经营场景督办推送时间" }));
   fireEvent.click(
     within(screen.getByLabelText("小时")).getByRole("button", {
       name: "12",
@@ -129,7 +128,7 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
     ),
   ).toHaveAttribute("aria-pressed", "true");
   expect(
-    screen.getByRole("button", { name: "经营场景监控名单推送时间" }),
+    screen.getByRole("button", { name: "经营场景督办推送时间" }),
   ).toHaveTextContent("12:30");
   expect(screen.getByRole("button", { name: "星期二" })).toHaveAttribute(
     "aria-pressed",
