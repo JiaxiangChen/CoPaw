@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>定时任务追踪 · UI Demo</title>
+    <link rel="stylesheet" href="demo.css" />
+    <script src="demo.js" defer></script>
+  </head>
+  <body>
+    <svg class="symbols" aria-hidden="true">
+      <defs>
+        <symbol id="i-clock" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 7v5l3 2" />
+        </symbol>
+        <symbol id="i-search" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 4 4" />
+        </symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="4" width="6" height="6" rx="1" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+        </symbol>
+        <symbol id="i-trace" viewBox="0 0 24 24">
+          <circle cx="6" cy="5" r="2" />
+          <circle cx="18" cy="12" r="2" />
+          <circle cx="6" cy="19" r="2" />
+          <path d="M6 7v10M8 5h4a6 6 0 0 1 6 5" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24">
+          <path d="m8 10 4 4 4-4" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24">
+          <rect x="8" y="8" width="11" height="12" rx="2" />
+          <path d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+        </symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24">
+          <path d="M4 7h16M4 17h16" />
+          <circle cx="9" cy="7" r="3" fill="currentColor" stroke="white" />
+          <circle cx="15" cy="17" r="3" fill="currentColor" stroke="white" />
+        </symbol>
+        <symbol id="i-play" viewBox="0 0 24 24">
+          <path d="m9 5 10 7-10 7Z" />
+        </symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24">
+          <path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5ZM10 20h4" />
+        </symbol>
+        <symbol id="i-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v6M12 16v1" />
+        </symbol>
+        <symbol id="i-sort" viewBox="0 0 24 24">
+          <path d="M8 19V5m-4 4 4-4 4 4M16 5v14m-4-4 4 4 4-4" />
+        </symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24">
+          <path d="M19 10a7.5 7.5 0 1 0-1 7M19 4v6h-6" />
+        </symbol>
+      </defs>
+    </svg>
+    <aside class="sidebar" aria-label="演示导航">
+      <div class="brand">
+        <span class="brand-mark">C</span>CoPaw<span class="brand-sub"
+          >CONSOLE</span
+        >
+      </div>
+      <div class="nav-caption">工作空间</div>
+      <div class="nav-item">
+        <svg><use href="#i-grid" /></svg>工作台
+      </div>
+      <div class="nav-caption">运行中心</div>
+      <div class="nav-item">
+        <svg><use href="#i-clock" /></svg>定时任务
+      </div>
+      <div class="nav-item">
+        <svg><use href="#i-grid" /></svg>批调度看板
+      </div>
+      <div class="nav-item selected" aria-current="page">
+        <svg><use href="#i-trace" /></svg>定时任务追踪
+      </div>
+      <div class="sidebar-foot">
+        <span class="avatar">管</span>
+        <div>管理员视角<small>只读查询</small></div>
+      </div>
+    </aside>
+    <div class="app">
+      <header class="topbar">
+        <div>
+          运行中心<span class="separator">/</span><strong>定时任务追踪</strong>
+        </div>
+        <div class="demo-state">
+          <span class="live-dot"></span>模拟数据 · 未连接服务<span
+            class="demo-label"
+            >UI DEMO</span
+          >
+        </div>
+      </header>
+      <main>
+        <div class="page-heading">
+          <div>
+            <h1>定时任务追踪</h1>
+            <p>从一个任务 ID，查看它的管理、调度、执行与通知记录。</p>
+          </div>
+          <div class="scenario-field">
+            <label for="scenario">演示场景</label
+            ><select id="scenario" aria-label="演示场景">
+              <option value="parent">批调度 · 父任务</option>
+              <option value="child">批调度 · 子任务</option>
+              <option value="ordinary">普通调度任务</option>
+              <option value="idle">尚未执行的任务</option>
+            </select>
+          </div>
+        </div>
+        <form id="query-form" class="query-bar">
+          <div class="query-field">
+            <label for="job-id">任务 ID</label>
+            <div class="search-input">
+              <svg><use href="#i-search" /></svg
+              ><input
+                id="job-id"
+                name="job-id"
+                aria-label="任务 ID"
+                spellcheck="false"
+                autocomplete="off"
+                required
+              />
+            </div>
+          </div>
+          <div class="source-field">
+            <span class="field-label">当前来源</span
+            ><span class="source-value"
+              >RMASSIST <span class="tag neutral">授权范围</span></span
+            >
+          </div>
+          <button class="button primary" type="submit" id="query-button">
+            查询任务
+          </button>
+          <button class="button" type="button" id="reset">重置</button>
+        </form>
+        <p class="query-helper">
+          仅查询当前授权范围内的新版任务。示例 ID 可通过“演示场景”切换。<span
+            id="query-status"
+            role="status"
+            aria-live="polite"
+          ></span>
+        </p>
+        <div id="not-found" class="empty-state" hidden>
+          <svg><use href="#i-search" /></svg>
+          <h2>未找到该演示任务</h2>
+          <p>
+            请核对任务
+            ID，或切换上方演示场景。这里不会显示上一次查询的任务信息。
+          </p>
+          <button type="button" class="button" id="back-example">
+            查看示例任务
+          </button>
+        </div>
+        <section
+          id="overview"
+          class="overview"
+          aria-label="任务当前概况"
+        ></section>
+        <section
+          id="timeline-section"
+          class="timeline-section"
+          aria-label="任务时间轴"
+        >
+          <div class="section-heading">
+            <div>
+              <h2>任务时间轴</h2>
+              <p>只展示此任务已有的记录，时间统一为北京时间（UTC+8）。</p>
+            </div>
+            <div class="heading-actions">
+              <button
+                type="button"
+                class="button quiet"
+                id="sort"
+                aria-label="切换时间排序"
+              >
+                <svg><use href="#i-sort" /></svg><span>时间正序</span></button
+              ><button type="button" class="button" id="refresh">
+                <svg><use href="#i-refresh" /></svg>刷新演示
+              </button>
+            </div>
+          </div>
+          <div class="filters">
+            <div class="range-shortcuts" aria-label="快捷时间范围">
+              <button type="button" data-range="today" aria-pressed="true">
+                今天</button
+              ><button type="button" data-range="three" aria-pressed="false">
+                近3天</button
+              ><button type="button" data-range="seven" aria-pressed="false">
+                近7天
+              </button>
+            </div>
+            <div class="datetime-range">
+              <input
+                type="datetime-local"
+                id="start"
+                aria-label="开始时间"
+              /><span>至</span
+              ><input type="datetime-local" id="end" aria-label="结束时间" />
+            </div>
+            <button
+              type="button"
+              class="button"
+              id="apply-range"
+              aria-label="应用时间筛选"
+            >
+              应用
+            </button>
+            <label class="entry-field" for="entry"
+              >业务入口<select id="entry" aria-label="业务入口">
+                <option value="all">全部入口</option>
+                <option value="batch">批调度</option>
+                <option value="ordinary">普通调度</option>
+                <option value="manual">手动执行</option>
+                <option value="retry">失败补跑</option>
+              </select></label
+            >
+          </div>
+          <p id="range-error" class="inline-error" role="alert" hidden></p>
+          <div class="category-bar">
+            <div
+              id="categories"
+              class="category-tabs"
+              aria-label="事件类型"
+            ></div>
+            <span id="result-count" class="result-count"></span>
+          </div>
+          <div id="event-list" class="event-list"></div>
+          <div id="empty-range" class="empty-state compact" hidden>
+            <svg><use href="#i-clock" /></svg>
+            <h3>该时间范围内暂无记录</h3>
+            <p>
+              可扩大时间范围或切换事件类型。没有记录不代表任务未触发或未执行。
+            </p>
+            <button type="button" class="button" id="show-seven">
+              查看近7天
+            </button>
+          </div>
+          <footer class="timeline-foot">
+            <span
+              ><span class="tiny-dot"></span
+              >仅查询已有记录，不触发任务执行或修改已读状态</span
+            ><span>演示时间：2026-10-28 09:06</span>
+          </footer>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

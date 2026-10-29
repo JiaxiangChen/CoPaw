@@ -3,6 +3,7 @@ import CronOverviewPage from "./CronOverview";
 import CronBatchDispatchPage from "./CronBatchDispatch";
 import ManagedBatchDispatchPage from "./ManagedBatchDispatch";
 import TaskCenterPage from "./TaskCenter";
+import CronTaskTracking from "./CronTaskTracking";
 
 export default function MonitorPage() {
   return (
@@ -15,6 +16,7 @@ export default function MonitorPage() {
         element={<ManagedBatchDispatchPage />}
       />
       <Route path="/tasks" element={<TaskCenterPage />} />
+      <Route path="/cron-task-tracking" element={<CronTaskTracking />} />
     </Routes>
   );
 }

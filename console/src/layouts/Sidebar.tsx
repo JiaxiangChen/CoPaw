@@ -330,6 +330,12 @@ export default function Sidebar({
             path: "/monitor/cron-batch-dispatch-new",
             label: t("nav.monitorCronBatchDispatchNew", "批调度看板（新）"),
           },
+          {
+            key: "monitor-cron-task-tracking",
+            icon: <SparkSearchLine size={18} />,
+            path: "/monitor/cron-task-tracking",
+            label: t("nav.monitorCronTaskTracking", "定时任务追踪"),
+          },
         ]
       : []),
     {
@@ -572,6 +578,13 @@ export default function Sidebar({
                   ? null
                   : t("nav.monitorCronBatchDispatchNew", "批调度看板（新）"),
                 icon: <SparkRefreshLine size={16} />,
+              },
+              {
+                key: "monitor-cron-task-tracking",
+                label: collapsed
+                  ? null
+                  : t("nav.monitorCronTaskTracking", "定时任务追踪"),
+                icon: <SparkSearchLine size={16} />,
               },
             ]
           : []),
