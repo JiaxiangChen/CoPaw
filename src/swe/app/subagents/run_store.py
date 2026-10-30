@@ -29,6 +29,23 @@ from .models import (
 )
 from .models import DelegationSpec
 
+_GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
+
+
+def _sanitize_failed_result(result: AgentResult | None) -> AgentResult | None:
+    if result is None:
+        return None
+    return result.model_copy(
+        update={
+            "status": "failed",
+            "summary": _GENERIC_FAILURE_MESSAGE,
+            "errors": [
+                error.model_copy(update={"message": _GENERIC_FAILURE_MESSAGE})
+                for error in result.errors
+            ],
+        },
+    )
+
 
 class SubAgentRunStore(Protocol):
     """Replaceable lifecycle store interface for SubAgent runs."""
@@ -116,6 +133,12 @@ class InMemorySubAgentRunStore:
         result: AgentResult,
     ) -> SubAgentRunRecord:
         """Store terminal successful or partial result."""
+        if result.status == "failed":
+            return await self.fail(
+                run_id,
+                _GENERIC_FAILURE_MESSAGE,
+                result=result,
+            )
         record = self.records[run_id].model_copy(
             update={
                 "status": result.status,
@@ -134,13 +157,14 @@ class InMemorySubAgentRunStore:
         result: AgentResult | None = None,
     ) -> SubAgentRunRecord:
         """Store terminal failure with structured error."""
+        result = _sanitize_failed_result(result)
         errors = (
             list(result.errors)
             if result and result.errors
             else [
                 AgentError(
                     code="runtime_error",
-                    message=message,
+                    message=_GENERIC_FAILURE_MESSAGE,
                     recoverable=False,
                 ),
             ]
@@ -390,6 +414,12 @@ class PerRunSubAgentRunStore:
         result: AgentResult,
     ) -> BackgroundSubAgentRunRecord:
         """Store a terminal completed or partial result."""
+        if result.status == "failed":
+            return await self.fail(
+                run_id,
+                _GENERIC_FAILURE_MESSAGE,
+                result=result,
+            )
         async with self._update_lock(run_id):
             record = self._require(run_id)
             if record.status in TERMINAL_BACKGROUND_RUN_STATUSES:
@@ -420,13 +450,14 @@ class PerRunSubAgentRunStore:
             if record.status in TERMINAL_BACKGROUND_RUN_STATUSES:
                 return record
             now = _now_utc()
+            result = _sanitize_failed_result(result)
             errors = (
                 list(result.errors)
                 if result and result.errors
                 else [
                     AgentError(
                         code=error_code,
-                        message=message,
+                        message=_GENERIC_FAILURE_MESSAGE,
                         recoverable=False,
                     ),
                 ]

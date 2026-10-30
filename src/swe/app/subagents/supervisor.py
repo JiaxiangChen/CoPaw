@@ -53,6 +53,7 @@ from .run_store import PerRunSubAgentRunStore
 
 _CONCURRENCY_LIMIT_REASON = "background_subagent_concurrency_limit"
 _WORKER_EXITED_WITHOUT_RESULT = "worker_exited_without_result"
+_GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
 logger = logging.getLogger(__name__)
 
 
@@ -348,7 +349,7 @@ class BackgroundSubAgentSupervisor:
                     skill_snapshot_signatures=skill_snapshot_signatures,
                     skill_snapshot_dirs=parent_skill_snapshot_dirs,
                 )
-        except OSError as exc:
+        except OSError:
             record = await store.create(
                 spec,
                 definition,
@@ -361,7 +362,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_snapshot_failed",
             )
         try:
@@ -373,7 +374,7 @@ class BackgroundSubAgentSupervisor:
                     definition=definition,
                 )
             )
-        except (OSError, ModelLaunchSnapshotError) as exc:
+        except (OSError, ModelLaunchSnapshotError):
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -392,7 +393,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_snapshot_failed",
             )
         diagnostics = diagnostics.model_copy(
@@ -462,7 +463,7 @@ class BackgroundSubAgentSupervisor:
         )
         try:
             self._write_launch_spec(launch_path, launch_spec)
-        except Exception as exc:
+        except Exception:
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -475,7 +476,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_launch_spec_failed",
             )
         command = [
@@ -487,7 +488,7 @@ class BackgroundSubAgentSupervisor:
         ]
         try:
             process = self._start_process(command, stderr_log_path)
-        except Exception as exc:
+        except Exception:
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -500,7 +501,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_start_failed",
             )
         active[record.run_id] = _ActiveRun(

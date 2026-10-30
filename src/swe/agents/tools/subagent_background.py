@@ -447,12 +447,12 @@ def _create_get_subagent_tool(
         include_details: bool = False,
     ) -> ToolResponse:
         """Fetch one Background SubAgent Run in the current scope."""
-        record = await _resolve_chat_nickname(context, nickname)
-        if record is None:
-            return _json_response(
-                {"status": "not_found", "nickname": nickname},
-            )
         try:
+            record = await _resolve_chat_nickname(context, nickname)
+            if record is None:
+                return _json_response(
+                    {"status": "not_found", "nickname": nickname},
+                )
             current = await context.supervisor.get(
                 context.tool_scope,
                 record.run_id,
@@ -481,12 +481,12 @@ def _create_cancel_subagent_tool(
 
     async def cancel_subagent(nickname: str) -> ToolResponse:
         """Cancel one active Background SubAgent Run in the current scope."""
-        record = await _resolve_chat_nickname(context, nickname)
-        if record is None:
-            return _json_response(
-                {"status": "not_found", "nickname": nickname},
-            )
         try:
+            record = await _resolve_chat_nickname(context, nickname)
+            if record is None:
+                return _json_response(
+                    {"status": "not_found", "nickname": nickname},
+                )
             result = await context.supervisor.cancel(
                 context.tool_scope,
                 record.run_id,
@@ -754,6 +754,8 @@ def _compact_failure_without_result(record: Any) -> dict[str, str] | None:
 
 
 def _compact_agent_result(result: Any) -> dict[str, Any]:
+    if getattr(result, "status", None) == "failed":
+        return {"summary": "SubAgent execution failed."}
     payload = {"summary": result.summary}
     errors = getattr(result, "errors", []) or []
     if any(

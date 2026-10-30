@@ -1524,7 +1524,9 @@ async def test_worker_exception_writes_failed(monkeypatch, tmp_path):
             self.store = store
 
         async def run(self, **kwargs):
-            raise RuntimeError("provider unavailable")
+            raise RuntimeError(
+                "run_id=subagent-secret path=/private/secret.log token=top-secret",
+            )
 
     launch_path, run_id, run_store_dir = await _write_launch_spec(tmp_path)
     monkeypatch.setattr(worker_module, "SubAgentRuntime", RaisingRuntime)
@@ -1536,4 +1538,5 @@ async def test_worker_exception_writes_failed(monkeypatch, tmp_path):
     assert record is not None
     assert record.status == "failed"
     assert record.errors
-    assert "provider unavailable" in record.errors[-1].message
+    assert record.errors[-1].code == "worker_runtime_error"
+    assert record.errors[-1].message == "SubAgent execution failed."

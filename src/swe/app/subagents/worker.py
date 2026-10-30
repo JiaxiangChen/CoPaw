@@ -22,6 +22,8 @@ from .models import SubAgentRunRecord, WorkerLaunchSpec
 from .run_store import PerRunSubAgentRunStore
 from .runtime import SubAgentRuntime
 
+_GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
+
 
 def load_launch_spec(path: Path) -> WorkerLaunchSpec:
     """Load and validate a worker launch spec from disk."""
@@ -121,10 +123,10 @@ async def run_worker(launch_spec_path: Path) -> int:
                 await _cleanup_mcp_clients(mcp_clients)
         await store.finish(launch_spec.run_id, result)
         return 0
-    except Exception as exc:
+    except Exception:
         await store.fail(
             launch_spec.run_id,
-            str(exc),
+            _GENERIC_FAILURE_MESSAGE,
             error_code="worker_runtime_error",
         )
         return 1

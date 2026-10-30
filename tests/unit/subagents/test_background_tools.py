@@ -1237,6 +1237,106 @@ async def test_failed_record_summary_does_not_leak_persisted_error_details(
 
 
 @pytest.mark.asyncio
+async def test_failed_agent_result_projection_redacts_raw_summary_and_errors(
+    tmp_path,
+):
+    run_store_dir = tmp_path / "runs"
+    definition = _enable_agent_definition(tmp_path).definition
+    store = PerRunSubAgentRunStore(run_store_dir)
+    record = await store.create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Inspect",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+    raw_failure = AgentResult(
+        task_id="task-1",
+        agent_run_id=record.run_id,
+        agent_name="plan-researcher",
+        status="failed",
+        summary=(
+            "run_id=subagent-secret pid=421 worker=/private/secret.log "
+            "api_key=top-secret"
+        ),
+        errors=[
+            AgentError(
+                code="runtime_error",
+                message="token=top-secret process=421 path=/private/secret.log",
+            ),
+        ],
+    )
+    failed = record.model_copy(
+        update={"status": "failed", "result": raw_failure},
+    )
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(get=_AsyncReturn(failed)),
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+    )
+
+    payload = json.loads(
+        (await tools["get_subagent"]("研究员")).content[0]["text"],
+    )
+
+    assert payload["result"] == {"summary": "SubAgent execution failed."}
+    rendered = json.dumps(payload)
+    for private_value in (
+        "subagent-secret",
+        "pid",
+        "worker",
+        "/private/secret.log",
+        "top-secret",
+    ):
+        assert private_value not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
+async def test_nickname_resolution_errors_return_safe_failure(
+    tmp_path,
+    monkeypatch,
+    method,
+):
+    def corrupt_lookup(*_args, **_kwargs):
+        raise RuntimeError(
+            "run_id=subagent-secret pid=421 worker=/private/secret.log",
+        )
+
+    monkeypatch.setattr(
+        "swe.agents.tools.subagent_background.read_chat_run_by_nickname",
+        corrupt_lookup,
+    )
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(),
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={"tenant_id": "tenant-1", "agent_id": "agent-1"},
+    )
+
+    payload = json.loads(
+        (await tools[method]("研究员")).content[0]["text"],
+    )
+
+    assert payload == {
+        "status": "failed",
+        "reason": "subagent_operation_failed",
+        "nickname": "研究员",
+    }
+
+
+@pytest.mark.asyncio
 async def test_cancel_not_manageable_returns_persisted_safe_projection(
     tmp_path,
 ):
