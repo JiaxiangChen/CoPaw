@@ -163,24 +163,6 @@ async def stream_agent_turns(
                 continue
             yield msg, last
     except PreToolUseTerminalStop as exc:
-        request_context = getattr(runtime.agent, "_request_context", {}) or {}
-        cancel_selected_expert = getattr(
-            runtime.agent,
-            "_cancel_selected_expert_run",
-            None,
-        )
-        if request_context.get("selected_expert_execution") and callable(
-            cancel_selected_expert,
-        ):
-            try:
-                await cancel_selected_expert()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.warning(
-                    "Failed to cancel selected expert after terminal hook stop",
-                    exc_info=True,
-                )
         consume_terminal_stop = getattr(
             runtime.agent,
             "consume_pre_tool_terminal_stop",

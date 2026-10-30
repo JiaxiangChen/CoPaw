@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import fcntl
+import hashlib
 import json
 import logging
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -37,6 +41,7 @@ from .models import (
 )
 from .launch_snapshot import (
     ModelLaunchSnapshotError,
+    _ensure_private_run_store_dir,
     capture_launch_dependencies,
     capture_model_launch_snapshot,
     remove_launch_skill_snapshot,
@@ -45,13 +50,16 @@ from .session_dependencies import (
     capture_community_expert_session_dependencies,
     resolve_community_expert_dependency_view,
 )
-from .nicknames import assign_subagent_nickname
+from .nicknames import allocate_subagent_nickname, assign_subagent_nickname
+from .run_access import read_chat_run_records
 from .permissions import build_definition_policy, compose_effective_policy
 from .registry import AgentRegistry
 from .run_store import PerRunSubAgentRunStore
 
 _CONCURRENCY_LIMIT_REASON = "background_subagent_concurrency_limit"
 _WORKER_EXITED_WITHOUT_RESULT = "worker_exited_without_result"
+_GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
+_NICKNAME_RESERVATION_STALE_SECONDS = 300
 logger = logging.getLogger(__name__)
 
 
@@ -189,55 +197,255 @@ class BackgroundSubAgentSupervisor:
         definition_match: DefinitionMatchMetadata | None = None,
     ) -> BackgroundSubAgentRunRecord | BackgroundSubAgentStartBlocked:
         """Reserve capacity before any asynchronous launch preparation."""
-        await self._reap_scope(scope)
-        active = self._active_for_scope(scope)
-        starting = self._starting.setdefault(self._scope_key(scope), set())
-        if len(set(active) | starting) >= self._max_running_per_scope:
-            return BackgroundSubAgentStartBlocked(
-                limit=self._max_running_per_scope,
-                active_run_ids=sorted(set(active) | starting),
+        definition = definition or self._registry.resolve(spec.name)
+        nickname, reservation_path, reservation_lease = (
+            await self._reserve_nickname(
+                scope,
+                spec,
+                definition,
             )
-        # No await between the capacity check and reservation: admission is
-        # atomic for concurrent requests on this supervisor's event loop.
-        run_id = f"subagent-{uuid4().hex[:12]}"
-        starting.add(run_id)
+        )
         try:
-            return await self._start_reserved(
-                scope=scope,
-                run_id=run_id,
-                spec=spec,
-                parent_agent_config=parent_agent_config,
-                workspace_dir=workspace_dir,
-                parent_policy=parent_policy,
-                workspace_policy=workspace_policy,
-                runtime_policy=runtime_policy,
-                request_context=request_context,
-                effective_skill_names=effective_skill_names,
-                skill_snapshot_signatures=skill_snapshot_signatures,
-                skill_snapshot_dirs=skill_snapshot_dirs,
-                definition=definition,
-                start_request=start_request,
-                definition_match=definition_match,
-            )
-        except asyncio.CancelledError:
-            if run_id in active:
-                cleanup = asyncio.create_task(self.cancel(scope, run_id))
-                try:
-                    await asyncio.wait_for(asyncio.shield(cleanup), timeout=5)
-                except (Exception, asyncio.CancelledError):
-                    logger.warning(
-                        "background_subagent_start_cancel_unconfirmed run_id=%s",
-                        run_id,
-                    )
-            raise
+            await self._reap_scope(scope)
+            active = self._active_for_scope(scope)
+            starting = self._starting.setdefault(self._scope_key(scope), set())
+            if len(set(active) | starting) >= self._max_running_per_scope:
+                return BackgroundSubAgentStartBlocked(
+                    limit=self._max_running_per_scope,
+                    active_run_ids=sorted(set(active) | starting),
+                )
+            # No await between the capacity check and reservation: admission is
+            # atomic for concurrent requests on this supervisor's event loop.
+            run_id = f"subagent-{uuid4().hex[:12]}"
+            starting.add(run_id)
+            try:
+                return await self._start_reserved(
+                    scope=scope,
+                    run_id=run_id,
+                    nickname=nickname,
+                    spec=spec,
+                    parent_agent_config=parent_agent_config,
+                    workspace_dir=workspace_dir,
+                    parent_policy=parent_policy,
+                    workspace_policy=workspace_policy,
+                    runtime_policy=runtime_policy,
+                    request_context=request_context,
+                    effective_skill_names=effective_skill_names,
+                    skill_snapshot_signatures=skill_snapshot_signatures,
+                    skill_snapshot_dirs=skill_snapshot_dirs,
+                    definition=definition,
+                    start_request=start_request,
+                    definition_match=definition_match,
+                )
+            except asyncio.CancelledError:
+                if run_id in active:
+                    cleanup = asyncio.create_task(self.cancel(scope, run_id))
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(cleanup),
+                            timeout=5,
+                        )
+                    except (Exception, asyncio.CancelledError):
+                        logger.warning(
+                            "background_subagent_start_cancel_unconfirmed run_id=%s",
+                            run_id,
+                        )
+                raise
+            finally:
+                starting.discard(run_id)
         finally:
-            starting.discard(run_id)
+            try:
+                try:
+                    reservation_path.unlink()
+                except FileNotFoundError:
+                    pass
+            finally:
+                os.close(reservation_lease)
+
+    @asynccontextmanager
+    async def _nickname_allocation_lock(
+        self,
+        scope: BackgroundSubAgentScope,
+        parent_thread_id: str,
+    ):
+        """Serialize nickname allocation until its run record is durable."""
+        digest = hashlib.sha256(
+            parent_thread_id.encode("utf-8"),
+        ).hexdigest()[:16]
+        _ensure_private_run_store_dir(scope.run_store_dir)
+        lock_path = scope.run_store_dir / f".nickname-{digest}.lock"
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "a+", encoding="utf-8") as stream:
+            try:
+                while True:
+                    try:
+                        fcntl.flock(
+                            stream.fileno(),
+                            fcntl.LOCK_EX | fcntl.LOCK_NB,
+                        )
+                        break
+                    except BlockingIOError:
+                        await asyncio.sleep(0.01)
+                yield digest
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+    async def _reserve_nickname(
+        self,
+        scope: BackgroundSubAgentScope,
+        spec: DelegationSpec,
+        definition: SubAgentDefinition,
+    ) -> tuple[str, Path, int]:
+        """Persist a Chat-visible reservation before launch preparation awaits."""
+        async with self._nickname_allocation_lock(
+            scope,
+            spec.parent_thread_id,
+        ) as session_digest:
+            chat_context = {
+                "session_id": spec.parent_thread_id,
+                "chat_id": spec.parent_chat_id,
+            }
+            used = {
+                record.nickname
+                for record in read_chat_run_records(
+                    scope.run_store_dir,
+                    chat_context,
+                )
+                if record.nickname
+            }
+            for reservation in self._nickname_reservations(
+                scope,
+                session_digest,
+            ):
+                if reservation["session_id"] != spec.parent_thread_id:
+                    continue
+                reserved_chat_id = reservation["chat_id"]
+                if (
+                    not reserved_chat_id
+                    or not spec.parent_chat_id
+                    or reserved_chat_id == spec.parent_chat_id
+                ):
+                    used.add(reservation["nickname"])
+            nickname = allocate_subagent_nickname(
+                assign_subagent_nickname(definition.nickname),
+                used,
+            )
+            reservation_path = (
+                scope.run_store_dir
+                / f".nickname-reservation-{session_digest}-{uuid4().hex}.json"
+            )
+            reservation_lease = self._write_nickname_reservation(
+                reservation_path,
+                {
+                    "session_id": spec.parent_thread_id,
+                    "chat_id": spec.parent_chat_id,
+                    "nickname": nickname,
+                    "created_at": time.time(),
+                },
+            )
+            return nickname, reservation_path, reservation_lease
+
+    @classmethod
+    def _nickname_reservations(
+        cls,
+        scope: BackgroundSubAgentScope,
+        session_digest: str,
+    ) -> list[dict[str, str]]:
+        reservations = []
+        for path in scope.run_store_dir.glob(
+            f".nickname-reservation-{session_digest}-*.json",
+        ):
+            try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                session_id = str(payload["session_id"])
+                chat_id = str(payload["chat_id"])
+                nickname = str(payload["nickname"])
+            except (OSError, ValueError, KeyError, TypeError):
+                cls._remove_stale_nickname_reservation(path)
+                continue
+            if cls._reservation_is_stale(
+                payload,
+            ) and cls._remove_stale_nickname_reservation(path):
+                continue
+            if session_id and nickname:
+                reservations.append(
+                    {
+                        "session_id": session_id,
+                        "chat_id": chat_id,
+                        "nickname": nickname,
+                    },
+                )
+        return reservations
+
+    @staticmethod
+    def _write_nickname_reservation(
+        path: Path,
+        payload: dict[str, str | int | float],
+    ) -> int:
+        descriptor = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with os.fdopen(
+                os.dup(descriptor),
+                "w",
+                encoding="utf-8",
+            ) as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+            os.fchmod(descriptor, 0o600)
+        except BaseException:
+            os.close(descriptor)
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise
+        return descriptor
+
+    @staticmethod
+    def _reservation_is_stale(payload: Mapping[str, Any]) -> bool:
+        try:
+            created_at = float(payload["created_at"])
+        except (KeyError, TypeError, ValueError):
+            return True
+        return time.time() - created_at >= _NICKNAME_RESERVATION_STALE_SECONDS
+
+    @staticmethod
+    def _remove_stale_nickname_reservation(path: Path) -> bool:
+        """Reclaim an orphan only after acquiring its filesystem lease."""
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            )
+        except OSError:
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path.unlink()
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(descriptor)
 
     async def _start_reserved(
         self,
         *,
         scope: BackgroundSubAgentScope,
         run_id: str,
+        nickname: str,
         spec: DelegationSpec,
         parent_agent_config: AgentProfileConfig,
         workspace_dir: Path,
@@ -265,7 +473,6 @@ class BackgroundSubAgentSupervisor:
         )
         store = PerRunSubAgentRunStore(scope.run_store_dir)
         effective_budget = _effective_budget(definition.budget, spec.budget)
-        nickname = assign_subagent_nickname(definition.nickname)
         parent_skill_snapshot_dirs = skill_snapshot_dirs
         try:
             session_dependency_view = resolve_community_expert_dependency_view(
@@ -305,7 +512,7 @@ class BackgroundSubAgentSupervisor:
                     skill_snapshot_signatures=skill_snapshot_signatures,
                     skill_snapshot_dirs=parent_skill_snapshot_dirs,
                 )
-        except OSError as exc:
+        except OSError:
             record = await store.create(
                 spec,
                 definition,
@@ -318,7 +525,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_snapshot_failed",
             )
         try:
@@ -330,7 +537,7 @@ class BackgroundSubAgentSupervisor:
                     definition=definition,
                 )
             )
-        except (OSError, ModelLaunchSnapshotError) as exc:
+        except (OSError, ModelLaunchSnapshotError):
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -349,7 +556,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_snapshot_failed",
             )
         diagnostics = diagnostics.model_copy(
@@ -419,7 +626,7 @@ class BackgroundSubAgentSupervisor:
         )
         try:
             self._write_launch_spec(launch_path, launch_spec)
-        except Exception as exc:
+        except Exception:
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -432,7 +639,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_launch_spec_failed",
             )
         command = [
@@ -444,7 +651,7 @@ class BackgroundSubAgentSupervisor:
         ]
         try:
             process = self._start_process(command, stderr_log_path)
-        except Exception as exc:
+        except Exception:
             _remove_private_launch_snapshot(
                 private_mcp_snapshot_path,
                 scope.run_store_dir,
@@ -457,7 +664,7 @@ class BackgroundSubAgentSupervisor:
             )
             return await store.fail(
                 record.run_id,
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 error_code="worker_start_failed",
             )
         active[record.run_id] = _ActiveRun(

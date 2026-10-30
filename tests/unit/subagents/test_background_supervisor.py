@@ -6,7 +6,14 @@ from __future__ import annotations
 import signal
 import json
 import asyncio
+import fcntl
+import hashlib
+import os
 from pathlib import Path
+import subprocess
+import sys
+import time
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -761,3 +768,519 @@ async def test_start_stops_when_model_snapshot_serialization_fails(
     assert not list(scope.run_store_dir.glob(".*.mcp.json"))
     assert not list(scope.run_store_dir.glob(".*.model.json"))
     assert not list(scope.run_store_dir.glob("*.skills"))
+
+
+@pytest.mark.parametrize(
+    ("used", "expected"),
+    [
+        (set(), "研究员"),
+        ({"研究员"}, "研究员-2"),
+        ({"研究员", "研究员-3"}, "研究员-2"),
+        ({"研究员", "研究员-2", "研究员-3"}, "研究员-4"),
+    ],
+)
+def test_allocate_subagent_nickname_uses_smallest_unused_suffix(
+    used,
+    expected,
+):
+    from swe.app.subagents.nicknames import allocate_subagent_nickname
+
+    assert allocate_subagent_nickname("研究员", used) == expected
+
+
+@pytest.mark.asyncio
+async def test_configured_nickname_remains_unique_after_terminal_run(tmp_path):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(
+            update={"nickname": "研究员"},
+        )
+    )
+    scope = _scope(tmp_path)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec(),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+    first = await supervisor.start(**kwargs)
+    await supervisor.cancel(scope, first.run_id)
+    second = await supervisor.start(**kwargs)
+
+    store = PerRunSubAgentRunStore(scope.run_store_dir)
+    assert (await store.get(first.run_id)).nickname == "研究员"
+    assert (await store.get(second.run_id)).nickname == "研究员-2"
+    assert first.run_id != second.run_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_chat", "second_session", "second_chat", "expected_nicknames"),
+    [
+        ("", "session-1", "", {"研究员", "研究员-2"}),
+        ("", "session-1", "other-chat", {"研究员", "研究员-2"}),
+        ("chat-1", "session-1", "", {"研究员", "研究员-2"}),
+        ("chat-1", "session-1", "other-chat", {"研究员"}),
+        ("", "other-session", "", {"研究员"}),
+    ],
+)
+async def test_concurrent_starts_reserve_nicknames_before_launch(
+    tmp_path,
+    monkeypatch,
+    first_chat,
+    second_session,
+    second_chat,
+    expected_nicknames,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(
+            update={"nickname": "研究员"},
+        )
+    )
+    scope = _scope(tmp_path)
+    entered = 0
+    launch_barrier = asyncio.Event()
+    original_start_reserved = supervisor._start_reserved
+
+    async def start_reserved(
+        *,
+        scope,
+        run_id,
+        nickname,
+        spec,
+        parent_agent_config,
+        workspace_dir,
+        **kwargs,
+    ):
+        nonlocal entered
+        entered += 1
+        assert not list(scope.run_store_dir.glob("subagent-*.json"))
+        if entered == 2:
+            launch_barrier.set()
+        await launch_barrier.wait()
+        return await original_start_reserved(
+            scope=scope,
+            run_id=run_id,
+            nickname=nickname,
+            spec=spec,
+            parent_agent_config=parent_agent_config,
+            workspace_dir=workspace_dir,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(supervisor, "_start_reserved", start_reserved)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec().model_copy(update={"parent_chat_id": first_chat}),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+    records = await asyncio.wait_for(
+        asyncio.gather(
+            supervisor.start(**kwargs),
+            supervisor.start(
+                **{
+                    **kwargs,
+                    "spec": _spec().model_copy(
+                        update={
+                            "parent_thread_id": second_session,
+                            "parent_chat_id": second_chat,
+                        },
+                    ),
+                },
+            ),
+        ),
+        timeout=5,
+    )
+    assert {record.nickname for record in records} == expected_nicknames
+
+
+@pytest.mark.asyncio
+async def test_two_supervisors_allocate_unique_nicknames_in_same_chat(
+    tmp_path,
+):
+    """Separate Supervisor instances share durable nickname reservations."""
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec().model_copy(update={"parent_chat_id": "chat-1"}),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+
+    records = await asyncio.gather(
+        BackgroundSubAgentSupervisor(popen_factory=_FakePopenFactory()).start(
+            **kwargs,
+        ),
+        BackgroundSubAgentSupervisor(popen_factory=_FakePopenFactory()).start(
+            **kwargs,
+        ),
+    )
+
+    assert {record.nickname for record in records} == {"研究员", "研究员-2"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first_chat,second_chat",
+    [("chat-1", ""), ("", "chat-1")],
+)
+async def test_persisted_nickname_records_treat_empty_chat_as_session_wildcard(
+    tmp_path,
+    first_chat,
+    second_chat,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    kwargs = {
+        "scope": scope,
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+
+    first = await supervisor.start(
+        **kwargs,
+        spec=_spec().model_copy(update={"parent_chat_id": first_chat}),
+    )
+    second = await supervisor.start(
+        **kwargs,
+        spec=_spec().model_copy(update={"parent_chat_id": second_chat}),
+    )
+
+    assert first.nickname == "研究员"
+    assert second.nickname == "研究员-2"
+
+
+@pytest.mark.asyncio
+async def test_nickname_allocation_reclaims_stale_orphan_reservation(tmp_path):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    scope.run_store_dir.mkdir()
+    session_digest = hashlib.sha256(b"session-1").hexdigest()[:16]
+    stale = (
+        scope.run_store_dir
+        / f".nickname-reservation-{session_digest}-orphan.json"
+    )
+    stale.write_text(
+        json.dumps(
+            {
+                "session_id": "session-1",
+                "chat_id": "chat-1",
+                "nickname": "研究员",
+                "created_at": time.time() - 3600,
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    record = await supervisor.start(
+        scope=scope,
+        spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
+        definition=definition,
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+    )
+
+    assert record.nickname == "研究员"
+    assert not stale.exists()
+
+
+@pytest.mark.asyncio
+async def test_nickname_allocation_keeps_aged_reservation_with_live_lease(
+    tmp_path,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    scope.run_store_dir.mkdir()
+    session_digest = hashlib.sha256(b"session-1").hexdigest()[:16]
+    reservation = (
+        scope.run_store_dir
+        / f".nickname-reservation-{session_digest}-live.json"
+    )
+    reservation.write_text(
+        json.dumps(
+            {
+                "session_id": "session-1",
+                "chat_id": "chat-1",
+                "nickname": "研究员",
+                "owner_pid": 99999999,
+                "created_at": time.time() - 3600,
+            },
+        ),
+        encoding="utf-8",
+    )
+    lease = os.open(reservation, os.O_RDONLY)
+    fcntl.flock(lease, fcntl.LOCK_EX)
+    try:
+        record = await supervisor.start(
+            scope=scope,
+            spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
+            definition=definition,
+            parent_agent_config=_agent_config(tmp_path),
+            workspace_dir=tmp_path,
+        )
+
+        assert record.nickname == "研究员-2"
+        assert reservation.exists()
+    finally:
+        fcntl.flock(lease, fcntl.LOCK_UN)
+        os.close(lease)
+        reservation.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_nickname_reservation_rejects_symlinked_run_store(tmp_path):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    scope = _scope(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    scope.run_store_dir.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        await supervisor.start(
+            scope=scope,
+            spec=_spec(),
+            parent_agent_config=_agent_config(tmp_path),
+            workspace_dir=tmp_path,
+        )
+
+    assert not list(outside.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_other_session_keeps_reservation_while_it_is_being_written(
+    tmp_path,
+    monkeypatch,
+):
+    supervisor = BackgroundSubAgentSupervisor()
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    write_started = threading.Event()
+    continue_write = threading.Event()
+    original_dump = json.dump
+
+    def paused_dump(payload, stream, **kwargs):
+        if payload.get("session_id") == "session-1":
+            write_started.set()
+            assert continue_write.wait(timeout=5)
+        return original_dump(payload, stream, **kwargs)
+
+    monkeypatch.setattr(json, "dump", paused_dump)
+
+    def reserve_first():
+        return asyncio.run(
+            supervisor._reserve_nickname(scope, _spec(), definition),
+        )
+
+    first_task = asyncio.create_task(asyncio.to_thread(reserve_first))
+    try:
+        assert await asyncio.to_thread(write_started.wait, 5)
+        first_path = next(
+            scope.run_store_dir.glob(".nickname-reservation-*.json"),
+        )
+        second = await supervisor._reserve_nickname(
+            scope,
+            _spec().model_copy(update={"parent_thread_id": "session-2"}),
+            definition,
+        )
+        first_exists_during_write = first_path.exists()
+    finally:
+        continue_write.set()
+        first = (await asyncio.gather(first_task, return_exceptions=True))[0]
+
+    assert first_exists_during_write
+    assert first[:2] == ("研究员", first_path)
+    assert second[0] == "研究员"
+    assert first_path.exists()
+    assert second[1].exists()
+    os.close(first[2])
+    os.close(second[2])
+
+
+@pytest.mark.asyncio
+async def test_nickname_allocation_keeps_old_reservation_while_lease_is_held(
+    tmp_path,
+):
+    supervisor = BackgroundSubAgentSupervisor()
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    _, reservation, owner_lease = await supervisor._reserve_nickname(
+        scope,
+        _spec(),
+        definition,
+    )
+    payload = json.loads(reservation.read_text(encoding="utf-8"))
+    payload["created_at"] = time.time() - 3600
+    reservation.write_text(json.dumps(payload), encoding="utf-8")
+    try:
+        nickname, _, other_lease = await supervisor._reserve_nickname(
+            scope,
+            _spec(),
+            definition,
+        )
+        try:
+            assert nickname == "研究员-2"
+            assert reservation.exists()
+        finally:
+            os.close(other_lease)
+    finally:
+        os.close(owner_lease)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "failure", "cancelled", "blocked"],
+)
+async def test_start_holds_nickname_lease_until_every_exit_path(
+    tmp_path,
+    monkeypatch,
+    outcome,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        max_running_per_scope=0 if outcome == "blocked" else 2,
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    leases = []
+    original_write = supervisor._write_nickname_reservation
+
+    def capture_lease(path, payload):
+        descriptor = original_write(path, payload)
+        leases.append(descriptor)
+        return descriptor
+
+    async def pause_reap(_scope):
+        entered.set()
+        await release.wait()
+        if outcome == "failure":
+            raise RuntimeError("launch preparation failed")
+
+    monkeypatch.setattr(
+        supervisor,
+        "_write_nickname_reservation",
+        capture_lease,
+    )
+    monkeypatch.setattr(supervisor, "_reap_scope", pause_reap)
+    task = asyncio.create_task(
+        supervisor.start(
+            scope=scope,
+            spec=_spec(),
+            definition=definition,
+            parent_agent_config=_agent_config(tmp_path),
+            workspace_dir=tmp_path,
+        ),
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        reservation = next(
+            scope.run_store_dir.glob(".nickname-reservation-*.json"),
+        )
+        payload = json.loads(reservation.read_text(encoding="utf-8"))
+        payload["created_at"] = time.time() - 3600
+        reservation.write_text(json.dumps(payload), encoding="utf-8")
+        await _assert_aged_reservation_remains_occupied(
+            scope,
+            definition,
+            reservation,
+        )
+        if outcome == "cancelled":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            if outcome == "failure":
+                with pytest.raises(
+                    RuntimeError,
+                    match="launch preparation failed",
+                ):
+                    await task
+            else:
+                result = await task
+                if outcome == "blocked":
+                    assert isinstance(result, BackgroundSubAgentStartBlocked)
+                else:
+                    assert result.nickname == "研究员"
+        assert not reservation.exists()
+        with pytest.raises(OSError):
+            os.fstat(leases[0])
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def _assert_aged_reservation_remains_occupied(
+    scope,
+    definition,
+    reservation,
+):
+    observer = BackgroundSubAgentSupervisor()
+    nickname, other_path, other_lease = await observer._reserve_nickname(
+        scope,
+        _spec(),
+        definition,
+    )
+    try:
+        assert nickname == "研究员-2"
+        assert reservation.exists()
+    finally:
+        other_path.unlink()
+        os.close(other_lease)

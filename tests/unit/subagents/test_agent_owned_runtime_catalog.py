@@ -57,8 +57,7 @@ async def test_start_subagent_resolves_enabled_agent_owned_package(
     )
 
     response = await tools["start_subagent"](
-        name="code-reviewer",
-        instruction="Do not override the configured instruction.",
+        expert_name="code-reviewer",
         objective="Review this change.",
     )
 

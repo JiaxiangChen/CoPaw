@@ -925,7 +925,11 @@ async def test_runtime_records_failure_as_application_result(
     from swe.app.subagents import runtime as runtime_module
 
     _FakeSWEAgent.instances = []
-    _FakeSWEAgent.replies = [RuntimeError("model failed")]
+    _FakeSWEAgent.replies = [
+        RuntimeError(
+            "run_id=subagent-secret pid=421 path=/private/secret.log token=top-secret",
+        ),
+    ]
     monkeypatch.setattr(runtime_module, "SWEAgent", _FakeSWEAgent)
     registry = AgentRegistry([builtin_definition_provider()])
     definition = registry.resolve("plan-researcher")
@@ -946,7 +950,9 @@ async def test_runtime_records_failure_as_application_result(
     )
 
     assert result.status == "failed"
+    assert result.summary == "SubAgent execution failed."
     assert result.errors
+    assert result.errors[0].message == "SubAgent execution failed."
     saved = await store.get(record.run_id)
     assert saved is not None
     assert saved.status == "failed"

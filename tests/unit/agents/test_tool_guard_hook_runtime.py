@@ -443,7 +443,9 @@ async def test_tool_guard_pending_extra_includes_request_scope_ids(
     assert agent.printed[0].content[0]["_swe_tool_governance"] == "pending"
     assert agent.printed[0].metadata[
         TOOL_GOVERNANCE_MESSAGE_METADATA_FIELD
-    ] == {"tool-1": "pending"}
+    ] == {
+        "tool-1": "pending",
+    }
     assert extra["chat_id"] == "chat-a"
     assert extra["msgid"] == "msg-a"
 
@@ -1246,143 +1248,6 @@ async def test_approved_pre_tool_hook_ask_replay_executes_once(
 
 
 @pytest.mark.asyncio
-async def test_selected_expert_hook_approval_resumes_only_original_wait(
-    tmp_path,
-) -> None:
-    from agentscope.tool import Toolkit
-
-    from swe.agents.tools.subagent_background import (
-        create_background_subagent_tools,
-    )
-    from swe.app.runner.runner import (
-        AgentRunner,
-        _approved_tool_call_from_record,
-    )
-    from swe.app.subagents import (
-        DelegationSpec,
-        PerRunSubAgentRunStore,
-        PermissionPolicy,
-        SubAgentDefinition,
-    )
-    from swe.config.config import AgentProfileConfig
-
-    store = PerRunSubAgentRunStore(tmp_path / "runs")
-    record = await store.create(
-        DelegationSpec(
-            parent_thread_id="session-1",
-            parent_chat_id="chat-1",
-            name="researcher",
-            objective="Inspect",
-        ),
-        SubAgentDefinition(
-            name="researcher",
-            description="Test",
-            instruction="Inspect",
-            source="run_scoped",
-            owner_scope="run:tenant-1:agent-1",
-        ),
-        PermissionPolicy.readonly(),
-    )
-    await store.cancel(record.run_id)
-    agent = _FakeAgent(tmp_path)
-    agent._request_context.update(
-        {
-            "tenant_id": "tenant-1",
-            "chat_id": "chat-1",
-            "selected_expert_id": "expert-1",
-            "selected_expert_execution": True,
-            "selected_expert_run_id": record.run_id,
-            "_selected_expert_wait_authorized": True,
-        },
-    )
-    approval_service = _RecordingApprovalService()
-    agent._tool_guard_approval_service = approval_service
-    agent._notify_approval_pending = AsyncMock()
-    hook_result = MergedHookResult(
-        decision=HookDecision.ASK,
-        permission_decisions=[
-            HookPermissionDecision(
-                handler_id="hook-a",
-                decision=HookDecision.ASK,
-                reason="review wait",
-            ),
-        ],
-    )
-    agent._emit_tool_hook = AsyncMock(return_value=hook_result)
-    wait_call = agent._selected_expert_wait_tool_call()
-    await agent._acting(wait_call)
-    assert approval_service.create_pending_kwargs is not None
-    pending_kwargs = approval_service.create_pending_kwargs
-    assert pending_kwargs is not None
-    approved = _approved_tool_call_from_record(
-        SimpleNamespace(
-            request_id="approval-1",
-            **pending_kwargs,
-        ),
-    )
-
-    class BudgetedAgent(_FakeAgent, ToolOutputBudgetMixin, _BaseAgent):
-        # Put the output budget between ToolGuardMixin and the base executor.
-        finish_function_name = "finish"
-
-    resumed = BudgetedAgent(tmp_path)
-    resumed._agent_config = SimpleNamespace(
-        running=SimpleNamespace(
-            tool_result_compact=ToolResultCompactConfig(),
-        ),
-    )
-    resumed._request_context.update(
-        {
-            "tenant_id": "tenant-1",
-            "chat_id": "chat-1",
-            "_subagent_run_store_dir": str(tmp_path / "runs"),
-        },
-    )
-    runner = AgentRunner(agent_id="agent-1", workspace_dir=tmp_path)
-    runner.tenant_id = "tenant-1"
-    runner._apply_selected_expert_context(
-        request_context=resumed._request_context,
-        selected_expert_id="expert-1",
-        chat=SimpleNamespace(id="chat-1"),
-        objective="/approve",
-        approved_tool_call=approved,
-    )
-    supervisor = SimpleNamespace(
-        start=AsyncMock(),
-        reap_run=AsyncMock(),
-        cancel=AsyncMock(),
-    )
-    tools = create_background_subagent_tools(
-        supervisor=supervisor,
-        parent_agent_config=AgentProfileConfig(id="agent-1", name="Main"),
-        workspace_dir=tmp_path,
-        request_context=resumed._request_context,
-        selected_expert_id="expert-1",
-    )
-    executed = []
-
-    async def wait_selected_expert():
-        executed.append("wait_selected_expert")
-        return await tools["wait_selected_expert"]()
-
-    resumed.toolkit = Toolkit()
-    resumed.toolkit.register_tool_function(wait_selected_expert)
-    resumed._emit_tool_hook = AsyncMock(return_value=hook_result)
-    resumed._acting_with_approval = AsyncMock()
-    message = await resumed._reasoning()
-    await resumed._acting(message.get_content_blocks("tool_use")[0])
-    assert await resumed._reason_about_replay_done() is None
-    assert executed == ["wait_selected_expert"]
-    assert resumed._request_context["selected_expert_run_id"] == record.run_id
-    assert resumed._request_context["selected_expert_execution"] is False
-    assert not resumed._request_context.get(
-        "_selected_expert_wait_authorized",
-    )
-    resumed._acting_with_approval.assert_not_awaited()
-    supervisor.start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_pre_tool_prompt_allow_does_not_bypass_tool_guard(
     monkeypatch,
     tmp_path,
@@ -1472,7 +1337,9 @@ async def test_unsafe_guard_finding_auto_denies_without_approval_context(
     assert agent.printed[0].content[0]["_swe_tool_governance"] == "blocked"
     assert agent.printed[0].metadata[
         TOOL_GOVERNANCE_MESSAGE_METADATA_FIELD
-    ] == {"tool-1": "blocked"}
+    ] == {
+        "tool-1": "blocked",
+    }
 
 
 @pytest.mark.asyncio
@@ -1673,7 +1540,10 @@ async def test_post_tool_hook_stop_preserves_success_then_raises(
     assert agent.printed == []
     assert [
         call.args[0] for call in agent._emit_tool_hook.await_args_list
-    ] == [HookEventName.PRE_TOOL_USE, HookEventName.POST_TOOL_USE]
+    ] == [
+        HookEventName.PRE_TOOL_USE,
+        HookEventName.POST_TOOL_USE,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1715,7 +1585,10 @@ async def test_preapproved_guarded_tool_runs_post_hook_and_honors_stop(
 
     assert [
         call.args[0] for call in agent._emit_tool_hook.await_args_list
-    ] == [HookEventName.PRE_TOOL_USE, HookEventName.POST_TOOL_USE]
+    ] == [
+        HookEventName.PRE_TOOL_USE,
+        HookEventName.POST_TOOL_USE,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1760,7 +1633,10 @@ async def test_preapproved_guarded_tool_runs_failure_hook_and_honors_stop(
 
     assert [
         call.args[0] for call in agent._emit_tool_hook.await_args_list
-    ] == [HookEventName.PRE_TOOL_USE, HookEventName.POST_TOOL_USE_FAILURE]
+    ] == [
+        HookEventName.PRE_TOOL_USE,
+        HookEventName.POST_TOOL_USE_FAILURE,
+    ]
 
 
 @pytest.mark.asyncio
@@ -1864,7 +1740,10 @@ async def test_post_tool_failure_hook_stop_replaces_original_error(
     )
     assert [
         call.args[0] for call in agent._emit_tool_hook.await_args_list
-    ] == [HookEventName.PRE_TOOL_USE, HookEventName.POST_TOOL_USE_FAILURE]
+    ] == [
+        HookEventName.PRE_TOOL_USE,
+        HookEventName.POST_TOOL_USE_FAILURE,
+    ]
 
 
 @pytest.mark.asyncio

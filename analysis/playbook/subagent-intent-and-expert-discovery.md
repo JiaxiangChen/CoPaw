@@ -2,7 +2,7 @@
 
 ## 工具没有出现
 
-先区分启动权限与管理权限。当前真实用户文本命中“子代理”“子智能体”“subagent”“sub-agent”，或结构化 `enable_subagents=true`，才开放新启动。英文忽略大小写，历史、工具结果及模型生成的 Contract 不产生授权。关闭专家主执行开关时，显式 `selected_expert_id` 是独立且排他的单轮 SubAgent 入口；开启后的普通 Chat 使用服务端持久专家绑定。
+先区分启动权限与管理权限。当前真实用户文本命中“子代理”“子智能体”“subagent”“sub-agent”，或结构化 `enable_subagents=true`，才开放新启动。英文忽略大小写，历史、工具结果及模型生成的 Contract 不产生授权。关闭专家主执行开关时，显式 `selected_expert_id` 是独立且排他的单轮 SubAgent 入口，只过滤可启动目录，由 Main 决定是否启动；开启后的普通 Chat 使用服务端持久专家绑定。
 
 ## 专家主执行与绑定冲突
 
@@ -25,6 +25,13 @@
 
 普通异步 Query 在 `_prepare_query_agent_context` 的 worker 中扫描保留记录，再在事件循环安装工具。不要将文件扫描移回 Agent 构造。刷新必须清除预读缓存；Goal 的工具刷新也在 worker 执行。回归入口为 `test_event_loop_request_preparation.py` 与 `test_chat_runtime_access.py`。
 
+## 昵称控制、等待与错误
+
+- Main 使用 `start_subagent(expert_name, objective, background="")` 选择目录中的专家，使用返回的 `nickname` 调用 get/cancel；不再传 `name`、`instruction` 或内部 `run_id`。选中专家只缩小目录，不强制启动、等待或接管本轮回复。协议入口为 [subagent_background.py](../../src/swe/agents/tools/subagent_background.py)，回归为 [test_background_tools.py](../../tests/unit/subagents/test_background_tools.py)。
+- 昵称在当前 Chat 的保留记录范围内唯一，同名依次分配 `研究员`、`研究员-2` 等，终态记录仍占用昵称。查不到昵称时先核对 tenant/Profile、逻辑 session、Chat ID 与保留记录；跨 Chat 或重复匹配均不解析。分配与跨进程预留入口为 [nicknames.py](../../src/swe/app/subagents/nicknames.py)、[supervisor.py](../../src/swe/app/subagents/supervisor.py)，归属解析为 [run_access.py](../../src/swe/app/subagents/run_access.py)。
+- `wait_subagent(nicknames=[...], timeout_ms=...)` 等待指定组全部终态；其他运行完成不会提前结束。超时返回最新状态及 `timed_out: true`，不会取消运行。省略 nicknames 使用 Chat 级监控；空数组为 `invalid_request`，未知昵称在等待前返回 `not_found`。回归入口为 [test_chat_runtime_access.py](../../tests/unit/subagents/test_chat_runtime_access.py)。
+- 模型侧失败只返回通用错误，不能依赖原始异常文本；终态失败记录的通用消息为 `SubAgent execution failed.`。排查原始原因请查内部运行日志与 worker stderr，勿将内部 ID 或异常重新拼进工具响应。存储及错误投影入口为 [run_store.py](../../src/swe/app/subagents/run_store.py)、[runtime.py](../../src/swe/app/subagents/runtime.py) 与工具适配器。
+
 ## 社区专家依赖与并发首次启动
 
 每个 Chat/专家使用独立冻结视图，每次启动使用自己的 context 副本。不要将专家绑定 Skill/MCP 注册到父 Agent 通用目录。
@@ -41,8 +48,8 @@
 
 ## 新会话首条消息未携带手选专家
 
-2026-10-28 诊断：两个 Source 开关均关闭时，普通 Chat 的手动专家选择仍应通过 `selected_expert_id` 强制启动对应 SubAgent；无需正文关键词授权。不要用开启自主发现作为补救。
+2026-10-28 诊断：两个 Source 开关均关闭时，普通 Chat 的手动专家选择仍应通过 `selected_expert_id` 提供对应 SubAgent 目录；无需正文关键词授权。2026-10-30 起由 Main 自主决定是否启动，不再强制执行。不要用开启自主发现作为补救。
 
 原 Console 存在首次发送时序缺口：`Chat/index.tsx` 的 `beforeSubmit` 仅快照专家绑定修订，没有快照 legacy 手选专家 ID；`useChatController.submitTurn` 在请求前执行 `ensureSession`，新建会话改变 `activeSessionId`；页面依赖该 ID 的 effect 清空 `legacySelectedExpertId`，而 `useChatRequest` 使用最新 `apiOptionsRef` 中的 fetch。随后 `customFetch` 从已清空的状态构造请求，省略 `selected_expert_id`，后端按默认 Agent 执行。
 
-已修复：`beforeSubmit` 将本轮手选专家 ID 冻结到提交参数；`customFetch` 优先使用该快照。会话创建和临时 ID 解析登记为同一选择范围的别名，避免误清空；发送后保留选择及输入框下方名称，后续消息继续提交该专家，切换其他会话/Profile、手动取消或进入 Plan/Goal 时清除。回归测试 `index.test.tsx` 的 `keeps a manual expert visible through new-chat creation, resolution, and repeated submissions` 覆盖首次发送、ID 解析、重复发送和切换会话。后端 `test_runner_auth_token_passthrough.py` 10 项通过，包含显式专家强制启动。定位实际会话仍应核对 `/console/chat` 请求字段及是否进入 Plan/Goal；此复现不代表所有未调用专家的会话均为同一原因。修复应在提交时冻结本轮选择并贯穿会话创建，保留切换其他会话时清空选择的行为。
+已修复：`beforeSubmit` 将本轮手选专家 ID 冻结到提交参数；`customFetch` 优先使用该快照。会话创建和临时 ID 解析登记为同一选择范围的别名，避免误清空；发送后保留选择及输入框下方名称，后续消息继续提交该专家，切换其他会话/Profile、手动取消或进入 Plan/Goal 时清除。回归测试 `index.test.tsx` 的 `keeps a manual expert visible through new-chat creation, resolution, and repeated submissions` 覆盖首次发送、ID 解析、重复发送和切换会话。后端回归入口为 `test_runner_auth_token_passthrough.py`，验证所选专家身份传递与不再注入强制执行标志。定位实际会话仍应核对 `/console/chat` 请求字段及是否进入 Plan/Goal；此复现不代表所有未调用专家的会话均为同一原因。修复应在提交时冻结本轮选择并贯穿会话创建，保留切换其他会话时清空选择的行为。

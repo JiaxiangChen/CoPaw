@@ -798,7 +798,7 @@ async def test_run_stores_record_status_result_and_errors(
     saved_failed = await local_store.get(failed.run_id)
     assert saved_failed is not None
     assert saved_failed.status == "failed"
-    assert saved_failed.errors[0].message == "boom"
+    assert saved_failed.errors[0].message == "SubAgent execution failed."
 
     timeout = await local_store.create(spec, definition, policy)
     await local_store.mark_running(timeout.run_id)

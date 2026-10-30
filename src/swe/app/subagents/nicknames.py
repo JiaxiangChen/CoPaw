@@ -22,3 +22,13 @@ def assign_subagent_nickname(configured: str | None = None) -> str:
     if configured and configured.strip():
         return configured.strip()
     return random.choice(BUILTIN_SUBAGENT_NICKNAMES)
+
+
+def allocate_subagent_nickname(base: str, used: set[str]) -> str:
+    """Choose the base name or its smallest unused numbered variant."""
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
