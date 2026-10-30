@@ -9,9 +9,9 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from croniter import croniter
-
 from .contracts import ManagedCronUnavailable
+from .cron_syntax import next_times
+from .date_policy import reason as date_reason, search_window
 
 STATE_COLUMNS = (
     "task_chat_id",
@@ -20,6 +20,8 @@ STATE_COLUMNS = (
     "batch_external_job_id",
     "dispatch_state",
     "pause_reason",
+    "date_window_paused",
+    "date_window_sync_required",
     "auto_paused_at",
     "next_run_at",
     "next_run_times_json",
@@ -88,6 +90,7 @@ def task_view(row: dict, actor_id: str) -> dict:
     paused = row.get("state_pause_reason")
     if not paused and not row["enabled"]:
         paused = "manual"
+    paused = paused or date_reason(row)
     return {
         "visible_in_my_tasks": row.get("creator_user_id") == actor_id,
         "chat_id": row.get("state_task_chat_id"),
@@ -131,8 +134,11 @@ def _next_run_times(row, *, now=None):
             if base.tzinfo is None
             else base.astimezone(zone)
         )
-        schedule = croniter(row["cron_expr"], base)
-        return [schedule.get_next(datetime).isoformat() for _ in range(3)]
+        base, until = search_window(row, base)
+        return [
+            value.isoformat()
+            for value in next_times(row["cron_expr"], base, until=until)
+        ]
     except (ValueError, KeyError, OverflowError) as exc:
         raise ManagedCronUnavailable("cron_data_unavailable") from exc
 
@@ -141,6 +147,7 @@ def job_view(row: dict, actor_id: str) -> dict:
     if row.get("spec_json") is None:
         raise ManagedCronUnavailable("cron_data_unavailable")
     spec = public_spec(_json(row.get("spec_json"), dict, {}))
+    spec.setdefault("run_date_range", None)
     spec.update(
         {
             "id": row["job_id"],
@@ -224,6 +231,7 @@ def child_item(row: dict, actor_id: str) -> dict:
             "offset_minutes",
             "offset_window_hours",
             "enable_offset",
+            "run_date_range",
         )
     } | {
         "job_id": item["id"],

@@ -343,6 +343,33 @@ def row(db, table):
 
 
 @pytest.mark.asyncio
+async def test_active_projection_preserves_empty_pause_reason_in_legacy_table(
+    setup,
+):
+    db, _, _, caller, service = setup
+    await service.create(caller, create_payload())
+    assert row(db, "swe_cron_jobs")["pause_reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_creation_persists_date_range_and_keeps_future_timer_disabled(
+    setup,
+):
+    db, _, platform, caller, service = setup
+    period = {"start_date": "2099-01-01", "end_date": "2099-01-02"}
+    result = await service.create(
+        caller,
+        create_payload(run_date_range=period),
+    )
+    assert result["status"] == "completed"
+    definition = row(db, "swe_cron_jobs_v2")
+    assert definition["run_start_date"] == "2099-01-01"
+    assert definition["enabled"] == 1
+    assert row(db, "swe_cron_job_states")["date_window_paused"] == 1
+    assert platform.calls[-1] == "pause"
+
+
+@pytest.mark.asyncio
 async def test_create_writes_ready_state_projection_and_durable_operation(
     setup,
 ):

@@ -14,6 +14,7 @@ def test_new_interface_documentation_is_available_in_openapi():
         managed_cron_dispatch_state,
         managed_cron_controls,
         managed_cron_management,
+        managed_cron_date_ranges,
     )
     from swe.app.crons import managed_api, managed_execution_api
 
@@ -25,6 +26,7 @@ def test_new_interface_documentation_is_available_in_openapi():
         managed_cron_dispatch_state,
         managed_cron_management,
         managed_cron_controls,
+        managed_cron_date_ranges,
         managed_api,
         managed_execution_api,
     ):
@@ -36,7 +38,12 @@ def test_new_interface_documentation_is_available_in_openapi():
         for method, operation in methods.items()
         if method in {"get", "post", "put", "delete"}
     ]
-    assert len(operations) == 32
+    assert len(operations) == 35
+    assert "/api/scheduler/cron/date-ranges/apply" in schema["paths"]
+    assert (
+        "/api/scheduler/cron/jobs/{job_id}/run-date-range" in schema["paths"]
+    )
+    assert "/api/scheduler/cron/jobs/{job_id}/pause" in schema["paths"]
     for operation in operations:
         assert re.search(
             r"[\u4e00-\u9fff]",

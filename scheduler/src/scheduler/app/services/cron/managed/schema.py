@@ -5,7 +5,7 @@ REQUIRED_COLUMNS = {
     "swe_cron_jobs_v2": (
         "tenant_id source_id agent_id job_id scope_id name task_type "
         "tenant_name bbk_id skill_ids workflow_binding_id "
-        "enabled cron_expr timezone spec_json offset_minutes "
+        "enabled cron_expr timezone spec_json run_start_date run_end_date offset_minutes "
         "offset_window_hours enable_offset management_owner "
         "creator_user_id definition_version deleted_at parent_tenant_id "
         "parent_source_id parent_agent_id parent_job_id original_cron_expr "
@@ -15,7 +15,7 @@ REQUIRED_COLUMNS = {
     "swe_cron_job_states": (
         "tenant_id source_id agent_id job_id task_chat_id task_session_id "
         "ordinary_external_job_id batch_external_job_id dispatch_state "
-        "pause_reason auto_paused_at next_run_at next_run_times_json "
+        "pause_reason date_window_paused date_window_sync_required auto_paused_at next_run_at next_run_times_json "
         "last_status last_run_at last_prefetch_at last_error "
         "has_scheduled_result latest_scheduled_preview "
         "last_scheduled_run_at unread_execution_count management_status "
@@ -29,7 +29,7 @@ REQUIRED_COLUMNS = {
         "lease_until version created_at updated_at"
     ),
     "swe_cron_execution_runs": (
-        "execution_id execution_key queue_order dispatch_order "
+        "execution_id execution_key queue_order dispatch_order dispatch_lane "
         "tenant_id source_id agent_id job_id "
         "scope_id actor_id definition_version provider_id model_id "
         "enqueued_state_version started_order kind trigger_key "

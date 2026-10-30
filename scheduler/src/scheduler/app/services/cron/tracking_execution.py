@@ -42,7 +42,7 @@ FALLBACK_MAP = {
 }
 EVENT_DETAIL_FIELDS = (
     "status error_code failure_type definition_version settled_status settled_error_code "
-    "business_attempt previous_execution_id reason call_id root_execution_id retry_count"
+    "business_attempt previous_execution_id reason call_id root_execution_id retry_count dispatch_lane"
 )
 
 

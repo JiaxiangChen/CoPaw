@@ -12,6 +12,8 @@ ACTIONS = {
     "dispatch_state": ("M07", "提交调度方式切换"),
     "set_priority": ("M09", "提交优先级调整"),
     "mark_read": ("M10", "提交标读操作"),
+    "pause_group": ("M13", "提交暂停任务及全部子任务"),
+    "date_range": ("M14", "提交修改可执行时间区间"),
 }
 
 
@@ -34,7 +36,7 @@ def journal_node(row, source):
     node["details"].update(
         select_fields(
             payload,
-            "enabled state auto_paused_at source_execution_id auto_pause_epoch",
+            "enabled state auto_paused_at source_execution_id auto_pause_epoch run_date_range expected_management_version",
         ),
     )
     node["details"]["expected_version"] = row.get("expected_version")

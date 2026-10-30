@@ -46,6 +46,7 @@ RUN_FIELDS = (
     "scheduled_fire_at",
     "dispatch_meta_json",
     "dispatch_attempt",
+    "dispatch_lane",
     "updated_at",
     "accepted_at",
     "started_at",

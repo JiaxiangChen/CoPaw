@@ -9,6 +9,8 @@ import os
 import httpx
 from croniter import croniter
 
+from .cron_syntax import business_parts
+
 from .operations import RegistrationRejected, RegistrationUnknown
 from .swe_client import checked_base
 
@@ -16,15 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 def platform_cron(expression):
-    parts = expression.split()
-    if len(parts) != 5 or not croniter.is_valid(expression):
-        raise ValueError("invalid_cron_schedule")
-    expanded, _ = croniter.expand(expression)
+    parts = business_parts(expression)
+    suffix = " " + parts[5] if len(parts) == 6 else ""
+    expanded, _ = croniter.expand(" ".join(parts[:5]))
     weekdays = expanded[4]
     if weekdays == ["*"]:
-        return "0 " + " ".join((*parts[:4], "?"))
+        return "0 " + " ".join((*parts[:4], "?")) + suffix
     days = ",".join(str(int(day) + 1) for day in weekdays)
-    return f"0 {parts[0]} {parts[1]} ? {parts[3]} {days}"
+    return f"0 {parts[0]} {parts[1]} ? {parts[3]} {days}" + suffix
 
 
 def platform_config():

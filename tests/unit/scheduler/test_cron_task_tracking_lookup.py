@@ -20,6 +20,24 @@ def service(db):
 
 
 @pytest.mark.asyncio
+async def test_overview_exposes_configured_date_range_and_independent_flags(
+    db,
+):
+    db.add("job-1")
+    db.conn.execute(
+        "UPDATE swe_cron_jobs_v2 SET run_start_date='2026-11-01',run_end_date='2026-11-30'",
+    )
+    db.conn.execute(
+        "UPDATE swe_cron_job_states SET date_window_paused=1,date_window_sync_required=1",
+    )
+    result = await service(db).overview("job-1", "alice", "default")
+    assert result["definition"].get("run_start_date") == "2026-11-01"
+    assert result["definition"].get("run_end_date") == "2026-11-30"
+    assert result["state"].get("date_window_paused") == 1
+    assert result["state"].get("date_window_sync_required") == 1
+
+
+@pytest.mark.asyncio
 async def test_lookup_never_selects_first_of_multiple_same_id_identities(db):
     db.add("job-1")
     db.add("job-1", tenant="bob")

@@ -25,15 +25,22 @@ DEFINITION_FIELDS = (
     "name task_type tenant_name bbk_id skill_ids workflow_binding_id enabled "
     "cron_expr original_cron_expr timezone offset_minutes offset_window_hours "
     "enable_offset creator_user_id definition_version job_origin plan_id "
-    "deleted_at created_at updated_at"
+    "deleted_at created_at updated_at run_start_date run_end_date"
 )
 STATE_FIELDS = (
     "task_chat_id task_session_id ordinary_external_job_id batch_external_job_id "
     "dispatch_state pause_reason auto_paused_at next_run_at next_run_times_json "
     "last_status last_run_at last_error management_status management_version "
-    "state_version unread_execution_count updated_at"
+    "state_version unread_execution_count updated_at date_window_paused date_window_sync_required"
 )
-SPEC_FIELDS = ("text", "request", "runtime", "model_slot", "schedule")
+SPEC_FIELDS = (
+    "text",
+    "request",
+    "runtime",
+    "model_slot",
+    "schedule",
+    "run_date_range",
+)
 CANDIDATE_FIELDS = ",".join(
     (
         *KEYS,

@@ -7,7 +7,8 @@ import json
 from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from croniter import croniter
+from .cron_syntax import business_parts
+from .date_policy import normalize_range
 
 from .identity import encode_scope, identity_value
 from .views import public_value
@@ -32,6 +33,7 @@ ALLOWED_SPEC_KEYS = {
     "dispatch",
     "runtime",
     "meta",
+    "run_date_range",
 }
 
 # 关联由服务端分发写入，公开编辑只能保留既有值，不能从请求伪造。
@@ -91,10 +93,7 @@ def _schedule(raw):
     if not isinstance(raw, dict) or raw.get("type", "cron") != "cron":
         raise ValueError("invalid_cron_schedule")
     expression = raw.get("cron", "")
-    if not isinstance(expression, str) or len(expression.split()) != 5:
-        raise ValueError("invalid_cron_schedule")
-    if not croniter.is_valid(expression):
-        raise ValueError("invalid_cron_schedule")
+    business_parts(expression)
     zone = raw.get("timezone", "UTC")
     if not isinstance(zone, str):
         raise ValueError("invalid_cron_timezone")
@@ -162,6 +161,7 @@ def normalize_spec(raw, caller, job_id, current=None):
     spec.update(expected)
     spec["scope_id"] = encode_scope(caller.tenant_id, caller.source_id)
     spec["schedule"] = _schedule(raw.get("schedule"))
+    spec["run_date_range"] = _run_date_range(raw, current)
     spec["runtime"] = _runtime(raw.get("runtime", {}))
     spec["task_type"] = _content(spec)
     spec["enabled"] = _enabled(raw, current)
@@ -198,6 +198,19 @@ def _profile(spec, caller, current):
         spec[field] = (
             previous.get(field) if preserve or incoming is None else incoming
         )
+
+
+def _run_date_range(raw, current):
+    """子任务正文更新也不能绕过继承，缺省时保留父组配置副本。"""
+    period = normalize_range(raw.get("run_date_range"))
+    if current is None or not current.get("parent_job_id"):
+        return period
+    inherited = normalize_range(
+        json.loads(current["spec_json"]).get("run_date_range"),
+    )
+    if "run_date_range" in raw and period != inherited:
+        raise ValueError("cron_date_range_inherited")
+    return inherited
 
 
 def _model_slot(slot):

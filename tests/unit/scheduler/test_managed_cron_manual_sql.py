@@ -37,7 +37,7 @@ def test_manual_create_covers_exactly_new_protocol_tables():
     for table, body in definitions.items():
         columns = set(
             re.findall(
-                r"^\s+(\w+)\s+(?:VARCHAR|CHAR|BIGINT|INT|TINYINT|DATETIME|LONGTEXT|TEXT)\b",
+                r"^\s+(\w+)\s+(?:VARCHAR|CHAR|BIGINT|INT|TINYINT|DATETIME|DATE|LONGTEXT|TEXT)\b",
                 body,
                 re.M,
             ),
@@ -45,7 +45,7 @@ def test_manual_create_covers_exactly_new_protocol_tables():
         assert set(REQUIRED_COLUMNS[table].split()) <= columns, table
         for line in body.splitlines():
             if re.match(
-                r"\s+\w+\s+(?:VARCHAR|CHAR|BIGINT|INT|TINYINT|DATETIME|LONGTEXT|TEXT)\b",
+                r"\s+\w+\s+(?:VARCHAR|CHAR|BIGINT|INT|TINYINT|DATETIME|DATE|LONGTEXT|TEXT)\b",
                 line,
             ):
                 assert re.search(r"COMMENT '[^']*[\u4e00-\u9fff]", line), line

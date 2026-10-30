@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
 """新版批次失败预览和人工重试，与旧 Intent 操作完全隔离。"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+)
 
 from .managed_cron import caller_identity
 from .managed_cron_management import (
@@ -19,6 +28,7 @@ router = APIRouter(
     prefix="/scheduler/cron/managed-dispatch/batches",
     tags=["managed-batch-operations"],
 )
+logger = logging.getLogger(__name__)
 
 
 def batch_service(db=Depends(management_database)):
@@ -59,11 +69,45 @@ async def failures(
 async def retry(
     batch_id: str,
     body: ManagedBatchRetryRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     caller: CallerIdentity = Depends(caller_identity),
     service=Depends(batch_service),
 ):
     """共库事务受理、审计并返回；不调用平台或 SWE，不改变批入口模式。响应丢失重提原 Body。"""
     try:
-        return await service.retry(caller, batch_id, body)
+        result = await service.retry(caller, batch_id, body)
+        worker = getattr(request.app.state, "managed_cron_worker", None)
+        if worker is not None:
+            background_tasks.add_task(
+                _dispatch_urgent,
+                service.db,
+                worker.dispatcher,
+                result["results"],
+            )
+        return result
     except Exception as exc:
         raise batch_error(exc) from exc
+
+
+async def _dispatch_urgent(db, dispatcher, results):
+    """响应已提交后立即尝试加急领取；失败仍保留持久队列供原后台恢复。"""
+    from ..services.cron.managed.diagnostics import format_management_error
+
+    for item in results:
+        if item["status"] != "queued":
+            continue
+        identifier = item["execution_id"]
+        try:
+            row = await db.fetch_one(
+                "SELECT dispatch_lane FROM swe_cron_execution_runs WHERE execution_id=%s",
+                (identifier,),
+            )
+            if row and row["dispatch_lane"] == "urgent":
+                await dispatcher.dispatch_registered(identifier)
+        except Exception as error:
+            logger.error(
+                "加急重跑首次派发未确认 execution_id=%s\n%s",
+                identifier,
+                format_management_error(error),
+            )

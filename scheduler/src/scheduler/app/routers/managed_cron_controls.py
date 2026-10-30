@@ -2,6 +2,7 @@
 """新任务独立控制和手动执行接口；不回退旧写入路径。"""
 
 from typing import Literal
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from .managed_cron import caller_identity
 from .managed_cron_management import (
     OperationRequest,
+    DeleteRequest,
     _error,
     _response,
     get_management_service,
@@ -21,6 +23,7 @@ from ..services.cron.managed.children_controls import ChildrenControlService
 from ..services.cron.managed.async_batch_delete import AsyncBatchDelete
 from ..services.cron.managed.contracts import ManagedCronUnavailable
 from ..services.cron.managed.controls import ControlService
+from ..services.cron.managed.diagnostics import format_management_error
 from ..services.cron.managed.executions import (
     ExecutionConflict,
     ExecutionRequest,
@@ -38,6 +41,7 @@ router = APIRouter(
     prefix="/scheduler/cron/jobs",
     tags=["managed-cron-controls"],
 )
+logger = logging.getLogger(__name__)
 
 
 class EnableRequest(OperationRequest):
@@ -49,6 +53,13 @@ class EnableRequest(OperationRequest):
         strict=True,
         description="最近一次任务详情的 management_version，不是定义或运行版本",
     )
+
+
+class DateRangeRequest(OperationRequest):
+    """日期配置可显式清空，但不能省略字段误清除既有日期。"""
+
+    expected_management_version: int = Field(ge=1, strict=True)
+    run_date_range: dict | None
 
 
 class RunRequest(OperationRequest):
@@ -143,6 +154,63 @@ def control_service(db=Depends(management_database)):
         return ControlService(db, ManagedPlatformClient(platform_config()))
     except (ValueError, RuntimeError, KeyError) as exc:
         raise HTTPException(503, "cron_control_service_unavailable") from exc
+
+
+@router.post(
+    "/{job_id}/pause",
+    summary="异步暂停任务及全部子任务",
+    status_code=202,
+    dependencies=[Depends(require_managed_runtime)],
+)
+async def pause_group(
+    job_id: str,
+    body: DeleteRequest,
+    caller: CallerIdentity = Depends(caller_identity),
+    service: ControlService = Depends(control_service),
+):
+    """入参及 operation 响应沿用删除接口，不删除任务或中断已运行执行。"""
+    from ..services.cron.managed.pause_group import PauseGroupService
+
+    try:
+        return _response(
+            await PauseGroupService(service.db, service.platform).submit(
+                caller,
+                job_id,
+                body.model_dump(),
+            ),
+        )
+    except Exception as exc:
+        logger.error(
+            "整组暂停受理失败 job_id=%s request_id=%s\n%s",
+            job_id,
+            body.request_id,
+            format_management_error(exc),
+        )
+        raise control_error(exc) from exc
+
+
+@router.put(
+    "/{job_id}/run-date-range",
+    summary="修改任务及全部子任务的可执行日期区间",
+)
+async def set_run_date_range(
+    job_id: str,
+    body: DateRangeRequest,
+    caller: CallerIdentity = Depends(caller_identity),
+    service: ControlService = Depends(control_service),
+):
+    """只修改日期，不修改正文；平台开关由外部调用维护接口同步。"""
+    try:
+        return _response(
+            await service.set_date_range(caller, job_id, body.model_dump()),
+        )
+    except Exception as exc:
+        logger.error(
+            "日期配置失败 job_id=%s\n%s",
+            job_id,
+            format_management_error(exc),
+        )
+        raise control_error(exc) from exc
 
 
 @router.put("/{job_id}/enabled", summary="设置单任务启停")

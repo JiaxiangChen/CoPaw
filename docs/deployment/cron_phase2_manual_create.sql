@@ -4,6 +4,7 @@
 -- 禁止删除重建已有表；已有数据先按 cron_phase2_deployment.md 核对差异。
 -- 所有新增时间使用 UTC，微秒精度；原历史表时间约定保持不变。
 -- 不修改 swe_cron_jobs / swe_cron_executions / 原分发队列及容量表结构。
+-- 运行区间的 DATE 字段按北京时间解释；其他时间戳继续使用 UTC。
 
 CREATE TABLE IF NOT EXISTS swe_cron_jobs_v2 (
   tenant_id VARCHAR(128) NOT NULL COMMENT '任务所属租户标识',
@@ -18,10 +19,12 @@ CREATE TABLE IF NOT EXISTS swe_cron_jobs_v2 (
   workflow_binding_id VARCHAR(128) DEFAULT NULL COMMENT '工作流绑定标识，与完整定义同步保存',
   task_type VARCHAR(32) NOT NULL COMMENT '任务类型：agent、text或workflow',
   enabled TINYINT NOT NULL DEFAULT 1 COMMENT '任务自身启用状态，不等于整组调度方式',
-  cron_expr VARCHAR(255) NOT NULL COMMENT '实际应用的五字段排程表达式',
+  cron_expr VARCHAR(255) NOT NULL COMMENT '业务五段或末尾带年份的六段排程表达式',
   original_cron_expr VARCHAR(255) DEFAULT NULL COMMENT '散列前原始排程表达式',
   timezone VARCHAR(128) NOT NULL COMMENT '任务排程时区',
   spec_json LONGTEXT NOT NULL COMMENT '完整定义及执行资源引用，不含认证凭据',
+  run_start_date DATE DEFAULT NULL COMMENT '允许运行开始日期，北京时间，包含当天，空表示不限制',
+  run_end_date DATE DEFAULT NULL COMMENT '允许运行结束日期，北京时间，包含当天，空表示不限制',
   management_owner VARCHAR(32) NOT NULL DEFAULT 'legacy' COMMENT '管理归属，存量快照legacy或新版scheduler',
   job_origin VARCHAR(32) DEFAULT NULL COMMENT '任务来源，如原生任务或广播子任务',
   creator_user_id VARCHAR(128) NOT NULL COMMENT '任务所属的创建用户',
@@ -43,7 +46,8 @@ CREATE TABLE IF NOT EXISTS swe_cron_jobs_v2 (
   updated_at DATETIME(6) NOT NULL COMMENT '记录更新时间，UTC',
   PRIMARY KEY (tenant_id, source_id, agent_id, job_id),
   KEY idx_managed_definition_parent (parent_tenant_id, parent_source_id, parent_agent_id, parent_job_id),
-  KEY idx_managed_definition_owner (management_owner, deleted_at)
+  KEY idx_managed_definition_owner (management_owner, deleted_at),
+  KEY idx_managed_definition_source_dates (source_id, management_owner, deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
 COMMENT='定时任务定义表，兼容存量快照与Scheduler新任务';
 
@@ -58,6 +62,8 @@ CREATE TABLE IF NOT EXISTS swe_cron_job_states (
   batch_external_job_id VARCHAR(128) DEFAULT NULL COMMENT '源任务组批入口平台绑定标识',
   dispatch_state VARCHAR(32) DEFAULT NULL COMMENT '对象实际生效方式：ordinary、batch_enabled或batch_paused',
   pause_reason VARCHAR(64) DEFAULT NULL COMMENT '单任务暂停原因',
+  date_window_paused TINYINT(1) NOT NULL DEFAULT 0 COMMENT '日期区间暂停标记，不覆盖人工或其他暂停原因',
+  date_window_sync_required TINYINT(1) NOT NULL DEFAULT 0 COMMENT '日期配置变更或平台同步失败后仍需同步的标记',
   auto_paused_at DATETIME(6) DEFAULT NULL COMMENT '首次自动暂停时间，UTC',
   next_run_at DATETIME(6) DEFAULT NULL COMMENT '存量导入的下次排程快照，查询新任务时实时计算展示',
   next_run_times_json LONGTEXT DEFAULT NULL COMMENT '存量后续排程时间快照',
@@ -118,6 +124,7 @@ CREATE TABLE IF NOT EXISTS swe_cron_execution_runs (
   execution_key CHAR(64) NOT NULL COMMENT '完整任务身份及逻辑执行期去重摘要',
   queue_order BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '入队单调序号，优先级相同时稳定排序，不依赖墙钟',
   dispatch_order INT NOT NULL DEFAULT 0 COMMENT '受理时按既有优先级热度规则冻结的批内顺序',
+  dispatch_lane VARCHAR(16) NOT NULL DEFAULT 'normal' COMMENT '派发通道：normal正常，urgent已结束批次异常重跑加急',
   tenant_id VARCHAR(128) NOT NULL COMMENT '任务所属租户ID',
   source_id VARCHAR(128) NOT NULL COMMENT '任务所属来源ID',
   agent_id VARCHAR(128) NOT NULL COMMENT '任务所属Agent ID',
@@ -164,7 +171,8 @@ CREATE TABLE IF NOT EXISTS swe_cron_execution_runs (
   KEY idx_managed_execution_pool (source_id, provider_id, model_id, status),
   KEY idx_managed_execution_history (history_execution_id),
   KEY idx_managed_execution_settlement (settled_status, status, queue_order),
-  KEY idx_managed_execution_feedback (source_id, provider_id, model_id, settled_at)
+  KEY idx_managed_execution_feedback (source_id, provider_id, model_id, settled_at),
+  KEY idx_managed_execution_priority (source_id, provider_id, model_id, dispatch_lane, status, queue_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
 COMMENT='Scheduler新任务逐次执行登记表';
 
@@ -278,6 +286,8 @@ CREATE TABLE IF NOT EXISTS swe_cron_managed_trigger_receipts (
   created_at DATETIME(6) NOT NULL COMMENT '收到平台触发的处理时间，UTC',
   PRIMARY KEY (receipt_id),
   UNIQUE KEY uk_managed_trigger_callback (callback_key),
-  KEY idx_managed_trigger_job (tenant_id, source_id, agent_id, job_id, logical_fire_at)
+  KEY idx_managed_trigger_job (tenant_id, source_id, agent_id, job_id, logical_fire_at),
+  KEY idx_managed_trigger_batch (batch_id),
+  KEY idx_managed_trigger_received (source_id, kind, status, created_at, batch_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin
 COMMENT='Scheduler新版普通批入口的持久触发回执表';

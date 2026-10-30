@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
+from .cron_syntax import matches
 
 from .distribution import TASKS
 from .operations import JOURNAL, IDENTITY_FIELDS
@@ -246,7 +247,7 @@ def trigger_times(body, binding, now):
         # 平台只传注册时的固定 Body，不能推测它的日志或计划期。
         # 接收时间是本次触发事实；批提前量仍用于计算成员等待时间。
         return now + advance, now
-    if not croniter.match(
+    if not matches(
         binding["spec"]["schedule"]["cron"],
         physical_time.astimezone(ZoneInfo(zone)),
     ):

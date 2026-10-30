@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -155,6 +155,8 @@ def public_value(value, depth=0):
         return [public_value(item, depth + 1) for item in value[:50]]
     if isinstance(value, datetime):
         return iso_time(value)
+    if isinstance(value, date):
+        return value.isoformat()
     return safe_text(value) if isinstance(value, str) else value
 
 

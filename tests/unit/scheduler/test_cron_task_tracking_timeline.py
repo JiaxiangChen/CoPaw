@@ -53,6 +53,45 @@ def event(db, kind, number=1, **extra):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action,expected",
+    [
+        ("pause_group", "暂停任务及全部子任务"),
+        ("date_range", "可执行时间区间"),
+    ],
+)
+async def test_new_group_management_nodes_keep_actual_submission_time(
+    db,
+    action,
+    expected,
+):
+    period = {"start_date": "2026-11-01", "end_date": "2026-11-30"}
+    db.insert(
+        "swe_cron_registration_journal",
+        **IDENTITY,
+        operation_id="op-new",
+        action=action,
+        actor_id="alice",
+        payload_json=json.dumps({"run_date_range": period}),
+        status="completed",
+        stage="completed",
+        version=1,
+        created_at="2026-10-27 00:00:00",
+        updated_at="2026-10-27 00:01:00",
+    )
+    result = await timeline(db, category="management")
+    node = next(
+        item
+        for item in result["items"]
+        if item.get("operation_id") == "op-new"
+    )
+    assert expected in node["title"]
+    assert node["occurred_at"] == "2026-10-27T08:00:00+08:00"
+    if action == "date_range":
+        assert node["details"]["run_date_range"] == period
+
+
 def history(db, *, meta=None, **values):
     db.insert(
         "swe_cron_executions",
