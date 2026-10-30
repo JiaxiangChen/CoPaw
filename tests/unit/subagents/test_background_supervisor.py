@@ -813,16 +813,19 @@ async def test_configured_nickname_remains_unique_after_terminal_run(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("second_session", "second_chat", "expected_nicknames"),
+    ("first_chat", "second_session", "second_chat", "expected_nicknames"),
     [
-        ("session-1", "", {"研究员", "研究员-2"}),
-        ("session-1", "other-chat", {"研究员"}),
-        ("other-session", "", {"研究员"}),
+        ("", "session-1", "", {"研究员", "研究员-2"}),
+        ("", "session-1", "other-chat", {"研究员", "研究员-2"}),
+        ("chat-1", "session-1", "", {"研究员", "研究员-2"}),
+        ("chat-1", "session-1", "other-chat", {"研究员"}),
+        ("", "other-session", "", {"研究员"}),
     ],
 )
 async def test_concurrent_starts_reserve_nicknames_before_launch(
     tmp_path,
     monkeypatch,
+    first_chat,
     second_session,
     second_chat,
     expected_nicknames,
@@ -871,7 +874,7 @@ async def test_concurrent_starts_reserve_nicknames_before_launch(
     monkeypatch.setattr(supervisor, "_start_reserved", start_reserved)
     kwargs = {
         "scope": scope,
-        "spec": _spec(),
+        "spec": _spec().model_copy(update={"parent_chat_id": first_chat}),
         "definition": definition,
         "parent_agent_config": _agent_config(tmp_path),
         "workspace_dir": tmp_path,

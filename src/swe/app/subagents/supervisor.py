@@ -171,8 +171,8 @@ class BackgroundSubAgentSupervisor:
         self._active: dict[tuple[str, str, str], dict[str, _ActiveRun]] = {}
         self._starting: dict[tuple[str, str, str], set[str]] = {}
         self._nickname_reservations: dict[
-            tuple[str, str, str, str, str],
-            set[str],
+            tuple[str, str, str, str],
+            dict[str, set[str]],
         ] = {}
 
     async def start(
@@ -195,14 +195,11 @@ class BackgroundSubAgentSupervisor:
     ) -> BackgroundSubAgentRunRecord | BackgroundSubAgentStartBlocked:
         """Reserve capacity before any asynchronous launch preparation."""
         definition = definition or self._registry.resolve(spec.name)
-        reservations = self._nickname_reservations.setdefault(
-            (
-                *self._scope_key(scope),
-                spec.parent_thread_id,
-                spec.parent_chat_id,
-            ),
-            set(),
+        chat_reservations = self._nickname_reservations.setdefault(
+            (*self._scope_key(scope), spec.parent_thread_id),
+            {},
         )
+        reservations = chat_reservations.setdefault(spec.parent_chat_id, set())
         chat_context = {
             "session_id": spec.parent_thread_id,
             "chat_id": spec.parent_chat_id,
@@ -215,9 +212,16 @@ class BackgroundSubAgentSupervisor:
             )
             if record.nickname
         }
+        for chat_id, names in chat_reservations.items():
+            if (
+                not chat_id
+                or not spec.parent_chat_id
+                or chat_id == spec.parent_chat_id
+            ):
+                used.update(names)
         nickname = allocate_subagent_nickname(
             assign_subagent_nickname(definition.nickname),
-            used | reservations,
+            used,
         )
         # Reserve before the first await, including asynchronous scope reaping.
         reservations.add(nickname)
