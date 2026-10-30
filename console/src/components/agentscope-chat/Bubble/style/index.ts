@@ -4,6 +4,8 @@ export default createGlobalStyle`
 .${(p) => p.theme.prefixCls}-bubble {
   position: relative;
   display: flex;
+  min-width: 0;
+  max-width: 100%;
 
   &-end,
   &-user {
@@ -16,10 +18,18 @@ export default createGlobalStyle`
 
   &-content-wrapper {
     width: 100%;
+    min-width: 0;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
+
+    > * {
+      box-sizing: border-box;
+      min-width: 0;
+      max-width: 100%;
+    }
   }
 
   &-content-wrapper-card {

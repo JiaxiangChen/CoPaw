@@ -290,6 +290,11 @@ export function reconcileHistoryLayers(
   newer: IAgentScopeRuntimeWebUIMessage[],
 ): IAgentScopeRuntimeWebUIMessage[] {
   const refreshed = [...newer];
+  const newerBoundaryIds = new Set(
+    refreshed
+      .filter((message) => message.cards?.[0]?.code === BOUNDARY_CARD)
+      .map((message) => message.id),
+  );
   const owners = new Map<string, number>();
   refreshed.forEach((message, index) => {
     responseOutput(message)?.forEach((item) => {
@@ -323,7 +328,9 @@ export function reconcileHistoryLayers(
       retained[separator].cards?.[0]?.code === BOUNDARY_CARD;
       separator += 1
     ) {
-      separators.push(retained[separator]);
+      if (!newerBoundaryIds.has(retained[separator].id)) {
+        separators.push(retained[separator]);
+      }
       removed.add(separator);
     }
     refreshed[owner] = mergeResponsePair(message, separators, refreshed[owner]);

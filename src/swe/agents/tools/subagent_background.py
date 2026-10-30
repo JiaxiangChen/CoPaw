@@ -269,6 +269,15 @@ async def _link_goal_subagent_run(
     )
 
 
+def _effective_subagent_skills(context, definition):
+    if (
+        definition.skill_owned is not None
+        or definition.agent_owned is not None
+    ):
+        return list(context.effective_skill_names or [])
+    return []
+
+
 def _create_start_subagent_tool(
     context: _BackgroundSubagentToolContext,
     directory: str,
@@ -357,13 +366,9 @@ def _create_start_subagent_tool(
                 definition=definition,
                 start_request=start_request,
                 definition_match=definition_match,
-                effective_skill_names=(
-                    list(context.effective_skill_names or [])
-                    if (
-                        definition.skill_owned is not None
-                        or definition.agent_owned is not None
-                    )
-                    else []
+                effective_skill_names=_effective_subagent_skills(
+                    context,
+                    definition,
                 ),
                 skill_snapshot_signatures=context.skill_snapshot_signatures,
                 skill_snapshot_dirs=context.skill_snapshot_dirs,
@@ -411,17 +416,8 @@ def _create_selected_expert_wait_tool(
 ) -> Callable[..., Any]:
     async def wait_selected_expert() -> ToolResponse:
         """Wait for the selected expert run belonging to this request."""
-        if not context.request_context.pop(
-            "_selected_expert_wait_authorized",
-            False,
-        ):
-            return _json_response({"status": "unavailable"})
-        run_id = str(
-            context.request_context.get("selected_expert_run_id") or "",
-        ).strip()
-        if not run_id or not context.request_context.get(
-            "selected_expert_execution",
-        ):
+        run_id = _selected_expert_wait_run_id(context)
+        if not run_id:
             return _json_response({"status": "unavailable"})
         authorized = False
         failures = 0
@@ -458,13 +454,12 @@ def _create_selected_expert_wait_tool(
                 if category == "deadline" or (
                     deadline is not None and time.monotonic() >= deadline
                 ):
-                    if authorized:
-                        return await _selected_expert_deadline_response(
-                            context,
-                            run_id,
-                        )
-                    _log_selected_expert_unconfirmed(context, run_id, category)
-                    return _json_response({"status": "unavailable"})
+                    return await _selected_expert_deadline_response(
+                        context,
+                        run_id,
+                        category,
+                        authorized=authorized,
+                    )
                 if record is not None:
                     assert deadline is not None
                     category = await _reap_selected_expert_run(
@@ -472,27 +467,48 @@ def _create_selected_expert_wait_tool(
                         run_id,
                         deadline,
                     )
-                if category is not None:
-                    failures += 1
-                    if failures >= _SELECTED_EXPERT_RETRY_LIMIT:
-                        _log_selected_expert_unconfirmed(
-                            context,
-                            run_id,
-                            category,
-                        )
-                        return _json_response({"status": "unavailable"})
-                else:
-                    failures = 0
-                delay = _SELECTED_EXPERT_POLL_SECONDS
-                if deadline is not None:
-                    delay = min(delay, max(deadline - time.monotonic(), 0))
-                await asyncio.sleep(delay)
+                failures = _selected_expert_failure_count(failures, category)
+                if failures >= _SELECTED_EXPERT_RETRY_LIMIT:
+                    _log_selected_expert_unconfirmed(context, run_id, category)
+                    return _json_response({"status": "unavailable"})
+                await asyncio.sleep(_selected_expert_poll_delay(deadline))
         except asyncio.CancelledError:
             if authorized:
                 await _cancel_selected_expert(context, run_id)
             raise
 
     return wait_selected_expert
+
+
+def _selected_expert_wait_run_id(
+    context: _BackgroundSubagentToolContext,
+) -> str:
+    if not context.request_context.pop(
+        "_selected_expert_wait_authorized",
+        False,
+    ):
+        return ""
+    run_id = str(
+        context.request_context.get("selected_expert_run_id") or "",
+    ).strip()
+    if not run_id or not context.request_context.get(
+        "selected_expert_execution",
+    ):
+        return ""
+    return run_id
+
+
+def _selected_expert_failure_count(failures, category):
+    return failures + 1 if category is not None else 0
+
+
+def _selected_expert_poll_delay(deadline):
+    if deadline is None:
+        return _SELECTED_EXPERT_POLL_SECONDS
+    return min(
+        _SELECTED_EXPERT_POLL_SECONDS,
+        max(deadline - time.monotonic(), 0),
+    )
 
 
 async def _poll_selected_expert_record(
@@ -552,7 +568,16 @@ async def _reap_selected_expert_run(context, run_id, deadline):
         return type(exc).__name__
 
 
-async def _selected_expert_deadline_response(context, run_id):
+async def _selected_expert_deadline_response(
+    context,
+    run_id,
+    category,
+    *,
+    authorized,
+):
+    if not authorized:
+        _log_selected_expert_unconfirmed(context, run_id, category)
+        return _json_response({"status": "unavailable"})
     terminal = await _cancel_selected_expert(context, run_id)
     return _json_response(
         (

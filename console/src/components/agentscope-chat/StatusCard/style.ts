@@ -3,6 +3,9 @@ import { createGlobalStyle } from "antd-style";
 export default createGlobalStyle`
 .${(p) => p.theme.prefixCls}-status-card {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border-radius: ${(p) => p.theme.borderRadiusLG}px;
   border: 1px solid ${(p) => p.theme.colorBorderSecondary};
   overflow: hidden;

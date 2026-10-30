@@ -3,6 +3,9 @@ import { createGlobalStyle } from "antd-style";
 export default createGlobalStyle`
 .${(p) => p.theme.prefixCls}-operate-card {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   border-radius: ${(p) => p.theme.borderRadiusLG}px;
   overflow: hidden;
 
@@ -229,7 +232,9 @@ export default createGlobalStyle`
 
     &-content {
       max-height: 128px;
-      overflow-y: auto;
+      min-width: 0;
+      max-width: 100%;
+      overflow: auto;
     }
   }
 

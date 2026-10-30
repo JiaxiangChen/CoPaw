@@ -84,6 +84,29 @@ describe("archived history assembly", () => {
     expect(reconcileHistoryLayers(retained, result)).toEqual(result);
   });
 
+  it("keeps a shared trailing divider only once when reconciling a layer with itself", () => {
+    const layer = convertArchivedPage([call], [boundary]);
+    const result = reconcileHistoryLayers(layer, layer);
+
+    expect(result.map((message) => message.id)).toEqual(
+      layer.map((message) => message.id),
+    );
+    expect(
+      result[0].cards![0].data.output.map((item: { id: string }) => item.id),
+    ).toEqual(["call"]);
+  });
+
+  it("preserves distinct trailing dividers from both layers", () => {
+    const retained = convertArchivedPage([call], [boundary]);
+    const newer = convertArchivedPage([call], [{ ...boundary, id: "other" }]);
+    const result = reconcileHistoryLayers(retained, newer);
+
+    expect(
+      result[0].cards![0].data.output.map((item: { id: string }) => item.id),
+    ).toEqual(["call", "conversation-compaction-boundary"]);
+    expect(result[1].id).toBe("conversation-compaction-other");
+  });
+
   it("aligns retained history with a refreshed traversal that reaches an older prefix", () => {
     const user = (id: string) =>
       historical(convertMessages([{ id, role: "user", content: id }]))[0];

@@ -2,11 +2,7 @@ import { useState } from "react";
 import { CheckOutlined, LoadingOutlined } from "@ant-design/icons";
 import { Dropdown, Spin, Tooltip } from "antd";
 import { SparkDownLine } from "@agentscope-ai/icons";
-import {
-  resolveExpertLabel,
-  toggleExpertSelection,
-  type SelectableExpert,
-} from "../expertSelection";
+import { resolveExpertLabel, type SelectableExpert } from "../expertSelection";
 import styles from "./index.module.less";
 
 export interface ExpertSelectorProps {
@@ -53,11 +49,7 @@ export default function ExpertSelector({
         return;
       }
     }
-    onChange(
-      persistent
-        ? expert.id
-        : toggleExpertSelection(selectedExpertId, expert.id, false),
-    );
+    onChange(expert.id);
     setOpen(false);
   };
 
@@ -69,23 +61,6 @@ export default function ExpertSelector({
       role="menu"
       aria-label="专家选择"
     >
-      {persistent && (
-        <button
-          type="button"
-          className={styles.item}
-          role="menuitem"
-          disabled={selectionDisabled || loading}
-          onClick={() => {
-            onChange(null);
-            setOpen(false);
-          }}
-        >
-          <span className={styles.itemName}>默认 Agent</span>
-          {!selectedExpertId && (
-            <CheckOutlined className={styles.check} aria-hidden />
-          )}
-        </button>
-      )}
       {persistent && selectedExpertId && (!selectedExpert || unavailable) && (
         <button type="button" className={styles.item} role="menuitem" disabled>
           <span className={styles.itemName}>

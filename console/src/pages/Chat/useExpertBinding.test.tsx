@@ -23,7 +23,10 @@ function deferred<T>() {
 const options = {
   chatId: "a",
   scopeKey: "source/profile",
-  ensureChat: vi.fn(async () => "created"),
+  createChat: vi.fn(async (expertId: string) => ({
+    id: "created",
+    expert_binding: view(expertId, 1),
+  })),
   notify: vi.fn(),
 };
 describe("useExpertBinding", () => {
@@ -82,20 +85,36 @@ describe("useExpertBinding", () => {
     });
     expect(result.current.view?.expert_id).toBe("new");
   });
-  it("creates an empty chat before the first selection and reads its revision", async () => {
-    mocks.put.mockResolvedValue(view("e", 1));
+  it("creates a chat with its initial binding without a separate read or write", async () => {
     const { result } = renderHook(() =>
       useExpertBinding({ ...options, chatId: null }),
     );
     await act(async () => {
       await result.current.change("e");
     });
-    expect(options.ensureChat).toHaveBeenCalledTimes(1);
-    expect(mocks.get).toHaveBeenCalledWith("created");
-    expect(mocks.put).toHaveBeenCalledWith("created", {
-      expected_revision: 0,
-      expert_id: "e",
+    expect(options.createChat).toHaveBeenCalledWith("e");
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+    expect(result.current.view?.expert_id).toBe("e");
+    expect(result.current.getSnapshot().chatId).toBe("created");
+  });
+  it("keeps a new legacy selection local when creation reports disabled mode", async () => {
+    const createChat = vi.fn().mockRejectedValue({
+      data: {
+        detail: {
+          code: "expert_main_disabled",
+          expert_binding: { ...view(), enabled: false },
+        },
+      },
     });
+    const { result } = renderHook(() =>
+      useExpertBinding({ ...options, chatId: null, createChat }),
+    );
+    await act(async () =>
+      expect(await result.current.change("e")).toBe("legacy"),
+    );
+    expect(result.current.getSnapshot().chatId).toBeNull();
+    expect(mocks.put).not.toHaveBeenCalled();
   });
   it("synchronizes a conflicting view without retrying", async () => {
     mocks.put.mockRejectedValue({
@@ -115,6 +134,50 @@ describe("useExpertBinding", () => {
     expect(result.current.view?.expert_id).toBe("other");
     expect(mocks.put).toHaveBeenCalledTimes(1);
     expect(options.notify).toHaveBeenCalled();
+  });
+  it("ignores a completed creation after switching to another chat", async () => {
+    const pending = deferred<{
+      id: string;
+      expert_binding: ReturnType<typeof view>;
+    }>();
+    const createChat = vi.fn(() => pending.promise);
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string | null }) =>
+        useExpertBinding({ ...options, chatId, createChat }),
+      { initialProps: { chatId: null } },
+    );
+    let saving!: Promise<string>;
+    act(() => {
+      saving = result.current.change("old");
+    });
+    rerender({ chatId: "b" });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      pending.resolve({ id: "created", expert_binding: view("old", 1) });
+      expect(await saving).toBe("failed");
+    });
+    expect(result.current.getSnapshot().chatId).toBe("b");
+    expect(result.current.view?.expert_id).toBeNull();
+  });
+  it("adopts the authorized chat identity when a creation retry finds a changed binding", async () => {
+    const createChat = vi.fn().mockRejectedValue({
+      data: {
+        detail: {
+          code: "expert_binding_changed",
+          chat_id: "already-created",
+          expert_binding: view("other", 2),
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useExpertBinding({ ...options, chatId: null, createChat }),
+    );
+    await act(async () =>
+      expect(await result.current.change("old")).toBe("conflict"),
+    );
+    expect(result.current.getSnapshot().chatId).toBe("already-created");
+    expect(result.current.view?.revision).toBe(2);
+    expect(result.current.view?.expert_id).toBe("other");
   });
   it("keeps legacy mode as a single-turn choice without a binding write", async () => {
     mocks.get.mockResolvedValue({ ...view(), enabled: false });

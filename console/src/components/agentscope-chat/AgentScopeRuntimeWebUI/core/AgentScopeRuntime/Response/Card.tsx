@@ -272,8 +272,16 @@ function renderResponseItem(item: IAgentScopeRuntimeMessage) {
 function renderGroupedItem(item: OperationGroupedItem) {
   const anchorId =
     item.kind === "group" ? `operation:${item.key}` : item.message.id;
+  const fullWidth =
+    item.kind === "group" ||
+    isOperationGroupToolMessage(item.message) ||
+    item.message.type === AgentScopeRuntimeMessageType.MCP_APPROVAL_REQUEST;
   return (
-    <div key={anchorId} data-history-anchor-id={anchorId}>
+    <div
+      key={anchorId}
+      data-history-anchor-id={anchorId}
+      style={fullWidth ? { width: "100%", minWidth: 0 } : undefined}
+    >
       {item.kind === "group" ? (
         <OperationGroup entry={item} />
       ) : (
@@ -385,7 +393,10 @@ export default function AgentScopeRuntimeResponseCard(props: {
         </Flex>
       )} */}
       {groupedMessages.process.length > 0 && (
-        <div data-history-anchor-id={`process:${props.data.id}`}>
+        <div
+          data-history-anchor-id={`process:${props.data.id}`}
+          style={{ width: "100%", minWidth: 0 }}
+        >
           <ProcessDisclosure
             durationText={durationText}
             failedCount={groupedMessages.failedProcessCount}

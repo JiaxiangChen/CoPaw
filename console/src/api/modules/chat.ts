@@ -11,6 +11,8 @@ import type {
   ExpertBindingUpdate,
   ChatPage,
   ChatSpec,
+  ChatCreateRequest,
+  ChatCreateResponse,
   ChatHistory,
   ChatArchivePage,
   ChatDeleteResponse,
@@ -263,8 +265,8 @@ export const chatApi = {
     return request<ChatPage>(`/chats?${searchParams.toString()}`);
   },
 
-  createChat: (chat: Partial<ChatSpec>) =>
-    request<ChatSpec>("/chats", {
+  createChat: (chat: ChatCreateRequest) =>
+    request<ChatCreateResponse>("/chats", {
       method: "POST",
       body: JSON.stringify(chat),
     }),

@@ -888,6 +888,19 @@ def _extract_wplus_user_scope(
     )
 
 
+def _extract_console_chat_id(request_data) -> str | None:
+    value = (
+        request_data.get("chat_id")
+        if isinstance(request_data, dict)
+        else getattr(request_data, "chat_id", None)
+    )
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Invalid chat_id")
+    return value.strip()
+
+
 def _extract_session_and_payload(request_data: Union[AgentRequest, dict]):
     """Extract run_key (ChatSpec.id), session_id, and native payload.
 
@@ -932,6 +945,9 @@ def _extract_session_and_payload(request_data: Union[AgentRequest, dict]):
             "user_id": sender_id,
         },
     }
+    requested_chat_id = _extract_console_chat_id(request_data)
+    if requested_chat_id is not None:
+        native_payload["chat_id"] = requested_chat_id
     if system_prompt_injections is not None:
         native_payload["meta"][
             "system_prompt_injections"
@@ -1253,6 +1269,19 @@ def _build_console_chat_meta(
     return meta
 
 
+def _has_explicit_chat_target(chat_id: str | None, session_id: str) -> bool:
+    if not chat_id:
+        return False
+    if chat_id != session_id:
+        return True
+    # Older Console clients also put the unresolved logical ID in chat_id.
+    try:
+        uuid.UUID(chat_id)
+    except ValueError:
+        return False
+    return True
+
+
 async def _get_or_create_console_chat(
     workspace: Any,
     session_id: str,
@@ -1260,6 +1289,23 @@ async def _get_or_create_console_chat(
 ) -> tuple[Any, str | None, bool]:
     scenario_preset_id = native_payload["meta"].get("scenario_preset_id")
     chat_meta = _build_console_chat_meta(workspace, native_payload)
+    requested_chat_id = native_payload.get("chat_id")
+    if _has_explicit_chat_target(requested_chat_id, session_id):
+        chat = await _get_authorized_recovery_chat(
+            workspace.chat_manager,
+            requested_chat_id,
+            sender_id=native_payload["sender_id"],
+            channel_id=native_payload["channel_id"],
+            identity=chat_meta,
+        )
+        if chat is None:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        if chat.session_id != session_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Chat session identity mismatch",
+            )
+        return chat, scenario_preset_id, False
     if not scenario_preset_id:
         chat = await workspace.chat_manager.get_or_create_chat(
             session_id,

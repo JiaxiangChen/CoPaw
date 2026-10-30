@@ -37,6 +37,7 @@ import {
 } from "./historyAssembly";
 import { applyPreferredSessionSelection } from "./preferredSession";
 import { shouldNotifySessionSelected } from "./sessionRaceGuard";
+import { createLocalSessionId } from "./localSessionId";
 import { filterStaleTaskSessions } from "./taskSessions";
 import {
   forgetResolvedChatId,
@@ -997,21 +998,6 @@ const chatSpecToSession = (chat: ChatSpec): ExtendedSession =>
 
 /** Returns true when id is a pure numeric local timestamp (not a backend UUID). */
 const isLocalTimestamp = (id: string): boolean => /^\d+$/.test(id);
-
-let lastLocalSessionTimestamp = 0;
-let localSessionSequence = 0;
-
-function createLocalSessionId(): string {
-  const now = Date.now();
-  if (now === lastLocalSessionTimestamp) {
-    localSessionSequence += 1;
-  } else {
-    lastLocalSessionTimestamp = now;
-    localSessionSequence = 0;
-  }
-
-  return `${now}${localSessionSequence.toString().padStart(3, "0")}`;
-}
 
 /** Detect if backend is still generating content for this chat. */
 const isGenerating = (chatHistory: ChatHistory): boolean => {

@@ -8,6 +8,8 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Customer } from "../types";
+import { htmlPreviewEventsApi } from "@/api/modules/htmlPreviewEvents";
+import * as wealthApi from "../api";
 import Tasks from "./index";
 import styles from "../index.module.less";
 
@@ -801,4 +803,67 @@ describe("经营分类独立表格", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/暂无客户名单/)).toBeInTheDocument();
   });
+});
+
+describe("客户清单操作埋点", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["business", "customer", "pending"] as const)(
+    "%s 只上报洞察和电访，使用客户标识和工作台来源",
+    async (view) => {
+      const customer = state.customers[0];
+      customer.custUid = "CUST-001";
+      customer.bbkOrgId = "ORG-001";
+      state.pendingCustomers = state.customers;
+      const recordClick = vi
+        .spyOn(htmlPreviewEventsApi, "recordClick")
+        .mockResolvedValue({ success: true });
+      const signature = vi
+        .spyOn(wealthApi, "fetchSchemeSignature")
+        .mockResolvedValue("signature");
+      const win = { location: { href: "" } };
+      vi.spyOn(window, "open").mockReturnValue(win as Window);
+      render(
+        <MemoryRouter>
+          <Tasks page={view === "pending" ? "pending" : "today"} />
+        </MemoryRouter>,
+      );
+      if (view === "customer") {
+        fireEvent.click(screen.getByRole("button", { name: "客户视角" }));
+      }
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "查看经营方案" })[0],
+      );
+      expect(recordClick).not.toHaveBeenCalled();
+      for (const [label, buttonId] of [
+        ["客户洞察", "insight"],
+        ["电访", "phone"],
+      ]) {
+        fireEvent.click(screen.getAllByRole("button", { name: label })[0]);
+        expect(recordClick).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            customer_id: "CUST-001",
+            customer_name: customer.name,
+            customer_info: { customer_id: "CUST-001", name: customer.name },
+            button_id: buttonId,
+            button_type: buttonId,
+            button_name: label,
+            button_text: label,
+            event_type: "button_click",
+            page_source: "WP_AGENT_WORKSPACE_TASK_LIST",
+            platform_source: "WP",
+          }),
+        );
+        const payload =
+          recordClick.mock.calls[recordClick.mock.calls.length - 1][0];
+        expect(payload.file_url).toBeUndefined();
+        expect(Number.isNaN(Date.parse(payload.clicked_at!))).toBe(false);
+        expect(payload.template_type).toBeUndefined();
+      }
+      await Promise.resolve();
+      expect(recordClick).toHaveBeenCalledTimes(2);
+      expect(signature).toHaveBeenLastCalledWith("CUST-001", "ORG-001");
+      expect(win.location.href).not.toBe("");
+    },
+  );
 });

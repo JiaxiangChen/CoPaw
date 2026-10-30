@@ -6,11 +6,13 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPage from "./index";
 import { schedulerCronApi } from "@/api/modules/schedulerCron";
 import type { ManagedJob } from "@/api/types/schedulerCron";
+import type { ExpertBindingView } from "@/api/types/chat";
 
 type MockSessionApi = {
   preferredChatId: string;
@@ -40,7 +42,13 @@ const mocks = vi.hoisted(() => {
     planModeEnabledHistory: [] as boolean[],
     showContentOnly: false,
     isOriginY: false,
-    createChat: vi.fn(async () => ({
+    createChat: vi.fn<
+      (payload?: Record<string, unknown>) => Promise<{
+        id: string;
+        meta: Record<string, unknown>;
+        expert_binding?: ExpertBindingView | null;
+      }>
+    >(async () => ({
       id: "chat-real-created",
       meta: { plan_mode_enabled: true },
     })),
@@ -690,7 +698,26 @@ describe("ChatPage plan mode wiring", () => {
     mocks.navigationSessionId = null;
     mocks.navigationTaskId = null;
     mocks.navigate.mockReset();
-    mocks.createChat.mockClear();
+    mocks.createChat.mockReset();
+    mocks.createChat.mockImplementation(async (payload) => {
+      if (payload?.initial_expert_id)
+        throw {
+          data: {
+            detail: {
+              code: "expert_main_disabled",
+              expert_binding: {
+                revision: 0,
+                expert_id: null,
+                enabled: false,
+                available: true,
+                expert_name: null,
+                reason: null,
+              },
+            },
+          },
+        };
+      return { id: "chat-real-created", meta: { plan_mode_enabled: true } };
+    });
     mocks.listCronJobs.mockReset();
     mocks.listCronJobs.mockResolvedValue([]);
     mocks.listExperts.mockReset();
@@ -734,6 +761,7 @@ describe("ChatPage plan mode wiring", () => {
   });
 
   it("keeps a manual expert visible through new-chat creation, resolution, and repeated submissions", async () => {
+    mocks.inputDisabled = false;
     mocks.currentSessionId = "";
     mocks.pathname = "/chat";
     mocks.sessions = [];
@@ -824,13 +852,11 @@ describe("ChatPage plan mode wiring", () => {
     await waitFor(() =>
       expect(mocks.expertSelectorProps?.selectedExpertId).toBe("expert-1"),
     );
-    await act(async () => {
-      await (
-        mocks.expertSelectorProps?.onChange as (
-          id: string | null,
-        ) => Promise<void>
-      )(null);
-    });
+    fireEvent.click(
+      within(screen.getByTestId("chat-sender-prefix")).getByRole("button", {
+        name: "研究专家",
+      }),
+    );
     await waitFor(() =>
       expect(mocks.expertSelectorProps?.selectedExpertId).toBe(null),
     );
@@ -938,6 +964,7 @@ describe("ChatPage plan mode wiring", () => {
   );
 
   it("restores persistent binding and submits its revision without clearing selection", async () => {
+    mocks.inputDisabled = false;
     mocks.getExpertBinding.mockResolvedValue({
       revision: 3,
       expert_id: "expert-1",
@@ -975,6 +1002,28 @@ describe("ChatPage plan mode wiring", () => {
     expect(body.expert_binding_revision).toBe(3);
     expect(body.selected_expert_id).toBeUndefined();
     expect(mocks.expertSelectorProps?.selectedExpertId).toBe("expert-1");
+    mocks.updateExpertBinding.mockResolvedValue({
+      revision: 4,
+      expert_id: null,
+      enabled: true,
+      available: true,
+      expert_name: null,
+      reason: null,
+    });
+    fireEvent.click(
+      within(screen.getByTestId("chat-sender-prefix")).getByRole("button", {
+        name: "绑定专家",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.updateExpertBinding).toHaveBeenCalledWith("chat-1", {
+        expected_revision: 3,
+        expert_id: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.expertSelectorProps?.selectedExpertId).toBe(null),
+    );
   });
 
   it.each(["/new", "/clear", "/reset"])(
@@ -1218,6 +1267,18 @@ describe("ChatPage plan mode wiring", () => {
       expert_name: "专家",
       reason: null,
     });
+    mocks.createChat.mockResolvedValueOnce({
+      id: "chat-real-created",
+      meta: {},
+      expert_binding: {
+        revision: 1,
+        expert_id: "expert-1",
+        enabled: true,
+        available: true,
+        expert_name: "专家",
+        reason: null,
+      },
+    });
     mocks.listExperts.mockResolvedValue([
       {
         definition_id: "expert-1",
@@ -1233,17 +1294,91 @@ describe("ChatPage plan mode wiring", () => {
         "expert-1",
       );
     });
-    await waitFor(() =>
-      expect(mocks.updateExpertBinding).toHaveBeenCalledWith(
-        "chat-real-created",
-        { expected_revision: 0, expert_id: "expert-1" },
-      ),
+    expect(mocks.createChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: expect.stringMatching(/^\d+$/),
+        initial_expert_id: "expert-1",
+      }),
     );
+    expect(mocks.updateExpertBinding).not.toHaveBeenCalled();
     expect(mocks.createChat).toHaveBeenCalledTimes(1);
     expect(mocks.navigate).toHaveBeenCalledWith("/chat/chat-real-created", {
       replace: true,
     });
   });
+  it("navigates to the original chat and uses its latest revision after a creation retry conflict", async () => {
+    mocks.pathname = "/chat";
+    mocks.currentSessionId = "";
+    mocks.sessions = [];
+    mocks.getChatIdForSession.mockReturnValue(null);
+    mocks.createChat.mockRejectedValue({
+      data: {
+        detail: {
+          code: "expert_binding_changed",
+          chat_id: "original-chat",
+          expert_binding: {
+            revision: 2,
+            expert_id: "other",
+            enabled: true,
+            available: true,
+            expert_name: "另一个专家",
+            reason: null,
+          },
+        },
+      },
+    });
+    render(<ChatPage />);
+    await waitFor(() => expect(mocks.expertSelectorProps).toBeTruthy());
+    await act(async () => {
+      (mocks.expertSelectorProps?.onChange as (id: string) => void)("expert-1");
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith("/chat/original-chat", {
+      replace: true,
+    });
+    expect(mocks.expertSelectorProps?.selectedExpertId).toBe("other");
+    let prepared;
+    await act(async () => {
+      prepared = await mocks.capturedOptions?.sender.beforeSubmit({
+        query: "hello",
+        fileList: [],
+      });
+    });
+    expect(prepared).toMatchObject({
+      biz_params: { expert_binding_revision: 2 },
+    });
+    expect(mocks.updateExpertBinding).not.toHaveBeenCalled();
+  });
+
+  it("reuses the independent draft identity when initial expert creation is retried", async () => {
+    mocks.pathname = "/chat";
+    mocks.currentSessionId = "";
+    mocks.sessions = [];
+    mocks.getChatIdForSession.mockReturnValue(null);
+    mocks.createChat.mockRejectedValue(new Error("offline"));
+    mocks.listExperts.mockResolvedValue([
+      {
+        definition_id: "expert-1",
+        enabled: true,
+        valid: true,
+        definition: { name: "专家" },
+      },
+    ]);
+    render(<ChatPage />);
+    await waitFor(() => expect(mocks.expertSelectorProps).toBeTruthy());
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await act(async () => {
+        (mocks.expertSelectorProps?.onChange as (id: string) => void)(
+          "expert-1",
+        );
+      });
+    }
+    expect(mocks.createChat).toHaveBeenCalledTimes(2);
+    const ids = mocks.createChat.mock.calls.map(([body]) => body?.session_id);
+    expect(ids[0]).toMatch(/^\d+$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
   it("cancels an asynchronously prepared draft after switching chats", async () => {
     mocks.inputDisabled = false;
     mocks.sessions[0].meta.plan_mode_enabled = false;

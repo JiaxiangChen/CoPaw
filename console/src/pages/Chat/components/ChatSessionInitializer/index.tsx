@@ -6,6 +6,7 @@ import { useChatAnywhereSessionsState } from "@/components/agentscope-chat";
 import { useChatContentOnly } from "@/components/agentscope-chat/ChatContentOnlyContext";
 import { useAgentStore } from "@/stores/agentStore";
 import { getInitialSessionSelection } from "../../sessionApi/initialSessionSelection";
+import { matchesResolvedChatId } from "../../sessionApi/resolvedSessionMapping";
 import { getSessionAgentId } from "../../sessionApi/sessionAgent";
 
 function matchesRequestedSession(
@@ -79,6 +80,16 @@ const ChatSessionInitializer: React.FC = () => {
     if (isContentOnly && matching) {
       setSessionNotFound(false);
     }
+
+    // Resolving the active draft's backend identity must not reload its composer.
+    if (
+      !isContentOnly &&
+      matchesResolvedChatId({
+        requestedSessionId: currentSessionIdRef.current,
+        chatId: resolvedSessionId,
+      })
+    )
+      return;
 
     if (matching && currentSessionIdRef.current !== matching.id) {
       const sessionAgentId = getSessionAgentId(

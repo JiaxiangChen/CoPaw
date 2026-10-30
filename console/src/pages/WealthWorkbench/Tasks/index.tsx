@@ -22,8 +22,8 @@ import { buildInsightUrl, buildTelUrl, fetchSchemeSignature } from "../api";
 import { useCanAccess, useWealthStore } from "../store";
 import type { Customer } from "../types";
 import { buildTaskTree, dateKey, scheduleLabel } from "../utils";
-// import { htmlPreviewEventsApi } from "@/api/modules/htmlPreviewEvents";
-// import type { HtmlTrackerPayloadType } from "@/api/types/htmlPreviewEvents";
+import { htmlPreviewEventsApi } from "@/api/modules/htmlPreviewEvents";
+import type { HtmlTrackerPayloadType } from "@/api/types/htmlPreviewEvents";
 
 /** 重点标签匹配：同一客户可能命中多个场景（标签以 "、" 分隔） */
 function matchLabel(label: string, selected: string) {
@@ -153,7 +153,7 @@ export function Opportunities({
  */
 async function openOutboundLink(kind: "dial" | "insight", c: Customer) {
   // 埋点：电访 button_id=phone，客户洞察 button_id=insight
-  // reportTaskClick(c, kind === "dial" ? "phone" : "insight");
+  reportTaskClick(c, kind === "dial" ? "phone" : "insight");
   const win = window.open("", "_blank");
   try {
     // bbkOrgId / custUid 均由 /wealth/name-list 接口直接返回
@@ -174,47 +174,29 @@ async function openOutboundLink(kind: "dial" | "insight", c: Customer) {
   }
 }
 
-/**
- * 任务执行按钮埋点：与 htmlPreviewClickTracking.buildHtmlPreviewClickPayload
- * 返回结构保持一致（event_type=button_click，template_type=main）。
- * - button_id：plan 查看经营方案 / phone 电访 / insight 客户洞察
- * - customer 信息取 /wealth/name-list 返回的 custUid、custNm（即 Customer.custUid / name）
- * - page_source / platform_source 固定为工作台任务清单口径
- */
-// function reportTaskClick(c: Customer, buttonId: "plan" | "phone" | "insight") {
-//   const meta: Record<"plan" | "phone" | "insight", { name: string; text: string }> = {
-//     plan: { name: "查看经营方案", text: "查看经营方案" },
-//     phone: { name: "电访", text: "电访" },
-//     insight: { name: "客户洞察", text: "客户洞察" },
-//   };
-//   const pageSource = "WP_AGENT_WORKSPACE_TASK_LIST";
-//   const payload: HtmlTrackerPayloadType = {
-//     cron_task_id: null,
-//     cron_task_name: null,
-//     file_url: "",
-//     file_name: null,
-//     list_key: "",
-//     list_name: "",
-//     trace_id: null,
-//     button_id: buttonId,
-//     button_name: meta[buttonId].name,
-//     button_text: meta[buttonId].text,
-//     button_type: buttonId,
-//     customer_id: c.custUid || null,
-//     customer_name: c.name || null,
-//     customer_info: {
-//       customer_id: c.custUid || "",
-//       name: c.name || "",
-//     },
-//     clicked_at: new Date().toISOString(),
-//     event_type: "button_click",
-//     page_source: pageSource,
-//     platform_source: "WP",
-//   };
-//   htmlPreviewEventsApi.recordClick(payload).catch(() => {
-//     // 埋点失败不影响主流程，静默丢弃
-//   });
-// }
+/** 客户清单的洞察 / 电访点击；操作者与机构信息由 recordClick 补齐。 */
+function reportTaskClick(c: Customer, buttonId: "phone" | "insight") {
+  const buttonName = buttonId === "phone" ? "电访" : "客户洞察";
+  const payload: HtmlTrackerPayloadType = {
+    button_id: buttonId,
+    button_name: buttonName,
+    button_text: buttonName,
+    button_type: buttonId,
+    customer_id: c.custUid || null,
+    customer_name: c.name || null,
+    customer_info: {
+      customer_id: c.custUid || "",
+      name: c.name || "",
+    },
+    clicked_at: new Date().toISOString(),
+    event_type: "button_click",
+    page_source: "WP_AGENT_WORKSPACE_TASK_LIST",
+    platform_source: "WP",
+  };
+  htmlPreviewEventsApi.recordClick(payload).catch(() => {
+    // 埋点失败不影响主流程，静默丢弃
+  });
+}
 
 function contactMethodLabel(method: string) {
   return method === "强接触" ? "已接触" : method;

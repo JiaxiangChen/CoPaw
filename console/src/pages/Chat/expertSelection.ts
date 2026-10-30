@@ -35,12 +35,3 @@ export function normalizeSelectableExperts(
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
 }
-
-export function toggleExpertSelection(
-  currentId: string | null,
-  nextId: string,
-  planModeEnabled: boolean,
-): string | null {
-  if (planModeEnabled) return null;
-  return currentId === nextId ? null : nextId;
-}

@@ -345,6 +345,11 @@ class ChatManager:
             await self._repo.upsert_chat(spec)
             return spec
 
+    async def create_chat_if_absent_by_session(self, spec: ChatSpec):
+        """Commit one initialized draft, including retries after response loss."""
+        async with self._lock:
+            return await self._repo.create_chat_if_absent_by_session(spec)
+
     async def update_chat(self, spec: ChatSpec) -> ChatSpec:
         """Update an existing chat spec.
 

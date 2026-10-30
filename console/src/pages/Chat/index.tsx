@@ -38,6 +38,7 @@ import { SparkCopyLine } from "@agentscope-ai/icons";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import sessionApi from "./sessionApi";
+import { createLocalSessionId } from "./sessionApi/localSessionId";
 import defaultConfig, { getDefaultConfig } from "./OptionsPanel/defaultConfig";
 import { chatApi } from "../../api/modules/chat";
 import { cronJobApi } from "../../api/modules/cronjob";
@@ -1315,6 +1316,22 @@ function ChatPageContent() {
     activePlanModeSession,
   );
   const activePlanModeScopeKey = chatId || activeSessionId || "";
+  const expertBindingSource = useIframeStore((state) => state.source);
+  const draftIdentityScope = JSON.stringify([
+    expertBindingSource,
+    selectedAgent,
+    getUserId(),
+    activePlanModeScopeKey,
+  ]);
+  const draftIdentityRef = useRef({ scope: draftIdentityScope, id: "" });
+  if (draftIdentityRef.current.scope !== draftIdentityScope) {
+    draftIdentityRef.current = { scope: draftIdentityScope, id: "" };
+  }
+  const getDraftSessionId = useCallback(() => {
+    if (!draftIdentityRef.current.id)
+      draftIdentityRef.current.id = createLocalSessionId();
+    return draftIdentityRef.current.id;
+  }, []);
   const [planModeLocalState, setPlanModeLocalState] =
     useState<PlanModeLocalState>({
       scopeKey: activePlanModeScopeKey,
@@ -1442,7 +1459,7 @@ function ChatPageContent() {
         session?.session_id ||
         sessionApi.getLogicalSessionId(candidateSessionId) ||
         candidateSessionId ||
-        `${getChannel()}:${getUserId()}`;
+        getDraftSessionId();
       const created = await chatApi.createChat({
         session_id: logicalSessionId,
         user_id: getUserId(session?.userId),
@@ -1453,10 +1470,9 @@ function ChatPageContent() {
       await sessionApi.getSessionList();
       return created.id;
     },
-    [activeSessionId, chatId],
+    [activeSessionId, chatId, getDraftSessionId],
   );
 
-  const expertBindingSource = useIframeStore((state) => state.source);
   const expertBinding = useExpertBinding({
     chatId: contextUsageChatId,
     scopeKey: JSON.stringify([
@@ -1465,20 +1481,21 @@ function ChatPageContent() {
       getUserId(),
       contextUsageChatId ? null : chatId || activeSessionId || "",
     ]),
-    ensureChat: async () => {
+    createChat: async (expertId) => {
       const session = activePlanModeSessionRef.current;
       const created = await chatApi.createChat({
         session_id:
           session?.sessionId ||
           session?.session_id ||
           sessionApi.getLogicalSessionId(chatId || activeSessionId || "") ||
-          `${getChannel()}:${getUserId()}`,
+          getDraftSessionId(),
+        initial_expert_id: expertId,
         user_id: getUserId(),
         channel: getChannel(),
         name: session?.name || "新会话",
         meta: session?.meta || {},
       });
-      return created.id;
+      return created;
     },
     notify: (text) => messageRef.current.warning(text),
   });
@@ -1508,14 +1525,14 @@ function ChatPageContent() {
       const result = await changeExpertBinding(expertId);
       if (owner !== getExpertBindingSnapshot()) return false;
       if (result === "legacy") setSelectedExpertId(expertId);
-      if (result === "saved" || result === "legacy") {
-        if (result === "saved" && !contextUsageChatId && owner.chatId) {
+      if (result === "saved" || result === "legacy" || result === "conflict") {
+        if (result !== "legacy" && !contextUsageChatId && owner.chatId) {
           const temporaryId = chatId || activeSessionId;
           if (temporaryId) rememberResolvedChatId(temporaryId, owner.chatId);
           navigate(`/chat/${owner.chatId}`, { replace: true });
           void sessionApi.getSessionList();
         }
-        return true;
+        return result !== "conflict";
       }
       return false;
     },

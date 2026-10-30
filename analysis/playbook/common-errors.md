@@ -858,3 +858,12 @@
 - **原因**：`customerMetrics` 曾使用 `contain: inline-size`，阻止指标内容参与表格的自动列宽计算；单独把26%改为auto会让多指标和单指标使用相同的最小尺寸提示。
 - **处理**：客户指标列使用auto列宽，保留84px的最低可读宽度；取消区域的inline-size隔离，内部改为可换行Flex，指标块保持125px，区域上限395px。内容数量参与表格的固有尺寸计算，长文字仍在指标块内省略并通过Tooltip显示。
 - **验证**：检查空指标、1项、6项、超过6项、超长标签与数值；覆盖今日、待触达、已完成及1920/1440/1280宽度，确认展开收起可用、指标不超出单元格、经营方案与执行操作不重叠。
+
+
+## 财富工作台洞察 / 电访没有文件地址时，点击上报返回 422
+
+- **来源**：点击接口最初为 HTML 文件预览设计，历史版本要求 `file_url` 非空；工作台按钮没有关联文件。
+- **当前契约**：`HtmlPreviewClickEventCreate.file_url` 可省略，默认 `""`；数据库仍保存非 NULL 的空字符串，不需要表结构迁移。不接受 JSON null，不应使用空格或虚构页面地址绕过校验。名单快照仍要求真实的非空文件地址。
+- **统计边界**：无 `file_url` 且无 `list_key` 的点击保留在事件明细、按钮汇总和客户点击统计中；名单点击汇总和名单客户并集排除该类事件。已有 URL 或显式 `list_key` 的事件沿用原分组规则。
+- **前端**：工作台只上报洞察 `insight`、电访 `phone`，不传 `file_url`；客户 ID 使用 `custUid`，来源为 `WP_AGENT_WORKSPACE_TASK_LIST` / `WP`，运行时 API 补齐操作者与机构信息。
+- **回归入口**：`tests/unit/app/test_html_preview_clicks.py`、`console/src/pages/WealthWorkbench/Tasks/groupTables.test.tsx`、`console/src/api/modules/htmlPreviewEvents.test.ts`。先部署允许省略字段的后端，再部署工作台前端。

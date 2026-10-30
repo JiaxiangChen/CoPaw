@@ -76,6 +76,89 @@ async def _async(value):
 
 
 @pytest.mark.asyncio
+async def test_explicit_chat_wins_over_newer_duplicate_logical_session(
+    tmp_path,
+):
+    from swe.app.routers.console import (
+        _extract_session_and_payload,
+        _get_or_create_console_chat,
+    )
+
+    manager = ChatManager(repo=JsonChatRepository(tmp_path / "chats.json"))
+    for chat_id in ("selected", "other"):
+        await manager.create_chat(
+            ChatSpec(
+                id=chat_id,
+                session_id="shared",
+                user_id="alice",
+                channel="console",
+            ),
+        )
+    data = _extract_session_and_payload(
+        {
+            "session_id": "shared",
+            "user_id": "alice",
+            "chat_id": "selected",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "hello"}],
+                },
+            ],
+        },
+    )
+    chat, _, _ = await _get_or_create_console_chat(
+        SimpleNamespace(chat_manager=manager, agent_id="profile"),
+        "shared",
+        data,
+    )
+    assert chat.id == "selected"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "chat_id,session_id,sender,source,agent,status",
+    [
+        ("missing", "session", "alice", "source", "profile", 404),
+        (
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000001",
+            "alice",
+            "source",
+            "profile",
+            404,
+        ),
+        ("chat", "wrong-session", "alice", "source", "profile", 409),
+        ("chat", "session", "bob", "source", "profile", 404),
+        ("chat", "session", "alice", "other", "profile", 404),
+        ("chat", "session", "alice", "source", "other", 404),
+    ],
+)
+async def test_explicit_chat_never_falls_back_on_invalid_identity(
+    admitted_chat,
+    chat_id,
+    session_id,
+    sender,
+    source,
+    agent,
+    status,
+):
+    from swe.app.routers.console import _get_or_create_console_chat
+
+    chat = await admitted_chat.chat_manager.get_chat("chat")
+    chat.channel = "console"
+    chat.meta.update(source_id="source", agent_id="profile")
+    await admitted_chat.chat_manager.update_chat(chat)
+    data = payload()
+    data.update(chat_id=chat_id, sender_id=sender)
+    data["meta"]["source_id"] = source
+    admitted_chat.agent_id = agent
+    with pytest.raises(HTTPException) as error:
+        await _get_or_create_console_chat(admitted_chat, session_id, data)
+    assert error.value.status_code == status
+
+
+@pytest.mark.asyncio
 async def test_disabled_mode_releases_without_executing_or_restoring(
     admitted_chat,
     monkeypatch,

@@ -15,6 +15,7 @@ export interface ExpertBindingUpdate {
 }
 
 export interface ExpertBindingConflict {
+  chat_id?: string;
   code:
     | "expert_binding_changed"
     | "expert_main_disabled"
@@ -32,6 +33,14 @@ export interface ChatSpec {
   updated_at: string | null; // Chat last update timestamp (ISO 8601)
   meta?: Record<string, unknown>; // Additional metadata
   status?: ChatStatus; // Conversation status: idle, running, or stopping
+}
+
+export interface ChatCreateRequest extends Partial<ChatSpec> {
+  initial_expert_id?: string;
+}
+
+export interface ChatCreateResponse extends ChatSpec {
+  expert_binding: ExpertBindingView | null;
 }
 
 export interface Message {

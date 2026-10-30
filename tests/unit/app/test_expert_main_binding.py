@@ -231,6 +231,274 @@ def test_generic_api_cannot_inject_binding(binding_api):
     assert response.status_code == 400
 
 
+def test_create_chat_saves_initial_expert_in_same_record(binding_api):
+    client, repo = binding_api
+    response = client.post(
+        "/chats",
+        json={
+            "session_id": "new-draft",
+            "user_id": "alice",
+            "initial_expert_id": "a",
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()
+    assert created["expert_binding"]["expert_id"] == "a"
+    assert created["expert_binding"]["revision"] == 1
+    stored = asyncio.run(repo.get_chat(created["id"]))
+    assert stored.meta["expert_main_binding"] == {
+        "expert_id": "a",
+        "revision": 1,
+    }
+
+
+def test_initial_expert_creation_retry_does_not_duplicate_or_overwrite(
+    binding_api,
+):
+    client, repo = binding_api
+    body = {
+        "session_id": "retry-draft",
+        "user_id": "alice",
+        "initial_expert_id": "a",
+    }
+    first = client.post("/chats", json=body).json()
+    retried = client.post("/chats", json=body)
+    assert retried.status_code == 200
+    assert retried.json()["id"] == first["id"]
+    assert len(asyncio.run(repo.list_chats())) == 2
+    switched = client.put(
+        f"/chats/{first['id']}/expert-binding",
+        json={"expected_revision": 1, "expert_id": "b"},
+    )
+    assert switched.status_code == 200
+    stale = client.post("/chats", json=body)
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["chat_id"] == first["id"]
+    assert stale.json()["detail"]["expert_binding"]["expert_id"] == "b"
+    assert len(asyncio.run(repo.list_chats())) == 2
+
+
+@pytest.mark.parametrize("current_expert", ["a", "b"])
+def test_initial_creation_retry_recovers_after_expert_becomes_unavailable(
+    binding_api,
+    monkeypatch,
+    current_expert,
+):
+    from swe.app.runner import api, expert_binding
+
+    client, repo = binding_api
+    body = {
+        "session_id": "lost-response-draft",
+        "user_id": "alice",
+        "initial_expert_id": "a",
+    }
+    created = client.post("/chats", json=body).json()
+    if current_expert == "b":
+        response = client.put(
+            f"/chats/{created['id']}/expert-binding",
+            json={"expected_revision": 1, "expert_id": "b"},
+        )
+        assert response.status_code == 200
+    monkeypatch.setattr(api, "resolve_bound_expert", lambda *args: None)
+    monkeypatch.setattr(
+        expert_binding,
+        "resolve_bound_expert",
+        lambda *args: None,
+    )
+
+    retried = client.post("/chats", json=body)
+
+    assert retried.status_code == (200 if current_expert == "a" else 409)
+    payload = (
+        retried.json() if current_expert == "a" else retried.json()["detail"]
+    )
+    assert (
+        payload["id" if current_expert == "a" else "chat_id"] == created["id"]
+    )
+    assert payload["expert_binding"]["expert_id"] == current_expert
+    assert payload["expert_binding"]["revision"] == (
+        1 if current_expert == "a" else 2
+    )
+    assert payload["expert_binding"]["available"] is False
+    assert payload["expert_binding"]["reason"] == "expert_unavailable"
+    assert len(asyncio.run(repo.list_chats())) == 2
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "disabled"])
+def test_initial_creation_recovers_commit_between_lookup_and_validation(
+    binding_api,
+    monkeypatch,
+    failure,
+):
+    from swe.app.runner import api, expert_binding
+    from swe.app.runner.manager import ChatManager
+
+    client, repo = binding_api
+    original_lookup = ChatManager.get_chat_by_session
+    lookup_count = 0
+
+    async def lookup_then_commit(manager, session_id, channel, user_id):
+        nonlocal lookup_count
+        observed = await original_lookup(manager, session_id, channel, user_id)
+        lookup_count += 1
+        if lookup_count == 1:
+            assert observed is None
+            await repo.upsert_chat(
+                ChatSpec(
+                    id="concurrently-committed-draft",
+                    session_id=session_id,
+                    channel=channel,
+                    user_id=user_id,
+                    meta={
+                        "source_id": "source-a",
+                        "agent_id": "profile-a",
+                        "expert_main_binding": {
+                            "revision": 1,
+                            "expert_id": "a",
+                        },
+                    },
+                ),
+            )
+            if failure == "unavailable":
+                monkeypatch.setattr(
+                    api,
+                    "resolve_bound_expert",
+                    lambda *args: None,
+                )
+                monkeypatch.setattr(
+                    expert_binding,
+                    "resolve_bound_expert",
+                    lambda *args: None,
+                )
+            else:
+
+                async def disabled(_request):
+                    return False
+
+                monkeypatch.setattr(
+                    api,
+                    "expert_main_enabled_for_request",
+                    disabled,
+                )
+        return observed
+
+    monkeypatch.setattr(ChatManager, "get_chat_by_session", lookup_then_commit)
+    response = client.post(
+        "/chats",
+        json={
+            "session_id": "overlapping-draft",
+            "user_id": "alice",
+            "initial_expert_id": "a",
+        },
+    )
+
+    assert response.status_code == (200 if failure == "unavailable" else 409)
+    payload = (
+        response.json()
+        if failure == "unavailable"
+        else response.json()["detail"]
+    )
+    assert (
+        payload["id" if failure == "unavailable" else "chat_id"]
+        == "concurrently-committed-draft"
+    )
+    assert payload["expert_binding"]["expert_id"] == (
+        "a" if failure == "unavailable" else None
+    )
+    assert payload["expert_binding"]["enabled"] is (failure == "unavailable")
+    assert payload["expert_binding"]["revision"] == (
+        1 if failure == "unavailable" else 2
+    )
+    if failure == "unavailable":
+        assert payload["expert_binding"]["available"] is False
+    assert lookup_count == 2
+    assert len(asyncio.run(repo.list_chats())) == 2
+
+
+def test_initial_creation_retry_returns_404_when_disabled_chat_is_deleted(
+    binding_api,
+    monkeypatch,
+):
+    client, repo = binding_api
+    body = {
+        "session_id": "deleted-draft",
+        "user_id": "alice",
+        "initial_expert_id": "a",
+    }
+    assert client.post("/chats", json=body).status_code == 200
+    release = repo.release_current_expert_binding
+
+    async def delete_before_release(chat_id):
+        await repo.delete_chats([chat_id])
+        return await release(chat_id)
+
+    monkeypatch.setattr(
+        repo,
+        "release_current_expert_binding",
+        delete_before_release,
+    )
+    response = client.post("/chats", json=body, headers={"enabled": "false"})
+    assert response.status_code == 404
+    assert len(asyncio.run(repo.list_chats())) == 1
+
+
+@pytest.mark.parametrize("headers", [{"source": "other"}, {"agent": "other"}])
+def test_initial_creation_retry_authorizes_before_resolving_experts(
+    binding_api,
+    monkeypatch,
+    headers,
+):
+    from swe.app.runner import api
+
+    client, repo = binding_api
+    body = {
+        "session_id": "private-draft",
+        "user_id": "alice",
+        "initial_expert_id": "a",
+    }
+    assert client.post("/chats", json=body).status_code == 200
+
+    def must_not_resolve(*args):
+        raise AssertionError("unauthorized retry must not resolve experts")
+
+    monkeypatch.setattr(api, "resolve_bound_expert", must_not_resolve)
+    response = client.post("/chats", json=body, headers=headers)
+    assert response.status_code == 404
+    assert len(asyncio.run(repo.list_chats())) == 2
+
+
+@pytest.mark.parametrize(
+    "case,status",
+    [("disabled", 409), ("invalid", 409), ("plan", 400), ("blank", 422)],
+)
+def test_rejected_initial_binding_leaves_no_empty_chat(
+    binding_api,
+    monkeypatch,
+    case,
+    status,
+):
+    from swe.app.runner import api
+
+    client, repo = binding_api
+    body = {
+        "session_id": "new-draft",
+        "user_id": "alice",
+        "initial_expert_id": "a",
+    }
+    headers = {}
+    if case == "disabled":
+        headers["enabled"] = "false"
+    elif case == "invalid":
+        monkeypatch.setattr(api, "resolve_bound_expert", lambda *args: None)
+    elif case == "plan":
+        body["meta"] = {"plan_mode_enabled": True}
+    else:
+        body["initial_expert_id"] = " "
+    response = client.post("/chats", json=body, headers=headers)
+    assert response.status_code == status
+    assert len(asyncio.run(repo.list_chats())) == 1
+
+
 def test_binding_update_rejects_blank_id_and_non_integer_revision():
     from swe.app.runner.expert_binding import ExpertBindingUpdate
 

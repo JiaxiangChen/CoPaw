@@ -17,6 +17,10 @@ from swe.agents.skills_manager import (
     _require_workspace_layout_v2,
 )
 from swe.agents.tool_guard_mixin import ToolGuardMixin
+from swe.agents.tools.subagent_background import (
+    _create_selected_expert_wait_tool,
+    _selected_expert_wait_run_id,
+)
 from swe.app.channels.base import BaseChannel
 from swe.app.channels.zhaohu.channel import ZhaohuChannel
 from swe.app.crons.executor import CronExecutor
@@ -85,6 +89,8 @@ def test_targeted_agent_paths_stay_within_complexity_budget() -> None:
         _validate_prepared_binding,
         _stop_append_text,
         HookRuntime._filter_completed_append_tasks,
+        _create_selected_expert_wait_tool,
+        _selected_expert_wait_run_id,
     )
 
     complexities = {

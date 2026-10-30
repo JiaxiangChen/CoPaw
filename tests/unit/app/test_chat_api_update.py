@@ -103,9 +103,12 @@ def test_update_chat_rejects_server_owned_scenario_snapshot_source() -> None:
 
 
 def test_create_chat_rejects_server_owned_scenario_snapshot() -> None:
+    from src.swe.app.runner.api import get_workspace
+
     manager = _FakeChatManager()
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[get_workspace] = lambda: None
 
     async def _get_chat_manager_override() -> _FakeChatManager:
         return manager

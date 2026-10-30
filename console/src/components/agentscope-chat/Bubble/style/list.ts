@@ -10,6 +10,7 @@ export default createGlobalStyle`
 .${(p) => p.theme.prefixCls}-bubble-list-scroll {
   height: 100%;
   width: 100%;
+  box-sizing: border-box;
   overflow: auto;
   scrollbar-gutter: stable both-edges;
 }

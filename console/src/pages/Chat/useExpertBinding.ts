@@ -40,12 +40,15 @@ type BindingOwner = {
   loading: boolean;
   saving: boolean;
 };
-type BindingChangeResult = "saved" | "legacy" | "failed" | "busy";
+type BindingChangeResult = "saved" | "legacy" | "failed" | "busy" | "conflict";
 
 export function useExpertBinding(options: {
   chatId: string | null;
   scopeKey: string;
-  ensureChat: () => Promise<string | null>;
+  createChat: (expertId: string) => Promise<{
+    id: string;
+    expert_binding: ExpertBindingView | null;
+  }>;
   notify: (message: string) => void;
 }) {
   const { chatId, scopeKey } = options;
@@ -129,11 +132,20 @@ export function useExpertBinding(options: {
       const owner = ownerRef.current;
       if (owner.saving || owner.loading) return "busy";
       if (owner.view?.enabled === false) return "legacy";
+      if (!owner.chatId && !expertId) return "legacy";
       if (owner.view && owner.view.expert_id === expertId) return "saved";
       owner.saving = true;
       publish(owner);
       try {
-        if (!owner.chatId) owner.chatId = await optionsRef.current.ensureChat();
+        if (!owner.chatId && expertId) {
+          const created = await optionsRef.current.createChat(expertId);
+          if (ownerRef.current !== owner) return "failed";
+          if (!created.expert_binding)
+            throw new Error("创建会话未返回专家状态，请重试");
+          owner.chatId = created.id;
+          owner.view = created.expert_binding;
+          return "saved";
+        }
         if (!owner.chatId || ownerRef.current !== owner) return "failed";
         if (!owner.view)
           owner.view = await chatApi.getExpertBinding(owner.chatId);
@@ -147,9 +159,26 @@ export function useExpertBinding(options: {
         owner.view = view;
         return "saved";
       } catch (error) {
+        const conflict = readExpertBindingConflict(
+          (error as { data?: unknown })?.data,
+        );
         if (
           ownerRef.current === owner &&
-          !syncConflict((error as { data?: unknown })?.data, owner.chatId)
+          !owner.chatId &&
+          conflict?.code === "expert_main_disabled"
+        ) {
+          owner.view = conflict.expert_binding;
+          return "legacy";
+        }
+        if (ownerRef.current === owner && !owner.chatId && conflict?.chat_id) {
+          owner.chatId = conflict.chat_id;
+          syncConflict((error as { data?: unknown })?.data, owner.chatId);
+          return "conflict";
+        }
+        if (
+          ownerRef.current === owner &&
+          (!owner.chatId ||
+            !syncConflict((error as { data?: unknown })?.data, owner.chatId))
         ) {
           optionsRef.current.notify(
             error instanceof Error ? error.message : "保存会话专家失败，请重试",

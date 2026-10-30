@@ -1567,3 +1567,117 @@ def test_event_list_route_supports_all_types_dimensions_and_offset(
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("file_fields", [{}, {"file_url": ""}])
+def test_workbench_click_without_file_url_is_accepted(
+    monkeypatch,
+    file_fields,
+):
+    service = MagicMock()
+    service.create_event = AsyncMock()
+    monkeypatch.setattr(html_preview_router_module, "_service", service)
+    monkeypatch.setattr(
+        html_preview_router_module,
+        "_resolve_bbk_id_by_user_and_source",
+        AsyncMock(return_value="branch-1"),
+    )
+    app = FastAPI()
+    app.include_router(html_preview_click_router)
+    response = TestClient(app).post(
+        "/html-preview/events",
+        json={
+            **file_fields,
+            "button_id": "phone",
+            "customer_id": "CUST-001",
+            "page_source": "WP_AGENT_WORKSPACE_TASK_LIST",
+            "platform_source": "WP",
+        },
+    )
+    assert response.status_code == 200
+    event = service.create_event.call_args.args[0]
+    assert event.file_url == ""
+    assert event.customer_id == "CUST-001"
+
+
+@pytest.mark.asyncio
+async def test_workbench_click_stores_empty_url_and_remains_in_customer_stats(
+    mock_db,
+):
+    store = HtmlPreviewClickStore(mock_db)
+    event = HtmlPreviewClickEventCreate(
+        button_id="phone",
+        customer_id="CUST-001",
+        customer_name="张三",
+    )
+    await store.create_event(event)
+    params = mock_db.execute.call_args.args[1]
+    assert params[6] == ""
+    assert params[8] == ""
+    assert params[13] == "phone"
+    row = {
+        "id": 1,
+        "file_url": "",
+        "list_key": "",
+        "button_id": "phone",
+        "button_type": "phone",
+        "customer_id": "CUST-001",
+        "customer_name": "张三",
+        "clicked_at": datetime(2026, 10, 29, 10),
+    }
+    mock_db.fetch_all.return_value = [row]
+    events = await store.list_events(source_id="copaw")
+    assert events[0].file_url == ""
+    customers = await store.list_customer_summary(source_id="copaw")
+    assert customers[0].phone_count == 1
+    assert customers[0].customer_id == "CUST-001"
+
+
+@pytest.mark.asyncio
+async def test_list_queries_exclude_events_without_list_context(mock_db):
+    """执行实际查询的 WHERE，验证无上下文事件不会形成未知名单。"""
+    import sqlite3
+
+    mock_db.fetch_all.side_effect = [[], [], []]
+    await HtmlPreviewClickStore(mock_db).list_lists(source_id="copaw")
+    event_query = mock_db.fetch_all.call_args_list[1].args[0]
+    union_query = mock_db.fetch_all.call_args_list[2].args[0]
+    # SQL 条件使用 MySQL / SQLite 共有表达式；覆盖显式名单和旧 URL 兜底。
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute(
+            "CREATE TABLE events (source_id, event_type, list_key, file_url)",
+        )
+        db.executemany(
+            "INSERT INTO events VALUES (?, ?, ?, ?)",
+            [
+                ("copaw", "button_click", "", ""),
+                ("copaw", "button_click", None, ""),
+                ("copaw", "button_click", "list-1", ""),
+                ("copaw", "button_click", None, "https://example.com/a.html"),
+            ],
+        )
+        where = event_query.split("FROM swe_html_preview_click_events", 1)[1]
+        where = (
+            where.split("GROUP BY", 1)[0]
+            .replace("%s", "?")
+            .replace("<=>", "IS")
+        )
+        rows = db.execute(
+            "SELECT list_key, file_url FROM events " + where,
+            mock_db.fetch_all.call_args_list[1].args[1],
+        ).fetchall()
+        assert rows == [("list-1", ""), (None, "https://example.com/a.html")]
+        where = union_query.split("AS merged", 1)[1].split("GROUP BY", 1)[0]
+        rows = db.execute(
+            "SELECT list_key FROM (SELECT list_key, 'customer' AS customer_key FROM events) AS merged "
+            + where,
+        ).fetchall()
+        assert rows == [("list-1",)]
+    finally:
+        db.close()
+
+
+def test_list_snapshot_still_requires_file_url():
+    with pytest.raises(ValidationError):
+        HtmlPreviewListSnapshotCreate(file_url="", customers=[])

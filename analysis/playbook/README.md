@@ -13,6 +13,7 @@
 | [common-errors.md](common-errors.md) | 常见报错模式、典型触发点和第一落点 |
 | [wealth-scene-monitoring.md](wealth-scene-monitoring.md) | 财富规划场景督办策略的接口字段、角色控制和回显验证 |
 | [control-path-complexity.md](control-path-complexity.md) | 策略、审批、专家准入及 Stop append 的复杂度拆分边界、计数口径和回归入口 |
+| [expert-binding-new-chat-identity.md](expert-binding-new-chat-identity.md) | 新草稿专家绑定的固定逻辑 ID、重复 ID 定位漂移、独立接口职责与复现边界 |
 | [subagent-monitor-refresh.md](subagent-monitor-refresh.md) | SubAgent 会话展示、事件刷新、轮询中断与跨会话竞态的复现和验收条件 |
 | [cron-execution-final-marker.md](cron-execution-final-marker.md) | 执行记录最终标记、历史兼容、重试替换与 MySQL 验证入口 |
 | [database-pool-disposal.md](database-pool-disposal.md) | MySQL 故障连接强制关闭、健康空闲关闭、容量隔离及反复修复的测试盲区 |

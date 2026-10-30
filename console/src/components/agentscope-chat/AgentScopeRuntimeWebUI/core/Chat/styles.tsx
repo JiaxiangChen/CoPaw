@@ -52,7 +52,7 @@ export default createGlobalStyle`
   p.theme.prefixCls}-bubble-list {
   margin: 0 auto;
   max-width: 850px;
-  min-width: 300px;
+  min-width: 0;
 }
 
 .${(p) => p.theme.prefixCls}-chat-anywhere-input {
@@ -63,7 +63,7 @@ export default createGlobalStyle`
   position: relative;
   overflow: visible;
   max-width: 850px;
-  min-width: 300px;
+  min-width: 0;
   margin: 0 auto;
 }
 .${(p) => p.theme.prefixCls}-chat-anywhere-input-blank {

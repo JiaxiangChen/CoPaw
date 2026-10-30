@@ -102,6 +102,18 @@ describe("ChatSessionInitializer", () => {
     expect(mocks.setCurrentSessionId).not.toHaveBeenCalled();
   });
 
+  it("keeps the active draft when expert binding publishes its backend chat id", () => {
+    mocks.currentSessionId = "1777001065201000";
+    mocks.pathname = "/chat/chat-2";
+    sessionStorage.setItem(
+      "copaw_resolved_chat_ids",
+      JSON.stringify({ "1777001065201000": "chat-2" }),
+    );
+    render(<ChatSessionInitializer />);
+    expect(mocks.setCurrentSessionId).not.toHaveBeenCalled();
+    expect(mocks.setSelectedAgent).not.toHaveBeenCalled();
+  });
+
   it("marks an unmapped temporary deep link as unavailable in content-only mode", () => {
     mocks.isContentOnly = true;
     mocks.currentSessionId = "1777001065201000";

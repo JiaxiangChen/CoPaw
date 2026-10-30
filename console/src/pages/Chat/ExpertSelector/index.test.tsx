@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExpertSelector from "./index";
@@ -142,24 +143,30 @@ describe("ExpertSelector inline menu", () => {
   });
 });
 
-it("offers default Agent in persistent mode and keeps the selected expert on repeat click", () => {
-  const onChange = vi.fn();
-  render(
-    <ExpertSelector
-      experts={[{ id: "e", name: "专家", description: "" }]}
-      persistent
-      selectedExpertId="e"
-      planModeEnabled={false}
-      onChange={onChange}
-      onDisablePlanMode={vi.fn()}
-      inline
-    />,
-  );
-  fireEvent.click(screen.getByRole("menuitem", { name: "专家" }));
-  expect(onChange).toHaveBeenLastCalledWith("e");
-  fireEvent.click(screen.getByRole("menuitem", { name: /默认 Agent/ }));
-  expect(onChange).toHaveBeenLastCalledWith(null);
-});
+it.each([false, true])(
+  "keeps the selected expert on repeat click without offering default Agent (persistent=%s)",
+  (persistent) => {
+    const onChange = vi.fn();
+    const view = render(
+      <ExpertSelector
+        experts={[{ id: "e", name: "专家", description: "" }]}
+        persistent={persistent}
+        selectedExpertId="e"
+        planModeEnabled={false}
+        onChange={onChange}
+        onDisablePlanMode={vi.fn()}
+        inline
+      />,
+    );
+    fireEvent.click(
+      within(view.container).getByRole("menuitem", { name: "专家" }),
+    );
+    expect(onChange).toHaveBeenLastCalledWith("e");
+    expect(
+      within(view.container).queryByRole("menuitem", { name: /默认 Agent/ }),
+    ).toBeNull();
+  },
+);
 it("shows an unavailable bound identity even when filtered from the selectable list", () => {
   render(
     <ExpertSelector
