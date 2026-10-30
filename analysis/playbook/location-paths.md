@@ -1,5 +1,12 @@
 # 定位路径
 
+## Console 全局侧栏菜单
+
+- 菜单定义、可见性规则和展开／折叠数据转换集中在 `console/src/layouts/sidebarNavigation.tsx`；`Sidebar.tsx` 保留状态订阅、渲染和交互。新增显示条件时先检查 `getSidebarVisibility`，避免在两种渲染分支各写一遍。
+- 当前行为有意在本次纯重构中保留：`hideChat=true` 时，展开模式隐藏聊天、运营看板和用户消息；折叠模式仅隐藏用户消息。专家社区和 Hook 管理仅在展开模式出现。`source === "RMASSIST"` 与 `space === "RM_ASSISTANCE"` 是两个独立条件。
+- 展开模式通过 `layouts/constants.ts` 的 `KEY_TO_PATH` 跳转，折叠模式也复用该映射，但技能运行看板保留原有 `collapsedPath`：该项尚无展开模式路由映射。修复该差异应作为独立行为变更处理。
+- 回归入口为 `console/src/layouts/Sidebar.test.tsx`，覆盖身份、来源、空间、bbk、hideChat 组合下两种模式的菜单顺序及既有跳转差异。先确认预期业务规则，再更新测试，避免通过结构整理改变菜单范围。
+
 ## 按来源查询租户及机构过滤
 
 - `GET /user-info/tenants/by-source` 位于 `src/swe/app/routers/user_info.py::list_tenants_by_source`；`source_id` 未传时沿用请求头来源，查询包含模板条目。
@@ -338,7 +345,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
 - 视角切换时统计数量先增后减，先查 `Tasks/index.tsx` 是否把旧经营名单直接用于客户视角：经营名单按技能与客户组合去重，客户名单由接口聚合，计数口径不同。名单查询在绘制前进入加载状态；加载时保留缓存，但不渲染旧名单，四个汇总及总记录数显示 `--`。使用延迟接口响应验证首个客户视角绘制帧，不能只检查请求完成后的数量。
 - 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。客户清单使用自动表格布局，常规最小宽度 1000px、今日客户视角 1100px、今日经营视角 800px；不再通过固定指标列及大量屏宽断点抬高最小表宽。长姓名允许换行，最近接触时间保留单行与完整值 title。今日任务和待触达的最近接触时间、经营方案、执行依次吸附右侧，滚动时不得互相遮挡。经营方案列宽120px，位于执行列左侧；最近接触时间的right偏移为经营方案与执行列宽度之和。
-- 客户指标通过 `components/CustomerMetrics.tsx` 展示，每项固定125px、横向间距10px；整列使用auto宽度，最小84px以保留表头可读性。内容区最小125px、最大395px，采用Flex自动换行，每行1–3项；取消inline-size隔离，让指标数量参与表格固有列宽计算。经营场景通过 `components/CustomerScenes.tsx` 每行展示一个固定140px宽的背景项，短名称也保持相同宽度，默认两项；列宽由自动表格布局随内容尺寸收紧。两者超宽均省略，支持悬停或键盘聚焦查看全文、展开更多。经营机会内容不设固定最小、最大宽度，使用单元格可用空间，最多三行并支持Tooltip。样式入口为 `index.module.less` 的 `.customerMetrics`、`.metricGrid`、`.metricItem`、`.customerScenes`、`.opportunityPreview`。验证至少包含空指标、单项、六项以上指标及展开、长场景名称、1280/1440/1920px嵌入和普通视图；较窄容器允许表内滚动，不得产生页面横向溢出。
+- 客户指标通过 `components/CustomerMetrics.tsx` 展示，每项固定125px、横向间距10px；整列使用auto宽度，最小286px以预留两项指标及单元格内边距。内容区最小260px、最大395px，采用Flex自动换行，指标足够时每行2–3项；取消inline-size隔离，让指标数量参与表格固有列宽计算。经营场景通过 `components/CustomerScenes.tsx` 每行展示一个固定140px宽的背景项，短名称也保持相同宽度，默认两项；列宽由自动表格布局随内容尺寸收紧。两者超宽均省略，支持悬停或键盘聚焦查看全文、展开更多。经营机会内容不设固定最小、最大宽度，使用单元格可用空间，最多三行并支持Tooltip。样式入口为 `index.module.less` 的 `.customerMetrics`、`.metricGrid`、`.metricItem`、`.customerScenes`、`.opportunityPreview`。验证至少包含空指标、单项、六项以上指标及展开、长场景名称、1280/1440/1920px嵌入和普通视图；较窄容器允许表内滚动，不得产生页面横向溢出。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
 - 浏览器标签页从隐藏切回可见时，工作台入口的 `useVisibilityRefresh` 调用 `refreshTaskLists`，每次直接后台更新今日任务（保持最近查询视角）、待触达和已完成名单及侧栏数量，不再先查询或比较客户数量；人数相同但客户或明细变化时也会同步。刷新期间保留当前名单和统计，不展示列表加载占位。仅客户经理且初始化/规划加载完成后生效，刷新期间忽略重复切回请求，已有名单请求进行中时不重复发起。iframe 内同样适用；宿主内部业务页签仅通过 CSS 隐藏 iframe 时不会触发该事件。回归入口：`useVisibilityRefresh.test.tsx`、`store.test.ts` 和 `Tasks/loading.test.tsx`。
 
