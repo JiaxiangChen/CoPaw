@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -40,6 +41,7 @@ from .models import (
 )
 from .launch_snapshot import (
     ModelLaunchSnapshotError,
+    _ensure_private_run_store_dir,
     capture_launch_dependencies,
     capture_model_launch_snapshot,
     remove_launch_skill_snapshot,
@@ -57,6 +59,8 @@ from .run_store import PerRunSubAgentRunStore
 _CONCURRENCY_LIMIT_REASON = "background_subagent_concurrency_limit"
 _WORKER_EXITED_WITHOUT_RESULT = "worker_exited_without_result"
 _GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
+_NICKNAME_RESERVATION_STALE_SECONDS = 300
+_PROCESS_START_TIME_TOLERANCE_SECONDS = 1
 logger = logging.getLogger(__name__)
 
 
@@ -264,9 +268,14 @@ class BackgroundSubAgentSupervisor:
         digest = hashlib.sha256(
             parent_thread_id.encode("utf-8"),
         ).hexdigest()[:16]
-        scope.run_store_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_private_run_store_dir(scope.run_store_dir)
         lock_path = scope.run_store_dir / f".nickname-{digest}.lock"
-        with lock_path.open("a") as stream:
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(descriptor, "a+", encoding="utf-8") as stream:
             try:
                 while True:
                     try:
@@ -322,30 +331,38 @@ class BackgroundSubAgentSupervisor:
                 scope.run_store_dir
                 / f".nickname-reservation-{uuid4().hex}.json"
             )
-            reservation_path.write_text(
-                json.dumps(
-                    {
-                        "session_id": spec.parent_thread_id,
-                        "chat_id": spec.parent_chat_id,
-                        "nickname": nickname,
-                    },
-                ),
-                encoding="utf-8",
+            self._write_nickname_reservation(
+                reservation_path,
+                {
+                    "session_id": spec.parent_thread_id,
+                    "chat_id": spec.parent_chat_id,
+                    "nickname": nickname,
+                    "owner_pid": os.getpid(),
+                    "owner_started_at": psutil.Process().create_time(),
+                    "created_at": time.time(),
+                },
             )
             return nickname, reservation_path
 
-    @staticmethod
+    @classmethod
     def _nickname_reservations(
+        cls,
         scope: BackgroundSubAgentScope,
     ) -> list[dict[str, str]]:
         reservations = []
         for path in scope.run_store_dir.glob(".nickname-reservation-*.json"):
             try:
+                if not stat.S_ISREG(path.lstat().st_mode):
+                    continue
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 session_id = str(payload["session_id"])
                 chat_id = str(payload["chat_id"])
                 nickname = str(payload["nickname"])
             except (OSError, ValueError, KeyError, TypeError):
+                cls._remove_stale_nickname_reservation(path)
+                continue
+            if cls._reservation_is_stale(payload):
+                cls._remove_stale_nickname_reservation(path)
                 continue
             if session_id and nickname:
                 reservations.append(
@@ -356,6 +373,57 @@ class BackgroundSubAgentSupervisor:
                     },
                 )
         return reservations
+
+    @staticmethod
+    def _write_nickname_reservation(
+        path: Path,
+        payload: dict[str, str | int | float],
+    ) -> None:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+        except BaseException:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise
+        os.chmod(path, 0o600)
+
+    @staticmethod
+    def _reservation_is_stale(payload: Mapping[str, Any]) -> bool:
+        try:
+            created_at = float(payload["created_at"])
+            owner_pid = int(payload["owner_pid"])
+            owner_started_at = float(payload["owner_started_at"])
+        except (KeyError, TypeError, ValueError):
+            return True
+        if time.time() - created_at < _NICKNAME_RESERVATION_STALE_SECONDS:
+            return False
+        try:
+            return (
+                abs(
+                    psutil.Process(owner_pid).create_time() - owner_started_at,
+                )
+                > _PROCESS_START_TIME_TOLERANCE_SECONDS
+            )
+        except (psutil.Error, ValueError):
+            return True
+
+    @staticmethod
+    def _remove_stale_nickname_reservation(path: Path) -> None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
     async def _start_reserved(
         self,

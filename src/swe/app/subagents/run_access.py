@@ -15,8 +15,11 @@ def record_belongs_to_chat(
     session_id = str(request_context.get("session_id") or "")
     if not session_id.strip() or record.spec.parent_thread_id != session_id:
         return False
-    return not record.spec.parent_chat_id or record.spec.parent_chat_id == str(
-        request_context.get("chat_id") or "",
+    request_chat_id = str(request_context.get("chat_id") or "")
+    return (
+        not record.spec.parent_chat_id
+        or not request_chat_id
+        or record.spec.parent_chat_id == request_chat_id
     )
 
 

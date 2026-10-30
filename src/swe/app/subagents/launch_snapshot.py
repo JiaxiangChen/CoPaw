@@ -390,7 +390,11 @@ def _write_private_snapshot(
 
 def _ensure_private_run_store_dir(path: Path) -> None:
     """Create a private run store without accepting a symlinked root."""
+    if path.is_symlink():
+        raise OSError("SubAgent run store must not be a symlink")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink():
+        raise OSError("SubAgent run store must not be a symlink")
     descriptor = os.open(
         path,
         os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
