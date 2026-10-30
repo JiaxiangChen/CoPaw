@@ -60,7 +60,6 @@ _CONCURRENCY_LIMIT_REASON = "background_subagent_concurrency_limit"
 _WORKER_EXITED_WITHOUT_RESULT = "worker_exited_without_result"
 _GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
 _NICKNAME_RESERVATION_STALE_SECONDS = 300
-_PROCESS_START_TIME_TOLERANCE_SECONDS = 1
 logger = logging.getLogger(__name__)
 
 
@@ -199,10 +198,12 @@ class BackgroundSubAgentSupervisor:
     ) -> BackgroundSubAgentRunRecord | BackgroundSubAgentStartBlocked:
         """Reserve capacity before any asynchronous launch preparation."""
         definition = definition or self._registry.resolve(spec.name)
-        nickname, reservation_path = await self._reserve_nickname(
-            scope,
-            spec,
-            definition,
+        nickname, reservation_path, reservation_lease = (
+            await self._reserve_nickname(
+                scope,
+                spec,
+                definition,
+            )
         )
         try:
             await self._reap_scope(scope)
@@ -254,9 +255,12 @@ class BackgroundSubAgentSupervisor:
                 starting.discard(run_id)
         finally:
             try:
-                reservation_path.unlink()
-            except FileNotFoundError:
-                pass
+                try:
+                    reservation_path.unlink()
+                except FileNotFoundError:
+                    pass
+            finally:
+                os.close(reservation_lease)
 
     @asynccontextmanager
     async def _nickname_allocation_lock(
@@ -295,7 +299,7 @@ class BackgroundSubAgentSupervisor:
         scope: BackgroundSubAgentScope,
         spec: DelegationSpec,
         definition: SubAgentDefinition,
-    ) -> tuple[str, Path]:
+    ) -> tuple[str, Path, int]:
         """Persist a Chat-visible reservation before launch preparation awaits."""
         async with self._nickname_allocation_lock(
             scope,
@@ -334,18 +338,16 @@ class BackgroundSubAgentSupervisor:
                 scope.run_store_dir
                 / f".nickname-reservation-{session_digest}-{uuid4().hex}.json"
             )
-            self._write_nickname_reservation(
+            reservation_lease = self._write_nickname_reservation(
                 reservation_path,
                 {
                     "session_id": spec.parent_thread_id,
                     "chat_id": spec.parent_chat_id,
                     "nickname": nickname,
-                    "owner_pid": os.getpid(),
-                    "owner_started_at": psutil.Process().create_time(),
                     "created_at": time.time(),
                 },
             )
-            return nickname, reservation_path
+            return nickname, reservation_path, reservation_lease
 
     @classmethod
     def _nickname_reservations(
@@ -367,8 +369,9 @@ class BackgroundSubAgentSupervisor:
             except (OSError, ValueError, KeyError, TypeError):
                 cls._remove_stale_nickname_reservation(path)
                 continue
-            if cls._reservation_is_stale(payload):
-                cls._remove_stale_nickname_reservation(path)
+            if cls._reservation_is_stale(
+                payload,
+            ) and cls._remove_stale_nickname_reservation(path):
                 continue
             if session_id and nickname:
                 reservations.append(
@@ -384,54 +387,58 @@ class BackgroundSubAgentSupervisor:
     def _write_nickname_reservation(
         path: Path,
         payload: dict[str, str | int | float],
-    ) -> None:
+    ) -> int:
         descriptor = os.open(
             path,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
         try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with os.fdopen(
+                os.dup(descriptor),
+                "w",
+                encoding="utf-8",
+            ) as stream:
                 json.dump(payload, stream, ensure_ascii=False)
+            os.fchmod(descriptor, 0o600)
         except BaseException:
+            os.close(descriptor)
             try:
                 path.unlink()
             except OSError:
                 pass
             raise
-        os.chmod(path, 0o600)
+        return descriptor
 
     @staticmethod
     def _reservation_is_stale(payload: Mapping[str, Any]) -> bool:
         try:
             created_at = float(payload["created_at"])
-            owner_pid = int(payload["owner_pid"])
-            owner_started_at = float(payload["owner_started_at"])
         except (KeyError, TypeError, ValueError):
             return True
-        if time.time() - created_at < _NICKNAME_RESERVATION_STALE_SECONDS:
-            return False
-        try:
-            return (
-                abs(
-                    psutil.Process(owner_pid).create_time() - owner_started_at,
-                )
-                > _PROCESS_START_TIME_TOLERANCE_SECONDS
-            )
-        except psutil.NoSuchProcess:
-            return True
-        except (psutil.Error, ValueError):
-            return False
+        return time.time() - created_at >= _NICKNAME_RESERVATION_STALE_SECONDS
 
     @staticmethod
-    def _remove_stale_nickname_reservation(path: Path) -> None:
+    def _remove_stale_nickname_reservation(path: Path) -> bool:
+        """Reclaim an orphan only after acquiring its filesystem lease."""
         try:
-            path.unlink()
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            )
         except OSError:
-            pass
+            return False
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            path.unlink()
+            return True
+        except OSError:
+            return False
+        finally:
+            os.close(descriptor)
 
     async def _start_reserved(
         self,

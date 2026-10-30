@@ -6,6 +6,7 @@ from __future__ import annotations
 import signal
 import json
 import asyncio
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -15,7 +16,6 @@ import time
 import threading
 from unittest.mock import AsyncMock
 
-import psutil
 import pytest
 
 from swe.app.subagents import (
@@ -999,8 +999,6 @@ async def test_nickname_allocation_reclaims_stale_orphan_reservation(tmp_path):
                 "session_id": "session-1",
                 "chat_id": "chat-1",
                 "nickname": "研究员",
-                "owner_pid": 99999999,
-                "owner_started_at": 0,
                 "created_at": time.time() - 3600,
             },
         ),
@@ -1020,7 +1018,7 @@ async def test_nickname_allocation_reclaims_stale_orphan_reservation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_nickname_allocation_keeps_live_other_process_reservation(
+async def test_nickname_allocation_keeps_aged_reservation_with_live_lease(
     tmp_path,
 ):
     supervisor = BackgroundSubAgentSupervisor(
@@ -1038,40 +1036,35 @@ async def test_nickname_allocation_keeps_live_other_process_reservation(
         scope.run_store_dir
         / f".nickname-reservation-{session_digest}-live.json"
     )
-    with subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
-    ) as owner:
-        try:
-            reservation.write_text(
-                json.dumps(
-                    {
-                        "session_id": "session-1",
-                        "chat_id": "chat-1",
-                        "nickname": "研究员",
-                        "owner_pid": owner.pid,
-                        "owner_started_at": psutil.Process(
-                            owner.pid,
-                        ).create_time(),
-                        "created_at": time.time() - 3600,
-                    },
-                ),
-                encoding="utf-8",
-            )
+    reservation.write_text(
+        json.dumps(
+            {
+                "session_id": "session-1",
+                "chat_id": "chat-1",
+                "nickname": "研究员",
+                "owner_pid": 99999999,
+                "created_at": time.time() - 3600,
+            },
+        ),
+        encoding="utf-8",
+    )
+    lease = os.open(reservation, os.O_RDONLY)
+    fcntl.flock(lease, fcntl.LOCK_EX)
+    try:
+        record = await supervisor.start(
+            scope=scope,
+            spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
+            definition=definition,
+            parent_agent_config=_agent_config(tmp_path),
+            workspace_dir=tmp_path,
+        )
 
-            record = await supervisor.start(
-                scope=scope,
-                spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
-                definition=definition,
-                parent_agent_config=_agent_config(tmp_path),
-                workspace_dir=tmp_path,
-            )
-
-            assert record.nickname == "研究员-2"
-            assert reservation.exists()
-        finally:
-            owner.terminate()
-            owner.wait(timeout=5)
-            reservation.unlink(missing_ok=True)
+        assert record.nickname == "研究员-2"
+        assert reservation.exists()
+    finally:
+        fcntl.flock(lease, fcntl.LOCK_UN)
+        os.close(lease)
+        reservation.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
@@ -1141,16 +1134,17 @@ async def test_other_session_keeps_reservation_while_it_is_being_written(
         first = (await asyncio.gather(first_task, return_exceptions=True))[0]
 
     assert first_exists_during_write
-    assert first == ("研究员", first_path)
+    assert first[:2] == ("研究员", first_path)
     assert second[0] == "研究员"
     assert first_path.exists()
     assert second[1].exists()
+    os.close(first[2])
+    os.close(second[2])
 
 
 @pytest.mark.asyncio
-async def test_nickname_allocation_keeps_old_reservation_when_owner_access_denied(
+async def test_nickname_allocation_keeps_old_reservation_while_lease_is_held(
     tmp_path,
-    monkeypatch,
 ):
     supervisor = BackgroundSubAgentSupervisor()
     definition = (
@@ -1159,7 +1153,7 @@ async def test_nickname_allocation_keeps_old_reservation_when_owner_access_denie
         .model_copy(update={"nickname": "研究员"})
     )
     scope = _scope(tmp_path)
-    _, reservation = await supervisor._reserve_nickname(
+    _, reservation, owner_lease = await supervisor._reserve_nickname(
         scope,
         _spec(),
         definition,
@@ -1167,19 +1161,126 @@ async def test_nickname_allocation_keeps_old_reservation_when_owner_access_denie
     payload = json.loads(reservation.read_text(encoding="utf-8"))
     payload["created_at"] = time.time() - 3600
     reservation.write_text(json.dumps(payload), encoding="utf-8")
-    original_process = psutil.Process
+    try:
+        nickname, _, other_lease = await supervisor._reserve_nickname(
+            scope,
+            _spec(),
+            definition,
+        )
+        try:
+            assert nickname == "研究员-2"
+            assert reservation.exists()
+        finally:
+            os.close(other_lease)
+    finally:
+        os.close(owner_lease)
 
-    def denied_owner_process(pid=None):
-        if pid == os.getpid():
-            raise psutil.AccessDenied(pid)
-        return original_process(pid)
 
-    monkeypatch.setattr(psutil, "Process", denied_owner_process)
-    nickname, _ = await supervisor._reserve_nickname(
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "failure", "cancelled", "blocked"],
+)
+async def test_start_holds_nickname_lease_until_every_exit_path(
+    tmp_path,
+    monkeypatch,
+    outcome,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        max_running_per_scope=0 if outcome == "blocked" else 2,
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    leases = []
+    original_write = supervisor._write_nickname_reservation
+
+    def capture_lease(path, payload):
+        descriptor = original_write(path, payload)
+        leases.append(descriptor)
+        return descriptor
+
+    async def pause_reap(_scope):
+        entered.set()
+        await release.wait()
+        if outcome == "failure":
+            raise RuntimeError("launch preparation failed")
+
+    monkeypatch.setattr(
+        supervisor,
+        "_write_nickname_reservation",
+        capture_lease,
+    )
+    monkeypatch.setattr(supervisor, "_reap_scope", pause_reap)
+    task = asyncio.create_task(
+        supervisor.start(
+            scope=scope,
+            spec=_spec(),
+            definition=definition,
+            parent_agent_config=_agent_config(tmp_path),
+            workspace_dir=tmp_path,
+        ),
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        reservation = next(
+            scope.run_store_dir.glob(".nickname-reservation-*.json"),
+        )
+        payload = json.loads(reservation.read_text(encoding="utf-8"))
+        payload["created_at"] = time.time() - 3600
+        reservation.write_text(json.dumps(payload), encoding="utf-8")
+        await _assert_aged_reservation_remains_occupied(
+            scope,
+            definition,
+            reservation,
+        )
+        if outcome == "cancelled":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            if outcome == "failure":
+                with pytest.raises(
+                    RuntimeError,
+                    match="launch preparation failed",
+                ):
+                    await task
+            else:
+                result = await task
+                if outcome == "blocked":
+                    assert isinstance(result, BackgroundSubAgentStartBlocked)
+                else:
+                    assert result.nickname == "研究员"
+        assert not reservation.exists()
+        with pytest.raises(OSError):
+            os.fstat(leases[0])
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def _assert_aged_reservation_remains_occupied(
+    scope,
+    definition,
+    reservation,
+):
+    observer = BackgroundSubAgentSupervisor()
+    nickname, other_path, other_lease = await observer._reserve_nickname(
         scope,
         _spec(),
         definition,
     )
-
-    assert nickname == "研究员-2"
-    assert reservation.exists()
+    try:
+        assert nickname == "研究员-2"
+        assert reservation.exists()
+    finally:
+        other_path.unlink()
+        os.close(other_lease)
