@@ -6,10 +6,13 @@ from __future__ import annotations
 import signal
 import json
 import asyncio
+import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
 from unittest.mock import AsyncMock
 
 import psutil
@@ -985,7 +988,11 @@ async def test_nickname_allocation_reclaims_stale_orphan_reservation(tmp_path):
     )
     scope = _scope(tmp_path)
     scope.run_store_dir.mkdir()
-    stale = scope.run_store_dir / ".nickname-reservation-orphan.json"
+    session_digest = hashlib.sha256(b"session-1").hexdigest()[:16]
+    stale = (
+        scope.run_store_dir
+        / f".nickname-reservation-{session_digest}-orphan.json"
+    )
     stale.write_text(
         json.dumps(
             {
@@ -1029,7 +1036,11 @@ async def test_nickname_allocation_keeps_live_other_process_reservation(
     owner = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
     )
-    reservation = scope.run_store_dir / ".nickname-reservation-live.json"
+    session_digest = hashlib.sha256(b"session-1").hexdigest()[:16]
+    reservation = (
+        scope.run_store_dir
+        / f".nickname-reservation-{session_digest}-live.json"
+    )
     try:
         reservation.write_text(
             json.dumps(
@@ -1082,3 +1093,93 @@ async def test_nickname_reservation_rejects_symlinked_run_store(tmp_path):
         )
 
     assert not list(outside.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_other_session_keeps_reservation_while_it_is_being_written(
+    tmp_path,
+    monkeypatch,
+):
+    supervisor = BackgroundSubAgentSupervisor()
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    write_started = threading.Event()
+    continue_write = threading.Event()
+    original_dump = json.dump
+
+    def paused_dump(payload, stream, **kwargs):
+        if payload.get("session_id") == "session-1":
+            write_started.set()
+            assert continue_write.wait(timeout=5)
+        return original_dump(payload, stream, **kwargs)
+
+    monkeypatch.setattr(json, "dump", paused_dump)
+
+    def reserve_first():
+        return asyncio.run(
+            supervisor._reserve_nickname(scope, _spec(), definition),
+        )
+
+    first_task = asyncio.create_task(asyncio.to_thread(reserve_first))
+    try:
+        assert await asyncio.to_thread(write_started.wait, 5)
+        first_path = next(
+            scope.run_store_dir.glob(".nickname-reservation-*.json"),
+        )
+        second = await supervisor._reserve_nickname(
+            scope,
+            _spec().model_copy(update={"parent_thread_id": "session-2"}),
+            definition,
+        )
+        first_exists_during_write = first_path.exists()
+    finally:
+        continue_write.set()
+        first = (await asyncio.gather(first_task, return_exceptions=True))[0]
+
+    assert first_exists_during_write
+    assert first == ("研究员", first_path)
+    assert second[0] == "研究员"
+    assert first_path.exists()
+    assert second[1].exists()
+
+
+@pytest.mark.asyncio
+async def test_nickname_allocation_keeps_old_reservation_when_owner_access_denied(
+    tmp_path,
+    monkeypatch,
+):
+    supervisor = BackgroundSubAgentSupervisor()
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    _, reservation = await supervisor._reserve_nickname(
+        scope,
+        _spec(),
+        definition,
+    )
+    payload = json.loads(reservation.read_text(encoding="utf-8"))
+    payload["created_at"] = time.time() - 3600
+    reservation.write_text(json.dumps(payload), encoding="utf-8")
+    original_process = psutil.Process
+
+    def denied_owner_process(pid=None):
+        if pid == os.getpid():
+            raise psutil.AccessDenied(pid)
+        return original_process(pid)
+
+    monkeypatch.setattr(psutil, "Process", denied_owner_process)
+    nickname, _ = await supervisor._reserve_nickname(
+        scope,
+        _spec(),
+        definition,
+    )
+
+    assert nickname == "研究员-2"
+    assert reservation.exists()

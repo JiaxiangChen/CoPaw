@@ -286,7 +286,7 @@ class BackgroundSubAgentSupervisor:
                         break
                     except BlockingIOError:
                         await asyncio.sleep(0.01)
-                yield
+                yield digest
             finally:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
@@ -300,7 +300,7 @@ class BackgroundSubAgentSupervisor:
         async with self._nickname_allocation_lock(
             scope,
             spec.parent_thread_id,
-        ):
+        ) as session_digest:
             chat_context = {
                 "session_id": spec.parent_thread_id,
                 "chat_id": spec.parent_chat_id,
@@ -313,7 +313,10 @@ class BackgroundSubAgentSupervisor:
                 )
                 if record.nickname
             }
-            for reservation in self._nickname_reservations(scope):
+            for reservation in self._nickname_reservations(
+                scope,
+                session_digest,
+            ):
                 if reservation["session_id"] != spec.parent_thread_id:
                     continue
                 reserved_chat_id = reservation["chat_id"]
@@ -329,7 +332,7 @@ class BackgroundSubAgentSupervisor:
             )
             reservation_path = (
                 scope.run_store_dir
-                / f".nickname-reservation-{uuid4().hex}.json"
+                / f".nickname-reservation-{session_digest}-{uuid4().hex}.json"
             )
             self._write_nickname_reservation(
                 reservation_path,
@@ -348,9 +351,12 @@ class BackgroundSubAgentSupervisor:
     def _nickname_reservations(
         cls,
         scope: BackgroundSubAgentScope,
+        session_digest: str,
     ) -> list[dict[str, str]]:
         reservations = []
-        for path in scope.run_store_dir.glob(".nickname-reservation-*.json"):
+        for path in scope.run_store_dir.glob(
+            f".nickname-reservation-{session_digest}-*.json",
+        ):
             try:
                 if not stat.S_ISREG(path.lstat().st_mode):
                     continue
@@ -415,8 +421,10 @@ class BackgroundSubAgentSupervisor:
                 )
                 > _PROCESS_START_TIME_TOLERANCE_SECONDS
             )
-        except (psutil.Error, ValueError):
+        except psutil.NoSuchProcess:
             return True
+        except (psutil.Error, ValueError):
+            return False
 
     @staticmethod
     def _remove_stale_nickname_reservation(path: Path) -> None:
