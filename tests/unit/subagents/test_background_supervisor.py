@@ -897,3 +897,34 @@ async def test_concurrent_starts_reserve_nicknames_before_launch(
         timeout=5,
     )
     assert {record.nickname for record in records} == expected_nicknames
+
+
+@pytest.mark.asyncio
+async def test_two_supervisors_allocate_unique_nicknames_in_same_chat(
+    tmp_path,
+):
+    """Separate Supervisor instances share durable nickname reservations."""
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(update={"nickname": "研究员"})
+    )
+    scope = _scope(tmp_path)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec().model_copy(update={"parent_chat_id": "chat-1"}),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+
+    records = await asyncio.gather(
+        BackgroundSubAgentSupervisor(popen_factory=_FakePopenFactory()).start(
+            **kwargs,
+        ),
+        BackgroundSubAgentSupervisor(popen_factory=_FakePopenFactory()).start(
+            **kwargs,
+        ),
+    )
+
+    assert {record.nickname for record in records} == {"研究员", "研究员-2"}

@@ -10,7 +10,11 @@ import json
 import pytest
 
 from swe.agents.hook_runtime.models import HookSessionOverlay
+from swe.agents.tools.subagent_background import (
+    create_background_subagent_tools,
+)
 from swe.agents.tool_guard_mixin import ToolGuardMixin
+from swe.app.subagents import BackgroundSubAgentStartBlocked
 from swe.app.runner.runner import (
     AgentRunner,
     _approved_tool_call_from_record,
@@ -286,9 +290,82 @@ def test_create_agent_for_query_forces_the_selected_expert_start(
     forced = json.loads(captured["request_context"]["forced_tool_call_json"])
     assert forced["name"] == "start_subagent"
     assert forced["input"] == {
-        "name": "researcher",
+        "expert_name": "researcher",
         "objective": "Research this topic",
     }
+
+
+@pytest.mark.asyncio
+async def test_selected_expert_forced_call_invokes_registered_start_tool(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """The forced payload must match the registered start tool signature."""
+    selected_id = "11111111-1111-4111-8111-111111111111"
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
+    (agents_dir / f"{selected_id}.toml").write_text(
+        'name = "researcher"\n'
+        'description = "Research expert."\n'
+        'instruction = "Research the requested topic."\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    runner = AgentRunner(agent_id="test-agent", workspace_dir=tmp_path)
+    runner.tenant_id = "tenant-1"
+    runner.session = SimpleNamespace(
+        _get_save_path=lambda session_id, user_id: (
+            f"/tmp/{session_id}-{user_id}.json"
+        ),
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured["request_context"] = kwargs["request_context"]
+
+    async def start(**kwargs):
+        captured["start"] = kwargs
+        return BackgroundSubAgentStartBlocked(limit=1)
+
+    monkeypatch.setattr("swe.app.runner.runner.SWEAgent", FakeAgent)
+    runner._create_agent_for_query(
+        agent_config=_fake_agent_config(),
+        env_context="",
+        mcp_clients=[],
+        request=SimpleNamespace(
+            channel_meta={"selected_expert_id": selected_id},
+        ),
+        session_id="session-1",
+        user_id="user-1",
+        channel="console",
+        chat=SimpleNamespace(id="chat-1"),
+        turn_id="turn-1",
+        hook_overlay=HookSessionOverlay(),
+        auth_token=None,
+        approved_tool_call=None,
+        current_user_text="Research this topic",
+    )
+
+    forced = json.loads(captured["request_context"]["forced_tool_call_json"])
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(start=start),
+        parent_agent_config=_fake_agent_config(),
+        workspace_dir=tmp_path,
+        request_context={
+            **captured["request_context"],
+            "tenant_id": "tenant-1",
+            "agent_id": "test-agent",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+        },
+        selected_expert_id=selected_id,
+    )
+
+    await tools["start_subagent"](**forced["input"])
+
+    assert captured["start"]["spec"].name == "researcher"
+    assert captured["start"]["spec"].objective == "Research this topic"
 
 
 def test_selected_expert_keeps_matching_approved_start_for_hook_replay(
@@ -324,7 +401,7 @@ def test_selected_expert_keeps_matching_approved_start_for_hook_replay(
         "id": "approved-start-id",
         "name": "start_subagent",
         "input": {
-            "name": "researcher",
+            "expert_name": "researcher",
             "objective": "Research this topic",
         },
         "_approval_replay": {"approval_kind": "hook_pre_tool_use"},

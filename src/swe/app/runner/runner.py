@@ -2396,7 +2396,7 @@ def _selected_expert_start_tool_call(
         "id": f"selected-expert-{uuid4().hex}",
         "name": "start_subagent",
         "input": {
-            "name": definition.name,
+            "expert_name": definition.name,
             "objective": normalized_objective,
         },
     }
@@ -2416,7 +2416,8 @@ def _is_selected_expert_start_approval(
     return (
         isinstance(approved_input, dict)
         and isinstance(selected_input, dict)
-        and approved_input.get("name") == selected_input.get("name")
+        and approved_input.get("expert_name")
+        == selected_input.get("expert_name")
     )
 
 

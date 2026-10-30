@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -171,10 +174,6 @@ class BackgroundSubAgentSupervisor:
         self._cancel_grace_seconds = cancel_grace_seconds
         self._active: dict[tuple[str, str, str], dict[str, _ActiveRun]] = {}
         self._starting: dict[tuple[str, str, str], set[str]] = {}
-        self._nickname_reservations: dict[
-            tuple[str, str, str, str],
-            dict[str, set[str]],
-        ] = {}
 
     async def start(
         self,
@@ -196,36 +195,11 @@ class BackgroundSubAgentSupervisor:
     ) -> BackgroundSubAgentRunRecord | BackgroundSubAgentStartBlocked:
         """Reserve capacity before any asynchronous launch preparation."""
         definition = definition or self._registry.resolve(spec.name)
-        chat_reservations = self._nickname_reservations.setdefault(
-            (*self._scope_key(scope), spec.parent_thread_id),
-            {},
+        nickname, reservation_path = await self._reserve_nickname(
+            scope,
+            spec,
+            definition,
         )
-        reservations = chat_reservations.setdefault(spec.parent_chat_id, set())
-        chat_context = {
-            "session_id": spec.parent_thread_id,
-            "chat_id": spec.parent_chat_id,
-        }
-        used = {
-            record.nickname
-            for record in read_chat_run_records(
-                scope.run_store_dir,
-                chat_context,
-            )
-            if record.nickname
-        }
-        for chat_id, names in chat_reservations.items():
-            if (
-                not chat_id
-                or not spec.parent_chat_id
-                or chat_id == spec.parent_chat_id
-            ):
-                used.update(names)
-        nickname = allocate_subagent_nickname(
-            assign_subagent_nickname(definition.nickname),
-            used,
-        )
-        # Reserve before the first await, including asynchronous scope reaping.
-        reservations.add(nickname)
         try:
             await self._reap_scope(scope)
             active = self._active_for_scope(scope)
@@ -275,7 +249,113 @@ class BackgroundSubAgentSupervisor:
             finally:
                 starting.discard(run_id)
         finally:
-            reservations.discard(nickname)
+            try:
+                reservation_path.unlink()
+            except FileNotFoundError:
+                pass
+
+    @asynccontextmanager
+    async def _nickname_allocation_lock(
+        self,
+        scope: BackgroundSubAgentScope,
+        parent_thread_id: str,
+    ):
+        """Serialize nickname allocation until its run record is durable."""
+        digest = hashlib.sha256(
+            parent_thread_id.encode("utf-8"),
+        ).hexdigest()[:16]
+        scope.run_store_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = scope.run_store_dir / f".nickname-{digest}.lock"
+        with lock_path.open("a") as stream:
+            try:
+                while True:
+                    try:
+                        fcntl.flock(
+                            stream.fileno(),
+                            fcntl.LOCK_EX | fcntl.LOCK_NB,
+                        )
+                        break
+                    except BlockingIOError:
+                        await asyncio.sleep(0.01)
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+    async def _reserve_nickname(
+        self,
+        scope: BackgroundSubAgentScope,
+        spec: DelegationSpec,
+        definition: SubAgentDefinition,
+    ) -> tuple[str, Path]:
+        """Persist a Chat-visible reservation before launch preparation awaits."""
+        async with self._nickname_allocation_lock(
+            scope,
+            spec.parent_thread_id,
+        ):
+            chat_context = {
+                "session_id": spec.parent_thread_id,
+                "chat_id": spec.parent_chat_id,
+            }
+            used = {
+                record.nickname
+                for record in read_chat_run_records(
+                    scope.run_store_dir,
+                    chat_context,
+                )
+                if record.nickname
+            }
+            for reservation in self._nickname_reservations(scope):
+                if reservation["session_id"] != spec.parent_thread_id:
+                    continue
+                reserved_chat_id = reservation["chat_id"]
+                if (
+                    not reserved_chat_id
+                    or not spec.parent_chat_id
+                    or reserved_chat_id == spec.parent_chat_id
+                ):
+                    used.add(reservation["nickname"])
+            nickname = allocate_subagent_nickname(
+                assign_subagent_nickname(definition.nickname),
+                used,
+            )
+            reservation_path = (
+                scope.run_store_dir
+                / f".nickname-reservation-{uuid4().hex}.json"
+            )
+            reservation_path.write_text(
+                json.dumps(
+                    {
+                        "session_id": spec.parent_thread_id,
+                        "chat_id": spec.parent_chat_id,
+                        "nickname": nickname,
+                    },
+                ),
+                encoding="utf-8",
+            )
+            return nickname, reservation_path
+
+    @staticmethod
+    def _nickname_reservations(
+        scope: BackgroundSubAgentScope,
+    ) -> list[dict[str, str]]:
+        reservations = []
+        for path in scope.run_store_dir.glob(".nickname-reservation-*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                session_id = str(payload["session_id"])
+                chat_id = str(payload["chat_id"])
+                nickname = str(payload["nickname"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if session_id and nickname:
+                reservations.append(
+                    {
+                        "session_id": session_id,
+                        "chat_id": chat_id,
+                        "nickname": nickname,
+                    },
+                )
+        return reservations
 
     async def _start_reserved(
         self,
