@@ -459,7 +459,6 @@ async def test_start_subagent_serializes_real_run_record(tmp_path):
     request_context = {
         "tenant_id": "tenant-1",
         "agent_id": "agent-1",
-        "selected_expert_execution": True,
         "_subagent_definition_store_dir": str(tmp_path / "definitions"),
     }
     tools = create_background_subagent_tools(

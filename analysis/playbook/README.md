@@ -32,7 +32,7 @@
 | [skill-freshness-and-span-write-performance.md](skill-freshness-and-span-write-performance.md) | 技能递归 freshness 检查与 Tracing 批量写入的 CPU 成本、隔离基准及优化边界 |
 | [skill-freshness-optimization-detail.md](skill-freshness-optimization-detail.md) | freshness 调用窗口、token 兼容性、锁优化、manifest 一致性及分阶段验收方案 |
 | [stop-appended-message.md](stop-appended-message.md) | Stop 附加消息资格、人工测试脱敏、UTF-8 配额、停止/持久化和重连诊断入口 |
-| [subagent-intent-and-expert-discovery.md](subagent-intent-and-expert-discovery.md) | 子代理意图、Source 专家发现、Chat 管理归属、依赖并发与 Goal 授权排查 |
+| [subagent-intent-and-expert-discovery.md](subagent-intent-and-expert-discovery.md) | 子代理意图、昵称协议与等待、Source 专家发现、Chat 管理归属、依赖并发与 Goal 授权排查 |
 | [tool-result-truncation.md](tool-result-truncation.md) | MCP / read_file 工具返回出现 `<<<TRUNCATED>>>` 时的截断点和临时调大配置 |
 | [tracing-bounded-writer.md](tracing-bounded-writer.md) | Tracing 写入确认、背压、分块、关闭超时及取消回滚异常的排查边界 |
 | [troubleshooting-order.md](troubleshooting-order.md) | 从复现、取证、收敛到验证的推荐顺序 |

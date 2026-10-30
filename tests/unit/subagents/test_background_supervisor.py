@@ -1033,45 +1033,45 @@ async def test_nickname_allocation_keeps_live_other_process_reservation(
     )
     scope = _scope(tmp_path)
     scope.run_store_dir.mkdir()
-    owner = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
-    )
     session_digest = hashlib.sha256(b"session-1").hexdigest()[:16]
     reservation = (
         scope.run_store_dir
         / f".nickname-reservation-{session_digest}-live.json"
     )
-    try:
-        reservation.write_text(
-            json.dumps(
-                {
-                    "session_id": "session-1",
-                    "chat_id": "chat-1",
-                    "nickname": "研究员",
-                    "owner_pid": owner.pid,
-                    "owner_started_at": psutil.Process(
-                        owner.pid,
-                    ).create_time(),
-                    "created_at": time.time() - 3600,
-                },
-            ),
-            encoding="utf-8",
-        )
+    with subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+    ) as owner:
+        try:
+            reservation.write_text(
+                json.dumps(
+                    {
+                        "session_id": "session-1",
+                        "chat_id": "chat-1",
+                        "nickname": "研究员",
+                        "owner_pid": owner.pid,
+                        "owner_started_at": psutil.Process(
+                            owner.pid,
+                        ).create_time(),
+                        "created_at": time.time() - 3600,
+                    },
+                ),
+                encoding="utf-8",
+            )
 
-        record = await supervisor.start(
-            scope=scope,
-            spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
-            definition=definition,
-            parent_agent_config=_agent_config(tmp_path),
-            workspace_dir=tmp_path,
-        )
+            record = await supervisor.start(
+                scope=scope,
+                spec=_spec().model_copy(update={"parent_chat_id": "chat-1"}),
+                definition=definition,
+                parent_agent_config=_agent_config(tmp_path),
+                workspace_dir=tmp_path,
+            )
 
-        assert record.nickname == "研究员-2"
-        assert reservation.exists()
-    finally:
-        owner.terminate()
-        owner.wait(timeout=5)
-        reservation.unlink(missing_ok=True)
+            assert record.nickname == "研究员-2"
+            assert reservation.exists()
+        finally:
+            owner.terminate()
+            owner.wait(timeout=5)
+            reservation.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
