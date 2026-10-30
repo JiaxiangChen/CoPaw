@@ -812,9 +812,20 @@ async def test_configured_nickname_remains_unique_after_terminal_run(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("second_session", "second_chat", "expected_nicknames"),
+    [
+        ("session-1", "", {"研究员", "研究员-2"}),
+        ("session-1", "other-chat", {"研究员"}),
+        ("other-session", "", {"研究员"}),
+    ],
+)
 async def test_concurrent_starts_reserve_nicknames_before_launch(
     tmp_path,
     monkeypatch,
+    second_session,
+    second_chat,
+    expected_nicknames,
 ):
     supervisor = BackgroundSubAgentSupervisor(
         popen_factory=_FakePopenFactory(),
@@ -866,7 +877,20 @@ async def test_concurrent_starts_reserve_nicknames_before_launch(
         "workspace_dir": tmp_path,
     }
     records = await asyncio.wait_for(
-        asyncio.gather(supervisor.start(**kwargs), supervisor.start(**kwargs)),
+        asyncio.gather(
+            supervisor.start(**kwargs),
+            supervisor.start(
+                **{
+                    **kwargs,
+                    "spec": _spec().model_copy(
+                        update={
+                            "parent_thread_id": second_session,
+                            "parent_chat_id": second_chat,
+                        },
+                    ),
+                },
+            ),
+        ),
         timeout=5,
     )
-    assert {record.nickname for record in records} == {"研究员", "研究员-2"}
+    assert {record.nickname for record in records} == expected_nicknames

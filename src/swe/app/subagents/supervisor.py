@@ -170,7 +170,10 @@ class BackgroundSubAgentSupervisor:
         self._cancel_grace_seconds = cancel_grace_seconds
         self._active: dict[tuple[str, str, str], dict[str, _ActiveRun]] = {}
         self._starting: dict[tuple[str, str, str], set[str]] = {}
-        self._nickname_reservations: dict[tuple[str, str, str], set[str]] = {}
+        self._nickname_reservations: dict[
+            tuple[str, str, str, str, str],
+            set[str],
+        ] = {}
 
     async def start(
         self,
@@ -193,7 +196,11 @@ class BackgroundSubAgentSupervisor:
         """Reserve capacity before any asynchronous launch preparation."""
         definition = definition or self._registry.resolve(spec.name)
         reservations = self._nickname_reservations.setdefault(
-            self._scope_key(scope),
+            (
+                *self._scope_key(scope),
+                spec.parent_thread_id,
+                spec.parent_chat_id,
+            ),
             set(),
         )
         chat_context = {
