@@ -17,6 +17,7 @@ from agentscope.tool import ToolResponse
 from ...app.subagents import (
     AgentOwnedDefinitionRepository,
     BackgroundSubAgentNotManageable,
+    BackgroundSubAgentRunRecord,
     BackgroundSubAgentScope,
     BackgroundSubAgentStartBlocked,
     BackgroundSubAgentSupervisor,
@@ -366,12 +367,86 @@ def _create_wait_subagent_tool(
         nicknames: list[str] | None = None,
         timeout_ms: int = 3000,
     ) -> ToolResponse:
-        """Wait briefly and return current Background SubAgent statuses."""
-        del nicknames
-        snapshot = await _wait_for_chat_runs(context, timeout_ms)
-        return _json_response(_serialize_wait_snapshot(snapshot))
+        """Wait for all named SubAgents, or monitor the Chat when omitted."""
+        try:
+            if nicknames is None:
+                snapshot = await _wait_for_chat_runs(context, timeout_ms)
+                return _json_response(_serialize_wait_snapshot(snapshot))
+            if not nicknames:
+                return _json_response(
+                    {
+                        "status": "invalid_request",
+                        "reason": "nicknames_must_not_be_empty",
+                    },
+                )
+            targets = {}
+            for nickname in nicknames:
+                record = await _resolve_chat_nickname(context, nickname)
+                if record is None:
+                    return _json_response(
+                        {"status": "not_found", "nickname": nickname},
+                    )
+                targets[record.run_id] = record
+            return _json_response(
+                await _wait_for_target_runs(context, targets, timeout_ms),
+            )
+        except Exception:
+            return _json_response(
+                {
+                    "status": "failed",
+                    "reason": "subagent_operation_failed",
+                },
+            )
 
     return wait_subagent
+
+
+async def _reload_target_records(
+    context: _BackgroundSubagentToolContext,
+    targets: dict[str, BackgroundSubAgentRunRecord],
+) -> list[BackgroundSubAgentRunRecord]:
+    """Refresh fixed, previously authorized run identities only."""
+    for run_id in targets:
+        await context.supervisor.reap_run(context.tool_scope, run_id)
+        record = await run_runtime_state_work(
+            read_chat_run_record,
+            context.tool_scope.run_store_dir,
+            context.request_context,
+            run_id,
+        )
+        if record is not None:
+            targets[run_id] = record
+    return list(targets.values())
+
+
+async def _wait_for_target_runs(
+    context: _BackgroundSubagentToolContext,
+    targets: dict[str, BackgroundSubAgentRunRecord],
+    timeout_ms: int,
+) -> dict[str, Any]:
+    """Wait until every fixed target is terminal or the deadline expires."""
+    deadline = time.monotonic() + max(timeout_ms, 0) / 1000
+    while True:
+        records = await _reload_target_records(context, targets)
+        complete = all(
+            record.status in TERMINAL_BACKGROUND_RUN_STATUSES
+            for record in records
+        )
+        remaining = deadline - time.monotonic()
+        if complete or remaining <= 0:
+            return {
+                "timed_out": not complete,
+                "subagents": [
+                    _model_subagent_record(
+                        record,
+                        include_result=(
+                            record.status in TERMINAL_BACKGROUND_RUN_STATUSES
+                        ),
+                    )
+                    for record in records
+                ],
+            }
+        await asyncio.sleep(min(0.05, remaining))
 
 
 async def _wait_for_chat_runs(

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Chat ownership and retained Background SubAgent management."""
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -32,7 +33,13 @@ def _context(tmp_path, **overrides):
     }
 
 
-async def _record(tmp_path, *, session_id="session-1", chat_id="chat-1"):
+async def _record(
+    tmp_path,
+    *,
+    session_id="session-1",
+    chat_id="chat-1",
+    nickname=None,
+):
     store = PerRunSubAgentRunStore(tmp_path / "runs")
     record = await store.create(
         DelegationSpec(
@@ -49,7 +56,8 @@ async def _record(tmp_path, *, session_id="session-1", chat_id="chat-1"):
             owner_scope="run:tenant-1:agent-1",
         ),
         PermissionPolicy.readonly(),
-        nickname=("研究员" if session_id == "session-1" else "审查员"),
+        nickname=nickname
+        or ("研究员" if session_id == "session-1" else "审查员"),
     )
     return store, record
 
@@ -196,6 +204,211 @@ async def test_wait_without_session_never_calls_supervisor(tmp_path):
         "timed_out": False,
     }
     supervisor.wait.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_wait_remains_pending_until_every_target_is_terminal(
+    tmp_path,
+):
+    store, first = await _record(tmp_path, nickname="研究员")
+    _, second = await _record(tmp_path, nickname="审查员")
+    await store.cancel(first.run_id)
+    polled = asyncio.Event()
+
+    async def reap(_scope, _run_id):
+        polled.set()
+
+    supervisor = SimpleNamespace(
+        reap_run=AsyncMock(side_effect=reap),
+        wait=AsyncMock(),
+        cancel=AsyncMock(),
+    )
+    task = asyncio.create_task(
+        _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=["研究员", "审查员"],
+            timeout_ms=1000,
+        ),
+    )
+    try:
+        await asyncio.wait_for(polled.wait(), timeout=0.5)
+        assert not task.done()
+        await store.cancel(second.run_id)
+        payload = _payload(await asyncio.wait_for(task, timeout=0.5))
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert payload["timed_out"] is False
+    assert [item["nickname"] for item in payload["subagents"]] == [
+        "研究员",
+        "审查员",
+    ]
+    assert all(item["status"] == "cancelled" for item in payload["subagents"])
+    assert "run_id" not in json.dumps(payload)
+    assert {call.args[1] for call in supervisor.reap_run.await_args_list} == {
+        first.run_id,
+        second.run_id,
+    }
+    supervisor.wait.assert_not_awaited()
+    supervisor.cancel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_wait_timeout_returns_latest_targets_ignoring_unrelated_run(
+    tmp_path,
+):
+    store, first = await _record(tmp_path, nickname="研究员")
+    _, second = await _record(tmp_path, nickname="审查员")
+    _, unrelated = await _record(tmp_path, nickname="旧任务")
+    await store.cancel(unrelated.run_id)
+
+    async def reap(_scope, run_id):
+        if run_id == first.run_id:
+            await store.cancel(run_id)
+
+    supervisor = SimpleNamespace(
+        reap_run=AsyncMock(side_effect=reap),
+        wait=AsyncMock(),
+        cancel=AsyncMock(),
+    )
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=["研究员", "审查员"],
+            timeout_ms=20,
+        ),
+    )
+
+    assert payload["timed_out"] is True
+    assert {
+        item["nickname"]: item["status"] for item in payload["subagents"]
+    } == {
+        "研究员": "cancelled",
+        "审查员": second.status,
+    }
+    assert "run_id" not in json.dumps(payload)
+    assert {call.args[1] for call in supervisor.reap_run.await_args_list} == {
+        first.run_id,
+        second.run_id,
+    }
+    supervisor.wait.assert_not_awaited()
+    supervisor.cancel.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_wait_all_terminal_returns_without_sleep(
+    tmp_path,
+    monkeypatch,
+):
+    store, record = await _record(tmp_path)
+    await store.cancel(record.run_id)
+    supervisor = SimpleNamespace(reap_run=AsyncMock(), wait=AsyncMock())
+    sleep = AsyncMock(
+        side_effect=AssertionError("terminal targets must not wait"),
+    )
+    monkeypatch.setattr(tool_module.asyncio, "sleep", sleep)
+
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=[record.nickname],
+            timeout_ms=1000,
+        ),
+    )
+
+    assert payload["timed_out"] is False
+    assert payload["subagents"][0]["status"] == "cancelled"
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nickname", ["未知", "外部任务"])
+async def test_group_wait_resolves_every_nickname_before_reaping(
+    tmp_path,
+    nickname,
+):
+    await _record(tmp_path)
+    await _record(tmp_path, chat_id="other-chat", nickname="外部任务")
+    supervisor = SimpleNamespace(reap_run=AsyncMock(), wait=AsyncMock())
+
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=["研究员", nickname],
+            timeout_ms=1000,
+        ),
+    )
+
+    assert payload == {"status": "not_found", "nickname": nickname}
+    supervisor.reap_run.assert_not_awaited()
+    supervisor.wait.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_wait_rejects_explicit_empty_target_list(tmp_path):
+    supervisor = SimpleNamespace(reap_run=AsyncMock(), wait=AsyncMock())
+
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](nicknames=[]),
+    )
+
+    assert payload["status"] == "invalid_request"
+    supervisor.reap_run.assert_not_awaited()
+    supervisor.wait.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["resolve", "reap", "monitor"])
+async def test_wait_failures_return_safe_response(
+    tmp_path,
+    monkeypatch,
+    failure_stage,
+):
+    await _record(tmp_path)
+    failure = RuntimeError("private subagent-internal /private/worker.log")
+    supervisor = SimpleNamespace(reap_run=AsyncMock(), wait=AsyncMock())
+    if failure_stage == "resolve":
+        monkeypatch.setattr(
+            tool_module,
+            "_resolve_chat_nickname",
+            AsyncMock(side_effect=failure),
+        )
+    elif failure_stage == "reap":
+        supervisor.reap_run.side_effect = failure
+    else:
+        supervisor.wait.side_effect = failure
+
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=None if failure_stage == "monitor" else ["研究员"],
+            timeout_ms=0,
+        ),
+    )
+
+    assert payload == {
+        "status": "failed",
+        "reason": "subagent_operation_failed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_group_wait_retains_missing_target_until_timeout(
+    tmp_path,
+    monkeypatch,
+):
+    _, record = await _record(tmp_path)
+    monkeypatch.setattr(tool_module, "read_chat_run_record", lambda *_: None)
+    supervisor = SimpleNamespace(reap_run=AsyncMock())
+
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](
+            nicknames=[record.nickname],
+            timeout_ms=0,
+        ),
+    )
+
+    assert payload["timed_out"] is True
+    assert len(payload["subagents"]) == 1
+    assert payload["subagents"][0]["nickname"] == record.nickname
+    assert payload["subagents"][0]["status"] == record.status
 
 
 @pytest.mark.asyncio
