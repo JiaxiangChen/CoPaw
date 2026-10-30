@@ -709,11 +709,6 @@ def _approved_tool_call_from_record(record) -> dict[str, Any] | None:
         source_key="thinking_blocks",
         target_key="_thinking_blocks",
     )
-    selected_expert_replay = record.extra.get("selected_expert_replay")
-    if isinstance(selected_expert_replay, dict):
-        approved_tool_call["_selected_expert_replay"] = dict(
-            selected_expert_replay,
-        )
     replay_metadata = _approval_replay_metadata(record)
     if replay_metadata is not None:
         approved_tool_call["_approval_replay"] = replay_metadata
@@ -2353,41 +2348,6 @@ def _request_selected_expert_id(request: AgentRequest) -> str | None:
     if isinstance(value, str):
         value = value.strip()
     return value or None
-
-
-def _selected_expert_replay_matches_request(
-    replay: Any,
-    selected_expert_id: str | None,
-    request_context: dict[str, Any],
-    tenant_id: str,
-    agent_id: str,
-) -> bool:
-    if not isinstance(replay, dict):
-        return False
-    if replay.get("phase") != "wait_selected_expert":
-        return False
-    if not replay.get("run_id") or not replay.get("selected_expert_id"):
-        return False
-    expert_id = replay["selected_expert_id"]
-    if selected_expert_id and selected_expert_id != expert_id:
-        return False
-    expected_identity = {
-        "tenant_id": str(tenant_id or "default"),
-        "agent_id": str(agent_id or "default"),
-        "session_id": str(request_context.get("session_id") or ""),
-        "chat_id": str(request_context.get("chat_id") or ""),
-    }
-    return all(
-        str(replay.get(key) or "") == value
-        for key, value in expected_identity.items()
-    )
-
-
-def _selected_expert_wait_approval_error() -> str:
-    return (
-        "The selected expert's status could not be confirmed. "
-        "It may still be running; it was not replaced by the Main Agent."
-    )
 
 
 def _selected_expert_start_tool_call(
@@ -4617,38 +4577,6 @@ class AgentRunner(Runner):
         objective: str,
         approved_tool_call: dict[str, Any] | None,
     ) -> None:
-        replay = (
-            approved_tool_call.get("_selected_expert_replay")
-            if isinstance(approved_tool_call, dict)
-            else None
-        )
-        if (
-            isinstance(approved_tool_call, dict)
-            and approved_tool_call.get("name") == "wait_selected_expert"
-        ):
-            if not _selected_expert_replay_matches_request(
-                replay,
-                selected_expert_id,
-                request_context,
-                self.tenant_id,
-                self.agent_id,
-            ):
-                request_context["selected_expert_execution_error"] = (
-                    _selected_expert_wait_approval_error()
-                )
-                return
-            assert isinstance(replay, dict)
-            run_id = str(replay["run_id"]).strip()
-            expert_id = str(replay["selected_expert_id"]).strip()
-            request_context["selected_expert_id"] = expert_id
-            request_context["selected_expert_execution"] = True
-            request_context["selected_expert_run_id"] = run_id
-            request_context["_selected_expert_wait_authorized"] = True
-            request_context["forced_tool_call_json"] = json.dumps(
-                approved_tool_call,
-                ensure_ascii=False,
-            )
-            return
         if selected_expert_id is None:
             return
         request_context["selected_expert_id"] = selected_expert_id
@@ -4661,9 +4589,8 @@ class AgentRunner(Runner):
                 selected_expert_id=selected_expert_id,
                 chat_id=chat.id if chat is not None else "",
             )
-        except OSError as exc:
+        except OSError:
             dependency_view_root = None
-            request_context["selected_expert_execution_error"] = str(exc)
         if dependency_view_root is not None:
             request_context["_expert_dependency_view_root"] = str(
                 dependency_view_root,
@@ -4693,11 +4620,6 @@ class AgentRunner(Runner):
             objective=objective,
         )
         if selected_expert_call is None:
-            if "selected_expert_execution_error" not in request_context:
-                request_context["selected_expert_execution_error"] = (
-                    "The selected expert is unavailable or disabled. "
-                    "Choose an enabled expert and try again."
-                )
             return
         request_context["selected_expert_execution"] = True
         approved_start = (
