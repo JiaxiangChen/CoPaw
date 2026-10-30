@@ -68,6 +68,7 @@ def _tools(tmp_path, supervisor, **context):
         parent_agent_config=AgentProfileConfig(id="agent-1", name="Main"),
         workspace_dir=tmp_path,
         request_context=_context(tmp_path, **context),
+        selected_expert_id=context.get("selected_expert_id"),
     )
 
 
@@ -117,7 +118,12 @@ async def test_foreign_runs_are_rejected_before_supervisor(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
-async def test_owned_runs_remain_manageable(tmp_path, method):
+@pytest.mark.parametrize("selected_expert_id", [None, "expert-1"])
+async def test_owned_runs_remain_manageable(
+    tmp_path,
+    method,
+    selected_expert_id,
+):
     store, record = await _record(tmp_path)
     record.nickname = "研究员"
     store._write(record)
@@ -127,7 +133,11 @@ async def test_owned_runs_remain_manageable(tmp_path, method):
         cancel=AsyncMock(return_value=record),
     )
     payload = _payload(
-        await _tools(tmp_path, supervisor)[method]("研究员"),
+        await _tools(
+            tmp_path,
+            supervisor,
+            selected_expert_id=selected_expert_id,
+        )[method]("研究员"),
     )
     assert payload["nickname"] == "研究员"
     assert payload["status"] == "cancelled"
@@ -163,7 +173,11 @@ async def test_legacy_record_without_chat_id_uses_session_ownership(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_wait_reads_only_owned_retained_terminal_records(tmp_path):
+@pytest.mark.parametrize("selected_expert_id", [None, "expert-1"])
+async def test_wait_reads_only_owned_retained_terminal_records(
+    tmp_path,
+    selected_expert_id,
+):
     store, own = await _record(tmp_path)
     own = await store.cancel(own.run_id)
     _, foreign = await _record(tmp_path, session_id="other-session")
@@ -177,7 +191,11 @@ async def test_wait_reads_only_owned_retained_terminal_records(tmp_path):
         ),
     )
     payload = _payload(
-        await _tools(tmp_path, supervisor)["wait_subagent"](timeout_ms=0),
+        await _tools(
+            tmp_path,
+            supervisor,
+            selected_expert_id=selected_expert_id,
+        )["wait_subagent"](timeout_ms=0),
     )
     assert payload["active_subagents"] == []
     assert [run["nickname"] for run in payload["terminal_subagents"]] == [

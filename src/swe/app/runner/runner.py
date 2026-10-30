@@ -2350,77 +2350,6 @@ def _request_selected_expert_id(request: AgentRequest) -> str | None:
     return value or None
 
 
-def _selected_expert_start_tool_call(
-    *,
-    workspace_dir: Path,
-    tenant_id: str | None,
-    agent_id: str,
-    selected_expert_id: str,
-    objective: str,
-) -> dict[str, Any] | None:
-    """Build the exact forced start call for one enabled local expert.
-
-    The Definition ID is a management identity, whereas the Background
-    SubAgent tool deliberately accepts only its runtime name.  Resolve that
-    mapping server-side so a submitted composer selection cannot be silently
-    skipped or changed by the Main Agent.
-    """
-    from ..subagents import (
-        AgentOwnedDefinitionRepository,
-        builtin_definition_provider,
-    )
-
-    try:
-        builtin_names = {
-            item.name
-            for item in builtin_definition_provider().list_definitions()
-        }
-        package = AgentOwnedDefinitionRepository(
-            workspace_dir / "agents",
-            owner_scope=f"{tenant_id or 'default'}/{agent_id}",
-            builtin_names=builtin_names,
-        ).get(selected_expert_id)
-    except ValueError:
-        return None
-    definition = package.definition if package is not None else None
-    if (
-        definition is None
-        or not definition.enabled
-        or definition.name in builtin_names
-    ):
-        return None
-    normalized_objective = objective.strip()
-    if not normalized_objective:
-        return None
-    return {
-        "id": f"selected-expert-{uuid4().hex}",
-        "name": "start_subagent",
-        "input": {
-            "expert_name": definition.name,
-            "objective": normalized_objective,
-        },
-    }
-
-
-def _is_selected_expert_start_approval(
-    approved_tool_call: dict[str, Any] | None,
-    selected_expert_call: dict[str, Any],
-) -> bool:
-    """Keep a matching approved start call's identity and hook replay."""
-    if not isinstance(approved_tool_call, dict):
-        return False
-    if approved_tool_call.get("name") != "start_subagent":
-        return False
-    approved_input = approved_tool_call.get("input")
-    selected_input = selected_expert_call.get("input")
-    return (
-        isinstance(approved_input, dict)
-        and isinstance(selected_input, dict)
-        and approved_input.get("expert_name")
-        == selected_input.get("expert_name")
-    )
-
-
 def _initialize_selected_expert_dependency_view(
     *,
     workspace_dir: Path,
@@ -4378,8 +4307,6 @@ class AgentRunner(Runner):
             request_context=request_context,
             selected_expert_id=selected_expert_id,
             chat=chat,
-            objective=current_user_text,
-            approved_tool_call=approved_tool_call,
         )
         if (
             values.get("agent_config") is not None
@@ -4575,8 +4502,6 @@ class AgentRunner(Runner):
         request_context: dict[str, Any],
         selected_expert_id: str | None,
         chat: Any,
-        objective: str,
-        approved_tool_call: dict[str, Any] | None,
     ) -> None:
         if selected_expert_id is None:
             return
@@ -4596,45 +4521,6 @@ class AgentRunner(Runner):
             request_context["_expert_dependency_view_root"] = str(
                 dependency_view_root,
             )
-        self._set_selected_expert_tool_call(
-            request_context=request_context,
-            workspace_dir=workspace_dir,
-            selected_expert_id=selected_expert_id,
-            objective=objective,
-            approved_tool_call=approved_tool_call,
-        )
-
-    def _set_selected_expert_tool_call(
-        self,
-        *,
-        request_context: dict[str, Any],
-        workspace_dir: Path,
-        selected_expert_id: str,
-        objective: str,
-        approved_tool_call: dict[str, Any] | None,
-    ) -> None:
-        selected_expert_call = _selected_expert_start_tool_call(
-            workspace_dir=workspace_dir,
-            tenant_id=self.tenant_id,
-            agent_id=self.agent_id,
-            selected_expert_id=selected_expert_id,
-            objective=objective,
-        )
-        if selected_expert_call is None:
-            return
-        request_context["selected_expert_execution"] = True
-        approved_start = (
-            approved_tool_call
-            if _is_selected_expert_start_approval(
-                approved_tool_call,
-                selected_expert_call,
-            )
-            else None
-        )
-        request_context["forced_tool_call_json"] = json.dumps(
-            approved_start or selected_expert_call,
-            ensure_ascii=False,
-        )
 
     @staticmethod
     def _source_tool_versions(request_context: dict[str, Any]) -> Any:
@@ -7209,11 +7095,6 @@ class AgentRunner(Runner):
             ):
                 yield item
             return
-        request_context = getattr(agent, "_request_context", {}) or {}
-        if request_context.get("selected_expert_execution"):
-            request_context["_selected_expert_request_deadline"] = (
-                time.monotonic() + max(float(timeout_seconds), 0.0)
-            )
         start = time.monotonic()
         async for msg, last in msg_stream:
             elapsed = time.monotonic() - start

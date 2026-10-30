@@ -483,21 +483,6 @@ async def _wait_for_chat_runs(
         await asyncio.sleep(min(0.05, max(deadline - time.monotonic(), 0)))
 
 
-async def _has_chat_run_access(
-    context: _BackgroundSubagentToolContext,
-    run_id: str,
-) -> bool:
-    return (
-        await run_runtime_state_work(
-            read_chat_run_record,
-            context.tool_scope.run_store_dir,
-            context.request_context,
-            run_id,
-        )
-        is not None
-    )
-
-
 async def _resolve_chat_nickname(
     context: _BackgroundSubagentToolContext,
     nickname: str,

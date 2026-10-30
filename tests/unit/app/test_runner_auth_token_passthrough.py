@@ -10,11 +10,7 @@ import json
 import pytest
 
 from swe.agents.hook_runtime.models import HookSessionOverlay
-from swe.agents.tools.subagent_background import (
-    create_background_subagent_tools,
-)
 from swe.agents.tool_guard_mixin import ToolGuardMixin
-from swe.app.subagents import BackgroundSubAgentStartBlocked
 from swe.app.runner.runner import (
     AgentRunner,
     _approved_tool_call_from_record,
@@ -48,10 +44,24 @@ def fake_model_preparation(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("selected_expert", [False, True])
 async def test_query_handler_injects_auth_headers_into_mcp_headers_and_context(
     monkeypatch,
+    tmp_path,
+    selected_expert,
 ) -> None:
-    runner = AgentRunner(agent_id="test-agent")
+    selected_id = "11111111-1111-4111-8111-111111111111"
+    if selected_expert:
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / f"{selected_id}.toml").write_text(
+            'name = "researcher"\n'
+            'description = "Research expert."\n'
+            'instruction = "Research the requested topic."\n'
+            "enabled = true\n",
+            encoding="utf-8",
+        )
+    runner = AgentRunner(agent_id="test-agent", workspace_dir=tmp_path)
     runner.session = SimpleNamespace(
         load_session_state=AsyncMock(),
         mutate_session_state=AsyncMock(return_value={}),
@@ -94,7 +104,8 @@ async def test_query_handler_injects_auth_headers_into_mcp_headers_and_context(
             return
 
         async def __call__(self, _msgs):
-            return
+            assert "forced_tool_call_json" not in captured["request_context"]
+            captured["main_completed_without_launch"] = True
 
     async def fake_stream_printing_messages(*, agents, coroutine_task):
         del agents
@@ -139,6 +150,9 @@ async def test_query_handler_injects_auth_headers_into_mcp_headers_and_context(
         trace_id="trace-1",
         auth_token="token-123",
         cookie="foo=bar; com.cmb.dw.rtl.sso.token=auth-123",
+        channel_meta=(
+            {"selected_expert_id": selected_id} if selected_expert else {}
+        ),
     )
     msgs = [SimpleNamespace(get_text_content=lambda: "hello")]
 
@@ -147,6 +161,7 @@ async def test_query_handler_injects_auth_headers_into_mcp_headers_and_context(
         results.append(item)
 
     assert not results
+    assert captured["main_completed_without_launch"] is True
     assert captured["passthrough_headers"] == {
         "cookie": "foo=bar; com.cmb.dw.rtl.sso.token=auth-123",
     }
@@ -239,11 +254,11 @@ def test_create_agent_for_query_injects_only_server_annotation_context(
     )
 
 
-def test_create_agent_for_query_forces_the_selected_expert_start(
+def test_selected_expert_selection_only_filters_catalog(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """A submitted expert selection starts its exact enabled definition."""
+    """A submitted selection leaves Main free to decide whether to delegate."""
     selected_id = "11111111-1111-4111-8111-111111111111"
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
@@ -287,92 +302,18 @@ def test_create_agent_for_query_forces_the_selected_expert_start(
         current_user_text="Research this topic",
     )
 
-    forced = json.loads(captured["request_context"]["forced_tool_call_json"])
-    assert forced["name"] == "start_subagent"
-    assert forced["input"] == {
-        "expert_name": "researcher",
-        "objective": "Research this topic",
-    }
+    context = captured["request_context"]
+    assert context["selected_expert_id"] == selected_id
+    assert "forced_tool_call_json" not in context
+    assert "selected_expert_execution" not in context
+    assert "_selected_expert_request_deadline" not in context
 
 
-@pytest.mark.asyncio
-async def test_selected_expert_forced_call_invokes_registered_start_tool(
+def test_selected_expert_does_not_replace_general_approval_replay(
     monkeypatch,
     tmp_path,
 ) -> None:
-    """The forced payload must match the registered start tool signature."""
-    selected_id = "11111111-1111-4111-8111-111111111111"
-    agents_dir = tmp_path / "agents"
-    agents_dir.mkdir()
-    (agents_dir / f"{selected_id}.toml").write_text(
-        'name = "researcher"\n'
-        'description = "Research expert."\n'
-        'instruction = "Research the requested topic."\n'
-        "enabled = true\n",
-        encoding="utf-8",
-    )
-    runner = AgentRunner(agent_id="test-agent", workspace_dir=tmp_path)
-    runner.tenant_id = "tenant-1"
-    runner.session = SimpleNamespace(
-        _get_save_path=lambda session_id, user_id: (
-            f"/tmp/{session_id}-{user_id}.json"
-        ),
-    )
-    captured: dict[str, Any] = {}
-
-    class FakeAgent:
-        def __init__(self, **kwargs):
-            captured["request_context"] = kwargs["request_context"]
-
-    async def start(**kwargs):
-        captured["start"] = kwargs
-        return BackgroundSubAgentStartBlocked(limit=1)
-
-    monkeypatch.setattr("swe.app.runner.runner.SWEAgent", FakeAgent)
-    runner._create_agent_for_query(
-        agent_config=_fake_agent_config(),
-        env_context="",
-        mcp_clients=[],
-        request=SimpleNamespace(
-            channel_meta={"selected_expert_id": selected_id},
-        ),
-        session_id="session-1",
-        user_id="user-1",
-        channel="console",
-        chat=SimpleNamespace(id="chat-1"),
-        turn_id="turn-1",
-        hook_overlay=HookSessionOverlay(),
-        auth_token=None,
-        approved_tool_call=None,
-        current_user_text="Research this topic",
-    )
-
-    forced = json.loads(captured["request_context"]["forced_tool_call_json"])
-    tools = create_background_subagent_tools(
-        supervisor=SimpleNamespace(start=start),
-        parent_agent_config=_fake_agent_config(),
-        workspace_dir=tmp_path,
-        request_context={
-            **captured["request_context"],
-            "tenant_id": "tenant-1",
-            "agent_id": "test-agent",
-            "session_id": "session-1",
-            "chat_id": "chat-1",
-        },
-        selected_expert_id=selected_id,
-    )
-
-    await tools["start_subagent"](**forced["input"])
-
-    assert captured["start"]["spec"].name == "researcher"
-    assert captured["start"]["spec"].objective == "Research this topic"
-
-
-def test_selected_expert_keeps_matching_approved_start_for_hook_replay(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """Approval recovery must retain the original call ID and objective."""
+    """Selection must not replace any approved tool with an expert start."""
     selected_id = "11111111-1111-4111-8111-111111111111"
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
@@ -397,13 +338,10 @@ def test_selected_expert_keeps_matching_approved_start_for_hook_replay(
             captured["request_context"] = kwargs["request_context"]
 
     monkeypatch.setattr("swe.app.runner.runner.SWEAgent", FakeAgent)
-    approved_start = {
-        "id": "approved-start-id",
-        "name": "start_subagent",
-        "input": {
-            "expert_name": "researcher",
-            "objective": "Research this topic",
-        },
+    approved_call = {
+        "id": "approved-read-id",
+        "name": "read_file",
+        "input": {"file_path": "evidence.txt"},
         "_approval_replay": {"approval_kind": "hook_pre_tool_use"},
     }
 
@@ -421,13 +359,16 @@ def test_selected_expert_keeps_matching_approved_start_for_hook_replay(
         turn_id="turn-1",
         hook_overlay=HookSessionOverlay(),
         auth_token=None,
-        approved_tool_call=approved_start,
+        approved_tool_call=approved_call,
         current_user_text="/approve",
     )
 
-    assert json.loads(
-        captured["request_context"]["forced_tool_call_json"],
-    ) == (approved_start)
+    assert (
+        json.loads(
+            captured["request_context"]["forced_tool_call_json"],
+        )
+        == approved_call
+    )
 
 
 def test_create_agent_for_query_keeps_subagents_disabled_by_default(
