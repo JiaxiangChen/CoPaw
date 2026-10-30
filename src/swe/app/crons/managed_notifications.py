@@ -4,6 +4,7 @@
 import json
 
 from .models import CronJobSpec
+from .managed_models import load_managed_spec
 
 _IDENTITY_KEYS = ("tenant_id", "source_id", "agent_id", "job_id")
 
@@ -53,7 +54,7 @@ async def load_notification_spec(db, row, metadata):
         raise ValueError("managed_cron_notification_not_found")
     if tuple(run[f"definition_{name}"] for name in _IDENTITY_KEYS) != key:
         raise ValueError("cron_notification_identity_conflict")
-    spec = CronJobSpec.model_validate_json(run["spec_json"])
+    spec = load_managed_spec(run["spec_json"])
     if (spec.tenant_id, spec.source_id, spec.id) != (key[0], key[1], key[3]):
         raise ValueError("cron_notification_snapshot_conflict")
     return spec

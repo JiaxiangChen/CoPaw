@@ -64,6 +64,7 @@ DETAIL_FIELDS = frozenset(
         "business_attempt",
         "previous_execution_id",
         "reason",
+        "dispatch_lane",
     },
 )
 
@@ -102,6 +103,8 @@ def _safe_detail(name, value):
             if isinstance(value, str) and value in FAILURE_TYPES
             else "other"
         )
+    if name == "dispatch_lane":
+        return value if value in {"normal", "urgent"} else "unknown"
     if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
         return value
     return "cron_detail_redacted"
@@ -128,6 +131,7 @@ def event_values(run, kind, details=None):
             "definition_version",
             "settled_status",
             "settled_error_code",
+            "dispatch_lane",
         )
     }
     selected.update(

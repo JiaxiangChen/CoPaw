@@ -2,6 +2,7 @@
 """SWE 直接写共库执行结果，通过持久运行身份隔离过期执行者。"""
 
 import json
+from .managed_dates import outside_date_range
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,23 @@ WHERE = " AND ".join(f"`{name}`=%s" for name in KEYS)
 TABLE = "swe_cron_execution_runs"
 TERMINAL = frozenset({"success", "error", "skipped", "cancelled"})
 logger = logging.getLogger(__name__)
+
+
+def _start_block_reason(definition, state, run):
+    """保留原停用错误码，新增日期限制则给出可追踪的明确原因。"""
+    if (
+        definition["deleted_at"]
+        or not definition["enabled"]
+        or state.get("pause_reason")
+        or int(run["enqueued_state_version"])
+        < int(state.get("queue_invalidation_version") or 0)
+    ):
+        return "cron_job_disabled_before_start"
+    return (
+        "cron_job_outside_date_range"
+        if outside_date_range(definition)
+        else None
+    )
 
 
 class ExecutionNotFound(LookupError):
@@ -169,19 +187,14 @@ class ExecutionWriter:
             if run["status"] != "accepted":
                 return None
             state = await self._state(key)
-            if (
-                definition["deleted_at"]
-                or not definition["enabled"]
-                or state.get("pause_reason")
-                or int(run["enqueued_state_version"])
-                < int(state.get("queue_invalidation_version") or 0)
-            ):
+            blocked = _start_block_reason(definition, state, run)
+            if blocked:
                 await self._complete(
                     definition,
                     run,
                     ExecutionOutcome(
                         "skipped",
-                        error_code="cron_job_disabled_before_start",
+                        error_code=blocked,
                     ),
                 )
                 return None

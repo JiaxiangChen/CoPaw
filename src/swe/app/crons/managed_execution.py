@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from .managed_results import ExecutionOutcome, TERMINAL
 from .models import CronJobSpec
+from .managed_models import load_managed_spec
 from .managed_failure import error_metadata, public_failure_detail
 
 logger = logging.getLogger(__name__)
@@ -141,7 +142,7 @@ class ManagedExecutionService:
 
     async def _execute_snapshot(self, run, live_headers):
         try:
-            spec = CronJobSpec.model_validate(json.loads(run["spec_json"]))
+            spec = load_managed_spec(run["spec_json"])
             spec = self._runtime_spec(spec)
             meta = self._dispatch_meta(run, spec, live_headers)
             if self.workspace_dir is not None:
