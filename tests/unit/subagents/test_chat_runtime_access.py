@@ -52,6 +52,7 @@ async def _record(tmp_path, *, session_id="session-1", chat_id="chat-1"):
             owner_scope="run:tenant-1:agent-1",
         ),
         PermissionPolicy.readonly(),
+        nickname=("研究员" if session_id == "session-1" else "审查员"),
     )
     return store, record
 
@@ -330,7 +331,7 @@ async def test_foreign_runs_are_rejected_before_supervisor(
         cancel=AsyncMock(return_value=None),
     )
     response = await _tools(tmp_path, supervisor, **overrides)[method](
-        record.run_id,
+        record.nickname,
     )
     assert _payload(response)["status"] == "not_found"
     supervisor.get.assert_not_awaited()
@@ -341,16 +342,34 @@ async def test_foreign_runs_are_rejected_before_supervisor(
 @pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
 async def test_owned_runs_remain_manageable(tmp_path, method):
     store, record = await _record(tmp_path)
+    record.nickname = "研究员"
+    store._write(record)
     record = await store.cancel(record.run_id)
     supervisor = SimpleNamespace(
         get=AsyncMock(return_value=record),
         cancel=AsyncMock(return_value=record),
     )
     payload = _payload(
-        await _tools(tmp_path, supervisor)[method](record.run_id),
+        await _tools(tmp_path, supervisor)[method]("研究员"),
     )
-    assert payload["run_id"] == record.run_id
+    assert payload["nickname"] == "研究员"
     assert payload["status"] == "cancelled"
+    assert "run_id" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
+async def test_unknown_nickname_is_not_found_without_internal_identity(
+    tmp_path,
+    method,
+):
+    supervisor = SimpleNamespace(get=AsyncMock(), cancel=AsyncMock())
+    payload = _payload(await _tools(tmp_path, supervisor)[method]("未知"))
+
+    assert payload == {"status": "not_found", "nickname": "未知"}
+    assert "run_id" not in json.dumps(payload)
+    supervisor.get.assert_not_awaited()
+    supervisor.cancel.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -360,10 +379,10 @@ async def test_legacy_record_without_chat_id_uses_session_ownership(tmp_path):
     supervisor = SimpleNamespace(get=AsyncMock(return_value=record))
     payload = _payload(
         await _tools(tmp_path, supervisor)["get_subagent"](
-            record.run_id,
+            record.nickname,
         ),
     )
-    assert payload["run_id"] == record.run_id
+    assert payload["nickname"] == record.nickname
 
 
 @pytest.mark.asyncio
@@ -380,9 +399,13 @@ async def test_wait_reads_only_owned_retained_terminal_records(tmp_path):
             ),
         ),
     )
-    payload = _payload(await _tools(tmp_path, supervisor)["wait_subagent"](0))
-    assert payload["active_runs"] == []
-    assert [run["run_id"] for run in payload["terminal_runs"]] == [own.run_id]
+    payload = _payload(
+        await _tools(tmp_path, supervisor)["wait_subagent"](timeout_ms=0),
+    )
+    assert payload["active_subagents"] == []
+    assert [run["nickname"] for run in payload["terminal_subagents"]] == [
+        own.nickname,
+    ]
     assert payload["timed_out"] is False
 
 
@@ -396,11 +419,11 @@ async def test_wait_without_session_never_calls_supervisor(tmp_path):
             session_id="",
         )[
             "wait_subagent"
-        ](0),
+        ](timeout_ms=0),
     )
     assert payload == {
-        "active_runs": [],
-        "terminal_runs": [],
+        "active_subagents": [],
+        "terminal_subagents": [],
         "timed_out": False,
     }
     supervisor.wait.assert_not_awaited()
@@ -433,7 +456,7 @@ async def test_one_chat_wait_cannot_consume_another_chats_terminal(tmp_path):
         ),
     )
     first_result = _payload(
-        await _tools(tmp_path, supervisor)["wait_subagent"](0),
+        await _tools(tmp_path, supervisor)["wait_subagent"](timeout_ms=0),
     )
     second_result = _payload(
         await _tools(
@@ -441,13 +464,17 @@ async def test_one_chat_wait_cannot_consume_another_chats_terminal(tmp_path):
             supervisor,
             session_id="session-2",
             chat_id="chat-2",
-        )["wait_subagent"](0),
+        )["wait_subagent"](timeout_ms=0),
     )
-    assert [item["run_id"] for item in first_result["terminal_runs"]] == [
-        first.run_id,
+    assert [
+        item["nickname"] for item in first_result["terminal_subagents"]
+    ] == [
+        first.nickname,
     ]
-    assert [item["run_id"] for item in second_result["terminal_runs"]] == [
-        second.run_id,
+    assert [
+        item["nickname"] for item in second_result["terminal_subagents"]
+    ] == [
+        second.nickname,
     ]
 
 
@@ -475,7 +502,7 @@ async def test_real_supervisor_reaping_preserves_other_chat_terminal(tmp_path):
             stderr_log_path=tmp_path / "stderr.log",
         )
     first_result = _payload(
-        await _tools(tmp_path, supervisor)["wait_subagent"](0),
+        await _tools(tmp_path, supervisor)["wait_subagent"](timeout_ms=0),
     )
     assert not supervisor.has_active_runs(scope)
     second_result = _payload(
@@ -484,13 +511,17 @@ async def test_real_supervisor_reaping_preserves_other_chat_terminal(tmp_path):
             supervisor,
             session_id="session-2",
             chat_id="chat-2",
-        )["wait_subagent"](0),
+        )["wait_subagent"](timeout_ms=0),
     )
-    assert [item["run_id"] for item in first_result["terminal_runs"]] == [
-        first.run_id,
+    assert [
+        item["nickname"] for item in first_result["terminal_subagents"]
+    ] == [
+        first.nickname,
     ]
-    assert [item["run_id"] for item in second_result["terminal_runs"]] == [
-        second.run_id,
+    assert [
+        item["nickname"] for item in second_result["terminal_subagents"]
+    ] == [
+        second.nickname,
     ]
 
 
@@ -576,7 +607,7 @@ async def test_missing_session_does_not_register_retained_management(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_temporary_worker_does_not_load_parent_skills(tmp_path):
+async def test_unknown_expert_does_not_start_or_load_parent_skills(tmp_path):
     captured = {}
 
     async def start(**kwargs):
@@ -590,13 +621,14 @@ async def test_temporary_worker_does_not_load_parent_skills(tmp_path):
         request_context=_context(tmp_path),
         effective_skill_names=["private-parent-skill"],
     )
-    await tools["start_subagent"](
-        name="temporary",
-        instruction="Inspect",
-        objective="Inspect",
+    payload = _payload(
+        await tools["start_subagent"](
+            expert_name="temporary",
+            objective="Inspect",
+        ),
     )
-    assert captured["definition"].source == "run_scoped"
-    assert captured["effective_skill_names"] == []
+    assert payload["status"] == "not_found"
+    assert captured == {}
 
 
 @pytest.mark.asyncio

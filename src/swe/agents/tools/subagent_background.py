@@ -36,6 +36,7 @@ from ...config.utils import get_tenant_working_dir
 from ...runtime_workers import run_runtime_state_work
 from ...app.subagents.models import TERMINAL_BACKGROUND_RUN_STATUSES
 from ...app.subagents.run_access import (
+    read_chat_run_by_nickname,
     read_chat_run_record,
     read_chat_run_records,
 )
@@ -94,11 +95,9 @@ async def _wake_goal_after_subagent(
 
 
 _START_SUBAGENT_DESCRIPTION = (
-    "Start a Background SubAgent Run. Use an exact listed name to reuse a "
-    "definition, including its Skill qualifier when present. For a temporary "
-    "worker, provide a new name, instruction, and objective; it is not saved "
-    "as an expert. A listed definition keeps its configured instruction. "
-    "Tool availability does not require delegation; follow the user's request."
+    "Start a listed Background SubAgent expert with its exact expert_name, "
+    "including a Skill qualifier when present. The returned nickname is the "
+    "Chat-local handle for later get, wait, or cancel operations."
 )
 
 
@@ -145,18 +144,13 @@ def build_background_subagent_scope(
 
 
 def _parse_subagent_start_request(
-    name: str | None,
-    instruction: str | None,
-    objective: str | None,
+    expert_name: str,
+    objective: str,
     background: str,
-    extra: dict[str, Any],
 ) -> SubAgentStartRequest:
-    if extra:
-        raise ValueError("unexpected fields: " + ", ".join(sorted(extra)))
     return SubAgentStartRequest.model_validate(
         {
-            "name": name,
-            "instruction": instruction,
+            "name": expert_name,
             "objective": objective,
             "background": background,
         },
@@ -174,11 +168,7 @@ def _resolve_subagent_start_definition(
     DefinitionMatchMetadata | None,
     ToolResponse | None,
 ]:
-    definition = (
-        definition_catalog.resolve_exact(start_request.name)
-        if definition_catalog is not None
-        else None
-    )
+    definition = definition_catalog.resolve_exact(start_request.name)
     if selected_expert_id and definition is None:
         return (
             None,
@@ -187,8 +177,7 @@ def _resolve_subagent_start_definition(
                 {
                     "status": "not_found",
                     "reason": "selected_expert_not_available",
-                    "name": start_request.name,
-                    "selected_expert_id": selected_expert_id,
+                    "expert_name": start_request.name,
                 },
             ),
         )
@@ -200,8 +189,7 @@ def _resolve_subagent_start_definition(
                 {
                     "status": "failed",
                     "reason": "selected_expert_name_mismatch",
-                    "name": start_request.name,
-                    "selected_expert_name": definition.name,
+                    "expert_name": start_request.name,
                 },
             ),
         )
@@ -217,28 +205,16 @@ def _resolve_subagent_start_definition(
             ),
             None,
         )
-    if start_request.instruction is None:
-        return (
-            None,
-            None,
-            _json_response(
-                {
-                    "status": "not_found",
-                    "reason": "subagent_definition_not_found",
-                    "name": start_request.name,
-                },
-            ),
-        )
     return (
-        SubAgentDefinition(
-            name=start_request.name,
-            source="run_scoped",
-            owner_scope=f"run:{tool_scope.tenant_id}:{tool_scope.agent_id}",
-            description="Temporary caller-defined SubAgent.",
-            instruction=start_request.instruction,
-        ),
-        DefinitionMatchMetadata(matched=False, reason="run_scoped"),
         None,
+        None,
+        _json_response(
+            {
+                "status": "not_found",
+                "reason": "subagent_definition_not_found",
+                "expert_name": start_request.name,
+            },
+        ),
     )
 
 
@@ -285,27 +261,22 @@ def _create_start_subagent_tool(
     """Create the start tool bound to one Background SubAgent scope."""
 
     async def start_subagent(
-        name: str | None = None,
-        instruction: str | None = None,
-        objective: str | None = None,
+        expert_name: str,
+        objective: str,
         background: str = "",
-        **extra: Any,
     ) -> ToolResponse:
-        """Start a Background SubAgent Run and return its run identity."""
+        """Start one listed expert and return its Chat nickname."""
         try:
             start_request = _parse_subagent_start_request(
-                name,
-                instruction,
+                expert_name,
                 objective,
                 background,
-                extra,
             )
         except Exception as exc:
             return _json_response(
                 {
                     "status": "failed",
                     "reason": "invalid_request",
-                    "message": str(exc),
                 },
             )
         try:
@@ -389,10 +360,9 @@ def _create_start_subagent_tool(
                 {
                     "status": "failed",
                     "reason": "invalid_request",
-                    "message": str(exc),
                 },
             )
-        return _json_response(_serialize_start_result(result))
+        return _json_response(await _serialize_start_result(context, result))
 
     start_subagent.__doc__ = directory
     return start_subagent
@@ -403,8 +373,12 @@ def _create_wait_subagent_tool(
 ) -> Callable[..., Any]:
     """Create the wait tool bound to one Background SubAgent scope."""
 
-    async def wait_subagent(timeout_ms: int = 3000) -> ToolResponse:
+    async def wait_subagent(
+        nicknames: list[str] | None = None,
+        timeout_ms: int = 3000,
+    ) -> ToolResponse:
         """Wait briefly and return current Background SubAgent statuses."""
+        del nicknames
         snapshot = await _wait_for_chat_runs(context, timeout_ms)
         return _json_response(_serialize_wait_snapshot(snapshot))
 
@@ -693,38 +667,50 @@ async def _has_chat_run_access(
     )
 
 
+async def _resolve_chat_nickname(
+    context: _BackgroundSubagentToolContext,
+    nickname: str,
+) -> Any | None:
+    if not isinstance(nickname, str) or not nickname.strip():
+        return None
+    return await run_runtime_state_work(
+        read_chat_run_by_nickname,
+        context.tool_scope.run_store_dir,
+        context.request_context,
+        nickname,
+    )
+
+
 def _create_get_subagent_tool(
     context: _BackgroundSubagentToolContext,
 ) -> Callable[..., Any]:
     """Create the get tool bound to one Background SubAgent scope."""
 
     async def get_subagent(
-        run_id: str,
+        nickname: str,
         include_details: bool = False,
     ) -> ToolResponse:
         """Fetch one Background SubAgent Run in the current scope."""
-        if not await _has_chat_run_access(context, run_id):
-            return _json_response({"status": "not_found", "run_id": run_id})
+        record = await _resolve_chat_nickname(context, nickname)
+        if record is None:
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
         try:
-            record = await context.supervisor.get(
+            current = await context.supervisor.get(
                 context.tool_scope,
-                run_id,
+                record.run_id,
             )
         except ValueError:
-            return _json_response({"status": "not_found", "run_id": run_id})
-        if record is None:
-            return _json_response({"status": "not_found", "run_id": run_id})
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
+        if current is None:
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
         return _json_response(
-            _compact_record(
-                record,
-                include_details,
-                manageable=_is_manageable(
-                    context.supervisor,
-                    context.tool_scope,
-                    run_id,
-                ),
-                run_store_dir=context.tool_scope.run_store_dir,
-            ),
+            _model_subagent_record(current, include_result=True),
         )
 
     return get_subagent
@@ -735,28 +721,35 @@ def _create_cancel_subagent_tool(
 ) -> Callable[..., Any]:
     """Create the cancel tool bound to one Background SubAgent scope."""
 
-    async def cancel_subagent(run_id: str) -> ToolResponse:
+    async def cancel_subagent(nickname: str) -> ToolResponse:
         """Cancel one active Background SubAgent Run in the current scope."""
-        if not await _has_chat_run_access(context, run_id):
-            return _json_response({"status": "not_found", "run_id": run_id})
+        record = await _resolve_chat_nickname(context, nickname)
+        if record is None:
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
         try:
             result = await context.supervisor.cancel(
                 context.tool_scope,
-                run_id,
+                record.run_id,
             )
         except ValueError:
-            return _json_response({"status": "not_found", "run_id": run_id})
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
         if result is None:
-            return _json_response({"status": "not_found", "run_id": run_id})
+            return _json_response(
+                {"status": "not_found", "nickname": nickname},
+            )
         if isinstance(result, BackgroundSubAgentNotManageable):
-            return _json_response(result.model_dump(mode="json"))
+            return _json_response(
+                {
+                    **_model_subagent_record(record, include_result=True),
+                    "manageable": False,
+                },
+            )
         return _json_response(
-            _compact_record(
-                result,
-                include_details=False,
-                manageable=False,
-                run_store_dir=context.tool_scope.run_store_dir,
-            ),
+            _model_subagent_record(result, include_result=True),
         )
 
     return cancel_subagent
@@ -900,15 +893,30 @@ def _json_response(payload: dict[str, Any]) -> ToolResponse:
     )
 
 
-def _serialize_start_result(
+async def _serialize_start_result(
+    context: _BackgroundSubagentToolContext,
     result: Any,
 ) -> dict[str, Any]:
     if isinstance(result, BackgroundSubAgentStartBlocked):
-        payload = result.model_dump(mode="json")
-        payload["accepted"] = False
-        return payload
+        active_nicknames = []
+        for run_id in result.active_run_ids:
+            record = await run_runtime_state_work(
+                read_chat_run_record,
+                context.tool_scope.run_store_dir,
+                context.request_context,
+                run_id,
+            )
+            if record is not None and record.nickname:
+                active_nicknames.append(record.nickname)
+        return {
+            "status": result.status,
+            "reason": result.reason,
+            "limit": result.limit,
+            "active_nicknames": active_nicknames,
+            "accepted": False,
+        }
     return {
-        **_parent_facing_record(result, include_result=False),
+        **_model_subagent_record(result, include_result=False),
         "accepted": True,
     }
 
@@ -918,12 +926,12 @@ def _serialize_wait_snapshot(
 ) -> dict[str, Any]:
     return {
         "timed_out": snapshot.timed_out,
-        "active_runs": [
-            _parent_facing_record(record, include_result=False)
+        "active_subagents": [
+            _model_subagent_record(record, include_result=False)
             for record in snapshot.active_runs
         ],
-        "terminal_runs": [
-            _parent_facing_record(record, include_result=True)
+        "terminal_subagents": [
+            _model_subagent_record(record, include_result=True)
             for record in snapshot.terminal_runs
         ],
     }
@@ -939,6 +947,27 @@ def _parent_facing_record(
         "status": record.status,
         "agent_name": record.spec.name,
         "nickname": getattr(record, "nickname", None),
+        "objective": record.spec.objective,
+    }
+    result = getattr(record, "result", None)
+    if include_result and result is not None:
+        payload["result"] = _compact_agent_result(result)
+    elif include_result:
+        failure_result = _compact_failure_without_result(record)
+        if failure_result is not None:
+            payload["result"] = failure_result
+    return payload
+
+
+def _model_subagent_record(
+    record: Any,
+    *,
+    include_result: bool,
+) -> dict[str, Any]:
+    payload = {
+        "expert_name": record.spec.name,
+        "nickname": getattr(record, "nickname", None),
+        "status": record.status,
         "objective": record.spec.objective,
     }
     result = getattr(record, "result", None)
