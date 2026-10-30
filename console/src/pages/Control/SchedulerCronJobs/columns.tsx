@@ -13,9 +13,10 @@ import {
 } from "../CronJobs/components/columns";
 import { isBatchDispatchMode, MODE_LABELS, scheduleLabel } from "./helpers";
 import styles from "../CronJobs/index.module.less";
+import { dateRangeLabel, isDatePause } from "./dateRange";
 
 export interface ManagedJobPanel {
-  kind: "edit" | "broadcast" | "children" | "mode" | "progress";
+  kind: "edit" | "broadcast" | "children" | "mode" | "progress" | "dates";
   job: ManagedJob;
 }
 type Panel = ManagedJobPanel;
@@ -27,7 +28,7 @@ interface ColumnOptions {
     error: (text: string) => unknown;
   };
   perform: (
-    kind: "toggle" | "remove" | "run",
+    kind: "toggle" | "remove" | "run" | "pause",
     job: ManagedJob,
   ) => Promise<void>;
   setPanel: (panel: ManagedJobPanel) => void;
@@ -125,6 +126,8 @@ export function createManagedColumns({
           />
           {job.deleted
             ? "已删除"
+            : isDatePause(job.task?.pause_reason)
+            ? "日期限制暂停"
             : job.enabled && !job.task?.is_paused
             ? "已启用"
             : "已停用"}
@@ -148,6 +151,24 @@ export function createManagedColumns({
       ),
     },
   );
+  display.splice(2, 0, {
+    title: "可执行时间区间",
+    key: "run_date_range",
+    width: 255,
+    render: (_, job) => (
+      <Tooltip title="北京时间，包含首尾两天">
+        <span>
+          {dateRangeLabel(job.run_date_range)}
+          {isBroadcastChildJob(job) && (
+            <>
+              <br />
+              <Tag>继承父任务</Tag>
+            </>
+          )}
+        </span>
+      </Tooltip>
+    ),
+  });
   display.push({
     title: t("common.actions"),
     key: "action",
@@ -161,7 +182,10 @@ export function createManagedColumns({
           disabled={busy || job.deleted}
           onClick={() => void perform("toggle", job)}
         >
-          {job.enabled && !job.task?.is_paused ? "停用" : "启用"}
+          {job.enabled &&
+          (!job.task?.is_paused || isDatePause(job.task?.pause_reason))
+            ? "停用"
+            : "启用"}
         </Button>
         <Button
           type="link"
@@ -193,6 +217,31 @@ export function createManagedColumns({
                 label: "编辑",
                 disabled: job.deleted || busy,
                 onClick: () => setPanel({ kind: "edit", job }),
+              },
+              {
+                key: "dates",
+                label: isBroadcastChildJob(job)
+                  ? "可执行时间区间（继承父任务）"
+                  : "修改可执行时间区间",
+                disabled: job.deleted || busy || isBroadcastChildJob(job),
+                onClick: () => setPanel({ kind: "dates", job }),
+              },
+              {
+                key: "pause",
+                label: isBroadcastChildJob(job)
+                  ? "暂停任务"
+                  : "暂停任务及全部子任务",
+                disabled: job.deleted || busy,
+                onClick: () =>
+                  Modal.confirm({
+                    title: isBroadcastChildJob(job)
+                      ? `暂停子任务「${job.name}」？`
+                      : `暂停任务「${job.name}」及其子任务？`,
+                    content: isBroadcastChildJob(job)
+                      ? "仅暂停当前子任务，不影响父任务和兄弟任务；未开始的执行跳过，已运行的继续。"
+                      : "未开始的执行跳过，已运行的继续；若开启批调度，则暂停本组批入口并异步同步平台关闭。",
+                    onOk: () => perform("pause", job),
+                  }),
               },
               {
                 key: "broadcast",

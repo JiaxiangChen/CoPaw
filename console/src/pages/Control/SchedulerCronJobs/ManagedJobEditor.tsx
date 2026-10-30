@@ -17,15 +17,17 @@ import { CronJobFormBody } from "../CronJobs/components/CronJobFormBody";
 import { DEFAULT_FORM_VALUES } from "../CronJobs/components/constants";
 import {
   buildSkillSelectOptions,
-  type CronJobFormValues,
   type SkillSelectOption,
 } from "../CronJobs/helpers";
 import {
   buildManagedCronFormValues,
   buildManagedCronSubmitPayload,
+  type ManagedCronFormValues,
 } from "./scheduleForm";
 import { detailToJob, failureMessage, RequestIdentity } from "./helpers";
 import styles from "../CronJobs/index.module.less";
+import { ManagedDateRangeField } from "./ManagedDateRangeField";
+import { isBroadcastChildJob } from "../CronJobs/components/columns";
 
 interface Props {
   context: ManagedCronContext;
@@ -49,7 +51,7 @@ export function ManagedJobEditor({
   onClose,
   onLoaded,
 }: Props) {
-  const [form] = Form.useForm<CronJobFormValues>();
+  const [form] = Form.useForm<ManagedCronFormValues>();
   const models = useExecutionModelOptions(true);
   const [skills, setSkills] = useState<SkillSelectOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +118,7 @@ export function ManagedJobEditor({
       mounted.current = false;
     };
   }, [context, job, form, onLoaded]);
-  const submit = async (values: CronJobFormValues) => {
+  const submit = async (values: ManagedCronFormValues) => {
     if (!ready || loading || saving) return;
     try {
       const spec = buildManagedCronSubmitPayload(values, snapshot);
@@ -174,6 +176,9 @@ export function ManagedJobEditor({
           skillOptionsLoading={loading}
           idDisabled
           enabledDisabled={Boolean(job)}
+        />
+        <ManagedDateRangeField
+          inherited={Boolean(snapshot && isBroadcastChildJob(snapshot))}
         />
       </Form>
     </Drawer>

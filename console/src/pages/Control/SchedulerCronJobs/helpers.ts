@@ -34,6 +34,7 @@ export function executionNeedsPolling(
 
 /** 沿用原页的排程文字，不依赖旧批调度元数据。 */
 export function scheduleLabel(cron: string, t: TFunction): string {
+  if (cron.trim().split(/\s+/).length === 6) return cron;
   const parts = parseCron(cron || "0 9 * * *");
   if (parts.type === "custom") return cron;
   if (parts.type === "hourly") return t("cronJobs.cronTypeHourly");

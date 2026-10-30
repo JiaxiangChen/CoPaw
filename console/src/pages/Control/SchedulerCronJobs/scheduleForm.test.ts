@@ -39,6 +39,8 @@ it.each([
   "0 9 20 5 *",
   "0 9,18 * * mon",
   "0,30 9 * * *",
+  "0 9 * * * 2026,2027",
+  "0 9 * * MON 2026-2029",
 ])("复杂排程%s使用自定义且不丢失", (cron) => {
   const job = jobWithCron(cron);
   const values = buildManagedCronFormValues(job);
@@ -93,4 +95,33 @@ it("新建任务不依赖原始快照", () => {
   expect(buildManagedCronSubmitPayload(values).schedule.cron).toBe(
     "0 10 * * *",
   );
+});
+
+it("日期区间随创建提交，清空时明确为不限日期", () => {
+  const original = {
+    ...jobWithCron("0 9 * * *"),
+    run_date_range: { start_date: "2026-11-01", end_date: "2026-11-30" },
+  };
+  const values = buildManagedCronFormValues(original);
+  expect(values.runDates?.[0].format("YYYY-MM-DD")).toBe("2026-11-01");
+  expect(buildManagedCronSubmitPayload(values).run_date_range).toEqual(
+    original.run_date_range,
+  );
+  expect(
+    buildManagedCronSubmitPayload({ ...values, runDates: null }).run_date_range,
+  ).toBeNull();
+});
+
+it("子任务编辑正文不会清空继承日期", () => {
+  const original = {
+    ...jobWithCron("0 9 * * *"),
+    meta: { broadcast_source_job_id: "parent" },
+    run_date_range: { start_date: "2026-11-01", end_date: "2026-11-30" },
+  };
+  expect(
+    buildManagedCronSubmitPayload(
+      { ...buildManagedCronFormValues(original), runDates: null },
+      original,
+    ).run_date_range,
+  ).toEqual(original.run_date_range);
 });

@@ -31,6 +31,7 @@ import {
   type ChildrenDeletionPlan,
 } from "./childrenDeletion";
 import styles from "../CronJobs/components/BroadcastChildrenModal.module.less";
+import { dateRangeLabel } from "./dateRange";
 
 const idle = () => false;
 const EMPTY_CHILDREN: ManagedChild[] = [];
@@ -456,7 +457,7 @@ export function ManagedChildrenModal({
           rowKey={rowKey}
           loading={panel.loading}
           dataSource={filtered}
-          scroll={{ x: 1700, y: "calc(100vh - 380px)" }}
+          scroll={{ x: 1955, y: "calc(100vh - 380px)" }}
           pagination={{
             current: page,
             pageSize,
@@ -499,6 +500,16 @@ export function ManagedChildrenModal({
             { title: "Agent", dataIndex: "agent_id", width: 100 },
             { title: "任务", dataIndex: "name", width: 180 },
             { title: "子任务ID", dataIndex: "id", width: 220 },
+            {
+              title: "可执行时间区间",
+              width: 255,
+              render: (_, row) => (
+                <Space direction="vertical" size={0}>
+                  <span>{dateRangeLabel(row.run_date_range)}</span>
+                  <Tag>继承父任务</Tag>
+                </Space>
+              ),
+            },
             {
               title: "状态",
               render: (_, row) =>

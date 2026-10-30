@@ -73,6 +73,34 @@ export default function TrackingOverview({
     ],
     ["原始排程", definition.original_cron_expr],
     [
+      "可执行时间区间",
+      definition.run_start_date && definition.run_end_date
+        ? `${text(definition.run_start_date)} 至 ${text(
+            definition.run_end_date,
+          )}`
+        : value.definition
+        ? "不限日期段"
+        : undefined,
+    ],
+    [
+      "日期暂停（保存标记）",
+      state.date_window_paused === true || state.date_window_paused === 1
+        ? "日期暂停"
+        : state.date_window_paused === false || state.date_window_paused === 0
+        ? "未标记日期暂停"
+        : undefined,
+    ],
+    [
+      "日期平台同步标记",
+      state.date_window_sync_required === true ||
+      state.date_window_sync_required === 1
+        ? "待同步"
+        : state.date_window_sync_required === false ||
+          state.date_window_sync_required === 0
+        ? "无待同步标记"
+        : undefined,
+    ],
+    [
       "启用",
       definition.enabled === true || definition.enabled === 1
         ? "已启用"

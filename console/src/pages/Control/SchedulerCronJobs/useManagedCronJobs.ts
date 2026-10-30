@@ -10,6 +10,7 @@ import type {
   ManagedJob,
   ManagedOperation,
 } from "@/api/types/schedulerCron";
+import { isDatePause } from "./dateRange";
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "新版任务请求失败";
@@ -244,6 +245,15 @@ export function useManagedCronJobs(
           requestId,
         ),
       ),
+    pause: (job: ManagedJob, requestId: string) =>
+      perform((ctx) =>
+        schedulerCronApi.pause(
+          targetManagedContext(ctx, job),
+          job.id,
+          job.definition_version,
+          requestId,
+        ),
+      ),
     toggle: (job: ManagedJob, requestId: string) =>
       perform((ctx) => {
         if (!job.management_version)
@@ -251,7 +261,9 @@ export function useManagedCronJobs(
         return schedulerCronApi.setEnabled(
           targetManagedContext(ctx, job),
           job.id,
-          Boolean(job.task?.is_paused) || !job.enabled,
+          (Boolean(job.task?.is_paused) &&
+            !isDatePause(job.task?.pause_reason)) ||
+            !job.enabled,
           job.management_version,
           requestId,
         );

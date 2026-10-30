@@ -14,6 +14,7 @@ import type {
   ManagedOperation,
   ManagedPage,
   ManagedSelectedChild,
+  ManagedRunDateRange,
 } from "../types/schedulerCron";
 
 const ROOT = "/scheduler/cron/jobs";
@@ -37,6 +38,7 @@ const SPEC_FIELDS = new Set([
   "tenant_name",
   "bbk_id",
   "plan_id",
+  "run_date_range",
 ]);
 
 function definitionOnly(spec: ManagedCronSpec): ManagedCronSpec {
@@ -213,6 +215,35 @@ export const schedulerCronApi = {
       context,
       `${jobPath(id)}/operations/${encodeURIComponent(operationId)}/retry`,
       { method: "POST" },
+    ),
+  pause: (
+    context: ManagedCronContext,
+    id: string,
+    version: number,
+    requestId: string,
+  ) =>
+    write<{ operation: ManagedOperation }>(
+      context,
+      `${jobPath(id)}/pause`,
+      "POST",
+      { request_id: requestId, expected_definition_version: version },
+    ),
+  setDateRange: (
+    context: ManagedCronContext,
+    id: string,
+    period: ManagedRunDateRange | null,
+    version: number,
+    requestId: string,
+  ) =>
+    write<{ operation: ManagedOperation }>(
+      context,
+      `${jobPath(id)}/run-date-range`,
+      "PUT",
+      {
+        request_id: requestId,
+        expected_management_version: version,
+        run_date_range: period,
+      },
     ),
   broadcast: (
     context: ManagedCronContext,

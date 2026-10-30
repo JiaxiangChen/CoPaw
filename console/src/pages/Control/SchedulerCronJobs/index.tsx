@@ -18,6 +18,7 @@ import { ManagedBroadcastModal } from "./ManagedBroadcastModal";
 import { ManagedChildrenModal } from "./ManagedChildrenModal";
 import { ManagedModeModal } from "./ManagedModeModal";
 import { ManagedProgressModal } from "./ManagedProgressModal";
+import { ManagedDateRangeModal } from "./ManagedDateRangeModal";
 import { failureMessage, RequestIdentity } from "./helpers";
 import styles from "../CronJobs/index.module.less";
 
@@ -35,7 +36,7 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
   const refresh = () => void data.reload();
   const close = () => setPanel(null);
   const perform = async (
-    kind: "toggle" | "remove" | "run",
+    kind: "toggle" | "remove" | "run" | "pause",
     job: ManagedJob,
   ) => {
     const key = `${kind}:${job.tenant_id}:${job.source_id}:${job.agent_id}:${job.id}`;
@@ -120,7 +121,7 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
           rowKey={(job) =>
             JSON.stringify([job.tenant_id, job.source_id, job.agent_id, job.id])
           }
-          scroll={{ x: 3390 }}
+          scroll={{ x: 3645 }}
           pagination={{
             defaultPageSize: 10,
             showSizeChanger: true,
@@ -161,6 +162,14 @@ function SchedulerCronWorkspace({ context }: { context: ManagedCronContext }) {
       )}
       {panel?.kind === "mode" && (
         <ManagedModeModal
+          context={target}
+          job={panel.job}
+          onClose={close}
+          onChanged={refresh}
+        />
+      )}
+      {panel?.kind === "dates" && (
+        <ManagedDateRangeModal
           context={target}
           job={panel.job}
           onClose={close}

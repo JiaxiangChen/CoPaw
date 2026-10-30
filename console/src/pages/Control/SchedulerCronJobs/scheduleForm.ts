@@ -1,4 +1,9 @@
 import type { CronJobSpecOutput } from "@/api/types";
+import dayjs, { type Dayjs } from "dayjs";
+import type {
+  ManagedCronSpec,
+  ManagedRunDateRange,
+} from "@/api/types/schedulerCron";
 import {
   buildCronJobFormValues,
   buildCronJobSubmitPayload,
@@ -10,9 +15,19 @@ import {
   serializeCron,
 } from "../CronJobs/components/parseCron";
 
+export type ManagedCronFormValues = CronJobFormValues & {
+  runDates?: [Dayjs, Dayjs] | null;
+};
+type DatedJob = CronJobSpecOutput & {
+  run_date_range?: ManagedRunDateRange | null;
+};
+
 /** 只适配新版编辑器，不改变旧页面的表单转换行为。 */
-export function buildManagedCronFormValues(job: CronJobSpecOutput) {
-  const values = buildCronJobFormValues(job);
+export function buildManagedCronFormValues(job: DatedJob) {
+  const values: ManagedCronFormValues = buildCronJobFormValues(job);
+  values.runDates = job.run_date_range
+    ? [dayjs(job.run_date_range.start_date), dayjs(job.run_date_range.end_date)]
+    : null;
   const cron = job.schedule.cron;
   const parts = parseCron(cron);
   if (parts.type === CronType.daily && (parts.hours?.length ?? 1) === 1) {
@@ -28,10 +43,18 @@ export function buildManagedCronFormValues(job: CronJobSpecOutput) {
 }
 
 export function buildManagedCronSubmitPayload(
-  values: CronJobFormValues,
-  original?: CronJobSpecOutput | null,
+  values: ManagedCronFormValues,
+  original?: DatedJob | null,
 ) {
-  const payload = buildCronJobSubmitPayload(values);
+  const payload: ManagedCronSpec = buildCronJobSubmitPayload(values);
+  payload.run_date_range = original?.meta?.broadcast_source_job_id
+    ? original.run_date_range ?? null
+    : values.runDates
+    ? {
+        start_date: values.runDates[0].format("YYYY-MM-DD"),
+        end_date: values.runDates[1].format("YYYY-MM-DD"),
+      }
+    : null;
   if (
     original &&
     serializeCron(parseCron(payload.schedule.cron)) ===
