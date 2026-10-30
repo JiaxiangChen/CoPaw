@@ -6,7 +6,8 @@
 
 ## 结论
 
-ADR 0038–0040 的存储方向仍适用，但不能把旧方案视为已经覆盖当前版本的实施规格。
+ADR 0038/0039 的存储方向仍适用；迁移边界以 ADR 0044/0045 为准，ADR 0040 已被替代。
+不能把旧方案视为已经覆盖当前版本的实施规格。
 当前 Chat 仍通过 `create_chat_service` 装配 `JsonChatRepository`；Session、冷 Turn、
 归档和 checkpoint 仍以文件协议发布。它们不是已经实现的数据库架构。
 
@@ -129,3 +130,64 @@ passed。9项push路由测试原有显式Requires full app dependencies跳过。
 Chat反查两个显式索引，替代此前隐式关联索引。六张表及151个字段均有中文COMMENT。
 分享表有表注释、3个新增字段注释、8个旧字段注释；旧字段变更读取实际结构生成，
 校验失败时停止，不覆盖部署特有字符集和排序规则。仍为草案，未执行DDL。
+
+## 2026-10-30 后续迁移与 CRUD 方案访谈
+
+以下记录早期两次停写的访谈过程；该部署步骤与窗口丢失许可已由本文末尾的单次停机修订替代。
+
+读取临时交接文档和提交18bd71e7，源码核对更新至494171e55。
+18bd71e7..HEAD核心会话CRUD、Session、archive、share、workspace、cron及W+存储路径无变化；
+未重跑旧契约测试，未把先前通过数作为新数据库实现证据。
+
+新增[迁移方案](../../docs/superpowers/specs/2026-10-30-nas-conversation-migration-plan.md)，
+覆盖独立NAS格式升级与新权威迁移的区别、统一scope装配、全部Session/ledger恢复入口、
+archive直接构造旁路、命令先发成功后提交的顺序、分享unknown时unlink风险、
+W+的chats.json依赖，以及备份/离线CLI边界。新导入器直接读受支持旧格式，
+不要求先统一升级NAS，不把export_legacy_state当唯一导入源。
+
+用户确认五项：隔离代表scope演练后生产整体切换；两次短暂停写，中间恢复旧服务离线导入；
+执行中语义边界提交及纯文本有界批量；回退只针对固定切换前镜像且保留新提交。
+另明确窗口内删除、分享、标题、绑定和新消息等全部会话变更可丢，删除可重现、新token可失效；
+该例外不适用于源快照已存在的数据、切换后的提交或独立业务表。
+已更新ADR0039/0040，新增ADR0044，并修正主设计原“生产单scope先切”的建议。
+CONTEXT补充Conversation Migration Snapshot与Conversation Rollback Export，
+避免把旧源快照恢复混称为保留新提交的回退。
+
+当前只交付方案和决策记录；没有运行时修改、DDL或数据迁移。现场库/NAS能力、
+全量导入、双Pod故障、新备份恢复和反向导出演练仍为实施验收门槛。
+
+补充安装边界：分享与其他业务共用app.state.db_connection及SWE_DB_*，
+ShareStore固定表名swe_chat_shares，读取会更新计数。不能用切换公共数据库名安装会话快照。
+当前方案只安装六新表及源share副本，整组原子RENAME须同实例staging、InnoDB/原子DDL、
+依赖/权限/MDL预检；不同实例先转运七表并核验。窗口share/counter丢失已获明确选择。
+
+## 2026-10-30 改为一次连续停机迁移
+
+用户要求按“准备新服务 → 停止原服务 → NAS 数据迁移入库 → 启动新服务”设计。
+已将迁移方案 §1/§4/§6 和主设计 §8/§9 改为一个连续维护窗口：提前准备和演练，
+暂停入口/调度，排空并停止所有旧 writer，备份最终一致源，导入、全量校验、安装七表，
+再启动新服务冒烟并整体恢复流量。新镜像提前准备不等于提前启动写生产数据的业务进程。
+
+新增 ADR 0045，明确替代 ADR 0040 的两次停写和数据丢失许可；ADR 0040 保留为历史，
+标注 superseded。最终排空边界之前已提交的删除、分享/token/计数、标题、专家绑定、
+消息及恢复模块全部保留。同步更新 ADR 0038/0044、CONTEXT 术语、playbook 索引和旧格式迁移文档入口。
+
+失败处置按“新版本是否已有任何提交”分界：尚无新写可恢复原分享表/原 NAS 与固定旧镜像；
+一旦有初始化/冒烟/分享计数等新写，须完整对账和反向导出保留新提交，不能简单恢复源快照。
+停机预算包含排空、备份、迁移、校验、安装及启动，须用生产规模副本计时；没有承诺短暂停机。
+仅修改设计文档，未实施运行时代码、DDL、数据迁移或生产切换。
+
+## 2026-10-30 实施任务拆解
+
+新增[实施计划](../../docs/superpowers/plans/2026-10-30-conversation-mysql-nas-implementation.md)，
+按依赖拆为15项：旧契约/夹具、身份/bundle、schema、publication/unknown、pins、
+SQL Chat CRUD、历史查询、Session执行、compact/reset、分享及入口注入、导入核验、
+导出备份、CLI/安装手册、目标环境全链路验收、物理GC。生产门槛与可延后GC明确区分。
+
+CodeGraph及精确源码核对确认：BaseChatRepository默认操作仍是load/save整库读改写，
+新repo必须覆盖；DatabaseConnection.transaction返回任务绑定的同连接session，
+publication与share应共用此连接；share表名固定，不能切公共DB配置来切换会话。
+bound-long-session-memory是旧NAS格式优化，不能用其已勾选项冒充本次数据库验收。
+
+分享扩展SQL仅修订头部执行说明为连续停机后的staging副本扩展/回填及七表安装，
+未改DDL语句、未执行数据库操作。新增计划复选框保持未完成，后续按真实测试与现场证据更新。

@@ -2,7 +2,9 @@
 -- Inspect SHOW CREATE TABLE swe_chat_shares before reviewing this script.
 -- Existing tokens, column definitions, collations, defaults and counters survive.
 -- Apply once in an isolated review database after the six-table draft.
--- Not idempotent; production rollout needs a reviewed online-DDL/backfill plan.
+-- Not idempotent; apply to the final-source staging copy during the continuous
+-- outage migration. Validate/backfill before installing the seven-table set.
+-- Keep the original share table unchanged for rollback before new-version writes.
 -- DDL implicitly commits. This script is not a rollbackable transaction.
 -- Annotate all eight legacy fields using their actual definitions, including
 -- deployment-specific character sets/collations/defaults. Indexes stay intact.

@@ -2,9 +2,10 @@
 
 - 日期：2026-10-29；状态：**评审草案，未实现、未执行 DDL**。
 - 当前实现基线：本地 `perf/event-loop-optimization`，`93aee5b90`；未拉取远端。
-- 上位决策：[ADR 0038](../../adr/0038-conversation-metadata-in-mysql-content-on-nas.md)、[0039](../../adr/0039-conversation-publication-uses-mysql-commit.md)、[0040](../../adr/0040-conversation-cutover-allows-window-write-loss.md)。
+- 上位决策：[ADR 0038](../../adr/0038-conversation-metadata-in-mysql-content-on-nas.md)、[0039](../../adr/0039-conversation-publication-uses-mysql-commit.md)、[0044](../../adr/0044-conversation-storage-uses-one-production-cutover.md)、[0045](../../adr/0045-conversation-migration-uses-one-continuous-outage.md)。ADR 0040 的窗口丢失许可已由 ADR 0045 替代。
 - 核对证据与当前测试：[设计复核](../../../analysis/playbook/conversation-storage-design-audit.md)。
 - SQL：[六张新表](../../../scripts/sql/conversation_metadata_tables.sql)、[现有分享表扩展](../../../scripts/sql/conversation_share_publication_extension.sql)。
+- 后续实施边界与迁移步骤：[NAS 数据与 CRUD 迁移方案](2026-10-30-nas-conversation-migration-plan.md)。
 
 旧详细设计和会话专用初始化 SQL 未找到，本稿替代失效的设计链接。现存运行时仍是
 NAS 文件权威，不能将本稿或 ADR 当作数据库适配器已经实现的证明。
@@ -259,6 +260,11 @@ writer终态提交在相同锁序串行，不能在“查 prepared”和“标 a
 
 ## 6. checkpoint、事件与恢复根
 
+2026-10-30 已确认执行中按工具完成、审批状态变化及 checkpoint/compact/reset 等语义
+边界发布，纯流式文本按有界批次合并，不逐 token 提交。边界提交失败或未知时停止推进
+模型/下一工具，先以原 operation key 对账；不重跑已完成工具，不自动跨 Pod 续跑。
+仅在确认提交且 authority/状态仍有效时继续；批次阈值由基准确定，见 ADR 0039。
+
 Chat `epoch` 是 checkpoint epoch，Session `context_epoch` 是共享上下文 reset
 边界，两者不混用；Turn固定记录context_epoch，publication.epoch指Chat checkpoint epoch。`/new`/`/clear` 原子发布新恢复根、更新对应 epoch/水位/可见性，
 不创建 compaction boundary。保留旧 epoch已提交历史，当前删除即时生效。
@@ -337,10 +343,17 @@ CREATE TABLE，DDL在隔离库验证后形成正式生产迁移。建表非事�
 
 ### 8.1 导入范围与校验
 
-选定内部一致且完整的旧数据快照，用当前reader在离线副本读取，不拼接运行中半写
-文件。ADR0040允许快照之后至切换完成的少量旧写丢失，不为保住此窗口写入新增
-专用拒写门、CDC、双写或增量追赶；但最终切换必须终止所有旧writer，不能新旧
-权威混跑。该例外不适用于普通备份、快照内损坏或新系统提交。
+2026-10-30 按用户最新要求改为一次连续停机：提前准备新版本和迁移工具，关闭入口、
+排空并停止全部旧 writer 后固定最终一致源；在同一停机窗口内完成备份、导入、全量校验
+和七表安装，之后才启动新服务并恢复流量。旧服务在此期间不恢复写入，新版本不提前
+运行会修改生产数据的初始化或后台任务。详见 ADR 0045 和后续迁移方案 §6。
+
+保留最终排空边界之前全部已提交的消息、删除、分享及计数、标题、专家绑定与恢复模块；
+撤销此前快照后少量旧写可丢的许可，不允许由迁移导致删除复活或分享 token 丢失。
+选定内部一致且完整的最终旧数据快照，用当前 reader 在离线副本读取，不拼接半写文件。
+pending/尾部先按旧协议收敛，无法解释或损坏的记录阻止切换。无需双写、CDC、增量追赶
+或新增专用应用拒写门；通过部署维护操作保持所有旧 writer 停止，新旧权威不混跑。
+停机时长包含排空、备份/复制、导入、校验、切表及启动检查，须在生产规模副本上计时。
 
 | 输入 | 必须导入/保留 | 禁止的捷径 |
 | --- | --- | --- |
@@ -365,7 +378,10 @@ CREATE TABLE，DDL在隔离库验证后形成正式生产迁移。建表非事�
 
 ### 8.2 回退
 
-旧数据快照保持只读；切换后数据库新提交不能靠回滚镜像丢弃。停新writer、完成
+兼容目标固定为切换前最后一个生产镜像 digest，导出它实际支持的完整格式；不扩展
+额外更早版本的兼容，也不预设现网一定已支持 v3/v2。此能力须在上线前用固定镜像实测。
+
+旧数据快照保持只读；新版本尚无写入时可恢复原表/原NAS和固定旧镜像。初始化或冒烟一旦产生提交也视为新写，不能靠回滚镜像丢弃。新写后先停新writer、完成
 unknown publication对账，导出选定DB一致状态及所有引用NAS内容为当前旧reader
 可读的session/ledger/journal/Chat/share格式；保留全部模块和新写入。若旧格式
 无法表达新状态，阻止回退并修复导出器，不覆盖原备份。演练必须包含切换后新增
@@ -378,7 +394,7 @@ unknown publication对账，导出选定DB一致状态及所有引用NAS内容�
 2. **发布/执行阶段**：接通准入、busy、generation fencing、Stop终态竞争、unknown
    reconciliation、批量pin/GC；生产等价两Pod/NAS故障注入。
 3. **迁移/回退阶段**：完整旧格式样本预览/导入/逐项核验/增量新写/回退演练。
-4. **灰度阶段**：全部旧writer退出，以单scope先切换；监控DB锁等待/unknown年龄、
+4. **切换阶段**：按 ADR 0044/0045，先在隔离环境按代表scope演练，生产一次连续停机完成备份、迁移、校验和整体切换；监控DB锁等待/unknown年龄、
    引用损坏、GC积压、正文IO与p95。无DB-free备用模式，不靠双写维持两套权威。
 
 | 验收类别 | 至少覆盖 |

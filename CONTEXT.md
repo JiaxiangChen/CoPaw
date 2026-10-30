@@ -2075,6 +2075,14 @@ _Avoid_: parallel mutation of shared context, implicit request queue, approval r
 The current owner's exclusive permission to advance an Answer Turn and publish changes to its identity-scoped Logical Chat Session. Superseded execution authority cannot publish late results, and obtaining new authority does not itself resume an interrupted Agent execution.
 _Avoid_: request routing affinity, automatic failover execution, permission to replay tools
 
+**Conversation Migration Snapshot**:
+The complete, internally consistent final legacy conversation state captured after legacy writers have drained and stopped. It includes every conversation change committed before that boundary and remains the source of truth for migration validation.
+_Avoid_: live working directory copy, earlier rehearsal snapshot, ordinary backup recovery point
+
+**Conversation Rollback Export**:
+The complete conversation state prepared for the fixed pre-cutover application version, including changes committed after cutover. It is distinct from restoring the original Conversation Migration Snapshot.
+_Avoid_: image-only rollback, pre-cutover snapshot restore, older-version compatibility archive
+
 **Conversation Compaction Boundary**:
 The durable, user-visible separator within one **Chat Record** marking the point where automatic context compaction or an explicit `/compact` archived earlier messages. It appears immediately through a non-message stream event and is restored from the archive on reload; its archived-message count is the number of display-safe history messages, not rendered cards; it never represents `/new` or `/clear`.
 _Avoid_: history-clear marker, new-conversation marker, summary message

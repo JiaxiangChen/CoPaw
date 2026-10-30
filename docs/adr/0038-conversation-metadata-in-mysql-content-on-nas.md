@@ -33,7 +33,8 @@ visibility, and physical reclamation respects live references and recovery or
 backup retention. No age-based deletion of valid history is introduced.
 History paging and direct Turn reads are included in the redesign while
 established API semantics remain compatible. Backup and cutover trade-offs
-were confirmed in ADR 0040; their detailed protocols are proposed in the
+were initially confirmed in ADR 0040 and updated to a continuous-outage migration
+in ADR 0045; their detailed protocols are proposed in the
 conversation storage design.
 
 The subsequent simplification decision removes computed content checksums,

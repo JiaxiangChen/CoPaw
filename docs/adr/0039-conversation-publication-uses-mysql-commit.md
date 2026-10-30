@@ -21,8 +21,8 @@ The user confirmed on 2026-10-20 that restart recovery guarantees committed
 content, not every displayed streaming increment. User-question admission
 remains durable before Agent execution. Live increments may precede history
 publication; success and terminal-history publication must reflect the
-committed result. The precise intermediate persistence cadence remains to be
-designed.
+committed result. The intermediate persistence cadence was subsequently resolved
+on 2026-10-30 as described below.
 
 One identity-scoped Logical Chat Session executes one Answer Turn at a time;
 a concurrent independent submission receives a busy result rather than implicit
@@ -46,3 +46,14 @@ replace database ownership validation. If the owner dies, a subsequent request
 may reconcile committed history but cannot attach to the dead process's live
 stream or automatically resume its Agent. This explicit deployment assumption
 avoids a second internal routing system.
+
+The user selected semantic-boundary publication on 2026-10-30: completed tool
+results, approval-state changes, and checkpoint/compaction/reset boundaries are
+published, while plain streamed text is coalesced into bounded batches rather
+than committed per token. Batch limits are determined by measurement. An uncertain
+or failed boundary publication stops further model/tool advancement until the
+original operation is reconciled; it never authorizes rerunning a completed tool.
+Continuation requires confirmed commit and still-valid execution authority and
+state. This improves retained intermediate progress without claiming atomicity
+between external tool effects and storage, or automatic Agent continuation after
+process failure. Approval business state remains owned by the approval service.

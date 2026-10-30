@@ -27,6 +27,8 @@
 | [my-mcp-manual-validation.md](my-mcp-manual-validation.md) | MyMCP 在本地环境下按用户、来源、应用和管理员身份进行手工验证的方法 |
 | [performance-optimization-plan.md](performance-optimization-plan.md) | freshness 扫描优化与官方 MySQL 异步驱动迁移的方案表、风险和验收标准 |
 | [conversation-storage-design-audit.md](conversation-storage-design-audit.md) | 会话元数据入库设计复核：当前契约、新增专家和历史逻辑、缺失设计/SQL 与重新设计入口 |
+| [NAS 数据与 CRUD 迁移方案](../../docs/superpowers/specs/2026-10-30-nas-conversation-migration-plan.md) | 多格式离线导入、统一读写适配、一次连续停机整体切换及固定镜像回退 |
+| [会话数据库迁移实施计划](../../docs/superpowers/plans/2026-10-30-conversation-mysql-nas-implementation.md) | 15 项代码/工具任务、文件职责、故障回归、七表安装及目标环境验收 |
 | [python-memory-hotspots.md](python-memory-hotspots.md) | Python 后端前五内存热点、引用持有链、运行时验证与第一阶段生命周期及临时缓存设计入口 |
 | [python-installation-denial.md](python-installation-denial.md) | Shell pip 安装平台拒绝、语法识别边界、Hook 改写与前后台执行入口 |
 | [skill-freshness-and-span-write-performance.md](skill-freshness-and-span-write-performance.md) | 技能递归 freshness 检查与 Tracing 批量写入的 CPU 成本、隔离基准及优化边界 |
