@@ -46,7 +46,7 @@ The four Background SubAgent tools use names and nicknames only.
 ```text
 start_subagent(expert_name, objective, background="")
 get_subagent(nickname, include_details=false)
-wait_subagent(nickname=null, timeout_ms=3000)
+wait_subagent(nicknames=null, timeout_ms=3000)
 cancel_subagent(nickname)
 ```
 
@@ -63,11 +63,25 @@ the supplied nickname to one Chat-owned record, then perform the existing
 operation using its internal run ID. An unknown nickname, or one outside the
 current Chat, produces `not_found`.
 
-Without a nickname, `wait_subagent` retains its Chat-level monitoring role,
-but reports `active_subagents` and `terminal_subagents` using model-facing
-fields only. With a nickname, it waits only for that run, returning when it
-becomes terminal or when `timeout_ms` elapses. A timeout does not cancel the
-SubAgent.
+`wait_subagent` accepts a list instead of a singular nickname:
+
+```text
+wait_subagent(nicknames=null, timeout_ms=3000)
+```
+
+Without `nicknames`, it retains its Chat-level monitoring role, but reports
+`active_subagents` and `terminal_subagents` using model-facing fields only.
+When a non-empty nickname list is supplied, the server resolves the complete
+list before waiting and creates a fixed target set. It returns immediately only
+when every target is already terminal. Otherwise it waits until every target
+becomes terminal or `timeout_ms` elapses. A target finishing early never makes
+the operation return while another target remains active. The timeout response
+contains the latest state of every requested nickname. A timeout does not
+cancel a SubAgent.
+
+The list is an all-or-nothing lookup: an unknown or out-of-Chat nickname
+returns `not_found` before any wait begins. An empty explicit list is rejected
+as an invalid request; omitting the field selects Chat-level monitoring.
 
 `cancel_subagent` is idempotent: a terminal SubAgent returns its current
 terminal state rather than an operation failure.
@@ -110,7 +124,8 @@ Tests must cover:
 2. no `run_id` in each model-facing tool response, including every error path;
 3. selected-expert catalog filtering still blocks launches of other experts;
 4. targeted wait ignores other terminal runs and times out without cancelling
-   its target;
+   its target; a multi-nickname wait returns early only when all requested
+   SubAgents are terminal and otherwise waits until its timeout;
 5. Chat-level wait remains backwards-compatible in timing and status behavior,
    except for replacing internal IDs with nicknames;
 6. get, wait, and cancel reject nicknames outside the current Chat;
