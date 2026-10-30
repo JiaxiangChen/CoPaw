@@ -62,3 +62,17 @@ def read_chat_run_records(
         if record is not None:
             records.append(record)
     return sorted(records, key=lambda item: item.created_at)
+
+
+def read_chat_run_by_nickname(
+    run_store_dir: Path,
+    request_context: Mapping[str, Any],
+    nickname: str,
+) -> BackgroundSubAgentRunRecord | None:
+    """Resolve an exact nickname only when one Chat-owned record matches."""
+    matches = [
+        record
+        for record in read_chat_run_records(run_store_dir, request_context)
+        if record.nickname == nickname
+    ]
+    return matches[0] if len(matches) == 1 else None

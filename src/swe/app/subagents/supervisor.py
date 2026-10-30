@@ -45,7 +45,8 @@ from .session_dependencies import (
     capture_community_expert_session_dependencies,
     resolve_community_expert_dependency_view,
 )
-from .nicknames import assign_subagent_nickname
+from .nicknames import allocate_subagent_nickname, assign_subagent_nickname
+from .run_access import read_chat_run_records
 from .permissions import build_definition_policy, compose_effective_policy
 from .registry import AgentRegistry
 from .run_store import PerRunSubAgentRunStore
@@ -169,6 +170,7 @@ class BackgroundSubAgentSupervisor:
         self._cancel_grace_seconds = cancel_grace_seconds
         self._active: dict[tuple[str, str, str], dict[str, _ActiveRun]] = {}
         self._starting: dict[tuple[str, str, str], set[str]] = {}
+        self._nickname_reservations: dict[tuple[str, str, str], set[str]] = {}
 
     async def start(
         self,
@@ -189,55 +191,86 @@ class BackgroundSubAgentSupervisor:
         definition_match: DefinitionMatchMetadata | None = None,
     ) -> BackgroundSubAgentRunRecord | BackgroundSubAgentStartBlocked:
         """Reserve capacity before any asynchronous launch preparation."""
-        await self._reap_scope(scope)
-        active = self._active_for_scope(scope)
-        starting = self._starting.setdefault(self._scope_key(scope), set())
-        if len(set(active) | starting) >= self._max_running_per_scope:
-            return BackgroundSubAgentStartBlocked(
-                limit=self._max_running_per_scope,
-                active_run_ids=sorted(set(active) | starting),
+        definition = definition or self._registry.resolve(spec.name)
+        reservations = self._nickname_reservations.setdefault(
+            self._scope_key(scope),
+            set(),
+        )
+        chat_context = {
+            "session_id": spec.parent_thread_id,
+            "chat_id": spec.parent_chat_id,
+        }
+        used = {
+            record.nickname
+            for record in read_chat_run_records(
+                scope.run_store_dir,
+                chat_context,
             )
-        # No await between the capacity check and reservation: admission is
-        # atomic for concurrent requests on this supervisor's event loop.
-        run_id = f"subagent-{uuid4().hex[:12]}"
-        starting.add(run_id)
+            if record.nickname
+        }
+        nickname = allocate_subagent_nickname(
+            assign_subagent_nickname(definition.nickname),
+            used | reservations,
+        )
+        # Reserve before the first await, including asynchronous scope reaping.
+        reservations.add(nickname)
         try:
-            return await self._start_reserved(
-                scope=scope,
-                run_id=run_id,
-                spec=spec,
-                parent_agent_config=parent_agent_config,
-                workspace_dir=workspace_dir,
-                parent_policy=parent_policy,
-                workspace_policy=workspace_policy,
-                runtime_policy=runtime_policy,
-                request_context=request_context,
-                effective_skill_names=effective_skill_names,
-                skill_snapshot_signatures=skill_snapshot_signatures,
-                skill_snapshot_dirs=skill_snapshot_dirs,
-                definition=definition,
-                start_request=start_request,
-                definition_match=definition_match,
-            )
-        except asyncio.CancelledError:
-            if run_id in active:
-                cleanup = asyncio.create_task(self.cancel(scope, run_id))
-                try:
-                    await asyncio.wait_for(asyncio.shield(cleanup), timeout=5)
-                except (Exception, asyncio.CancelledError):
-                    logger.warning(
-                        "background_subagent_start_cancel_unconfirmed run_id=%s",
-                        run_id,
-                    )
-            raise
+            await self._reap_scope(scope)
+            active = self._active_for_scope(scope)
+            starting = self._starting.setdefault(self._scope_key(scope), set())
+            if len(set(active) | starting) >= self._max_running_per_scope:
+                return BackgroundSubAgentStartBlocked(
+                    limit=self._max_running_per_scope,
+                    active_run_ids=sorted(set(active) | starting),
+                )
+            # No await between the capacity check and reservation: admission is
+            # atomic for concurrent requests on this supervisor's event loop.
+            run_id = f"subagent-{uuid4().hex[:12]}"
+            starting.add(run_id)
+            try:
+                return await self._start_reserved(
+                    scope=scope,
+                    run_id=run_id,
+                    nickname=nickname,
+                    spec=spec,
+                    parent_agent_config=parent_agent_config,
+                    workspace_dir=workspace_dir,
+                    parent_policy=parent_policy,
+                    workspace_policy=workspace_policy,
+                    runtime_policy=runtime_policy,
+                    request_context=request_context,
+                    effective_skill_names=effective_skill_names,
+                    skill_snapshot_signatures=skill_snapshot_signatures,
+                    skill_snapshot_dirs=skill_snapshot_dirs,
+                    definition=definition,
+                    start_request=start_request,
+                    definition_match=definition_match,
+                )
+            except asyncio.CancelledError:
+                if run_id in active:
+                    cleanup = asyncio.create_task(self.cancel(scope, run_id))
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(cleanup),
+                            timeout=5,
+                        )
+                    except (Exception, asyncio.CancelledError):
+                        logger.warning(
+                            "background_subagent_start_cancel_unconfirmed run_id=%s",
+                            run_id,
+                        )
+                raise
+            finally:
+                starting.discard(run_id)
         finally:
-            starting.discard(run_id)
+            reservations.discard(nickname)
 
     async def _start_reserved(
         self,
         *,
         scope: BackgroundSubAgentScope,
         run_id: str,
+        nickname: str,
         spec: DelegationSpec,
         parent_agent_config: AgentProfileConfig,
         workspace_dir: Path,
@@ -265,7 +298,6 @@ class BackgroundSubAgentSupervisor:
         )
         store = PerRunSubAgentRunStore(scope.run_store_dir)
         effective_budget = _effective_budget(definition.budget, spec.budget)
-        nickname = assign_subagent_nickname(definition.nickname)
         parent_skill_snapshot_dirs = skill_snapshot_dirs
         try:
             session_dependency_view = resolve_community_expert_dependency_view(

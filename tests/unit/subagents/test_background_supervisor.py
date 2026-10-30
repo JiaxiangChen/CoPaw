@@ -761,3 +761,112 @@ async def test_start_stops_when_model_snapshot_serialization_fails(
     assert not list(scope.run_store_dir.glob(".*.mcp.json"))
     assert not list(scope.run_store_dir.glob(".*.model.json"))
     assert not list(scope.run_store_dir.glob("*.skills"))
+
+
+@pytest.mark.parametrize(
+    ("used", "expected"),
+    [
+        (set(), "研究员"),
+        ({"研究员"}, "研究员-2"),
+        ({"研究员", "研究员-3"}, "研究员-2"),
+        ({"研究员", "研究员-2", "研究员-3"}, "研究员-4"),
+    ],
+)
+def test_allocate_subagent_nickname_uses_smallest_unused_suffix(
+    used,
+    expected,
+):
+    from swe.app.subagents.nicknames import allocate_subagent_nickname
+
+    assert allocate_subagent_nickname("研究员", used) == expected
+
+
+@pytest.mark.asyncio
+async def test_configured_nickname_remains_unique_after_terminal_run(tmp_path):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(
+            update={"nickname": "研究员"},
+        )
+    )
+    scope = _scope(tmp_path)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec(),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+    first = await supervisor.start(**kwargs)
+    await supervisor.cancel(scope, first.run_id)
+    second = await supervisor.start(**kwargs)
+
+    store = PerRunSubAgentRunStore(scope.run_store_dir)
+    assert (await store.get(first.run_id)).nickname == "研究员"
+    assert (await store.get(second.run_id)).nickname == "研究员-2"
+    assert first.run_id != second.run_id
+
+
+@pytest.mark.asyncio
+async def test_concurrent_starts_reserve_nicknames_before_launch(
+    tmp_path,
+    monkeypatch,
+):
+    supervisor = BackgroundSubAgentSupervisor(
+        popen_factory=_FakePopenFactory(),
+    )
+    definition = (
+        _definition_provider()
+        .list_definitions()[0]
+        .model_copy(
+            update={"nickname": "研究员"},
+        )
+    )
+    scope = _scope(tmp_path)
+    entered = 0
+    launch_barrier = asyncio.Event()
+    original_start_reserved = supervisor._start_reserved
+
+    async def start_reserved(
+        *,
+        scope,
+        run_id,
+        nickname,
+        spec,
+        parent_agent_config,
+        workspace_dir,
+        **kwargs,
+    ):
+        nonlocal entered
+        entered += 1
+        assert not list(scope.run_store_dir.glob("subagent-*.json"))
+        if entered == 2:
+            launch_barrier.set()
+        await launch_barrier.wait()
+        return await original_start_reserved(
+            scope=scope,
+            run_id=run_id,
+            nickname=nickname,
+            spec=spec,
+            parent_agent_config=parent_agent_config,
+            workspace_dir=workspace_dir,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(supervisor, "_start_reserved", start_reserved)
+    kwargs = {
+        "scope": scope,
+        "spec": _spec(),
+        "definition": definition,
+        "parent_agent_config": _agent_config(tmp_path),
+        "workspace_dir": tmp_path,
+    }
+    records = await asyncio.wait_for(
+        asyncio.gather(supervisor.start(**kwargs), supervisor.start(**kwargs)),
+        timeout=5,
+    )
+    assert {record.nickname for record in records} == {"研究员", "研究员-2"}

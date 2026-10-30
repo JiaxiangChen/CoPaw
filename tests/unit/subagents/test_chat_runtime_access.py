@@ -694,3 +694,54 @@ def test_management_only_factory_does_not_load_expert_catalog(
         start_enabled=False,
     )
     assert set(tools) == {"wait_subagent", "get_subagent", "cancel_subagent"}
+
+
+@pytest.mark.asyncio
+async def test_read_chat_run_by_nickname_requires_unique_exact_owned_match(
+    tmp_path,
+):
+    from swe.app.subagents.run_access import read_chat_run_by_nickname
+
+    store, foreign = await _record(tmp_path, chat_id="other-chat")
+    foreign.nickname = "研究员"
+    store._write(foreign)
+    assert (
+        read_chat_run_by_nickname(
+            tmp_path / "runs",
+            _context(tmp_path),
+            "研究员",
+        )
+        is None
+    )
+
+    _, own = await _record(tmp_path)
+    own.nickname = "研究员"
+    store._write(own)
+    assert (
+        read_chat_run_by_nickname(
+            tmp_path / "runs",
+            _context(tmp_path),
+            "研究员",
+        ).run_id
+        == own.run_id
+    )
+    assert (
+        read_chat_run_by_nickname(
+            tmp_path / "runs",
+            _context(tmp_path),
+            "研究",
+        )
+        is None
+    )
+
+    _, duplicate = await _record(tmp_path)
+    duplicate.nickname = "研究员"
+    store._write(duplicate)
+    assert (
+        read_chat_run_by_nickname(
+            tmp_path / "runs",
+            _context(tmp_path),
+            "研究员",
+        )
+        is None
+    )
