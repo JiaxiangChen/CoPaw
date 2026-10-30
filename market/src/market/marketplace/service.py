@@ -1021,6 +1021,7 @@ class MarketplaceService:
                             user_id,
                             source_id,
                         )
+                        return True
                     logger.warning(
                         "Agent reload failed on attempt %s: %s - %s",
                         attempt + 1,
@@ -2589,23 +2590,6 @@ class MarketplaceService:
                 error=None,
             )
         definition_id = str(uuid.uuid4())
-        from swe.app.subagents import builtin_definition_provider
-
-        builtin_names = {
-            definition.name
-            for definition in builtin_definition_provider().list_definitions()
-        }
-        if expert_name in builtin_names:
-            return _ExpertInstallTarget(
-                definition_id="",
-                definition_path=target_root / "unused.toml",
-                enabled=True,
-                error=ExpertOperationResult(
-                    user_id=user_id,
-                    success=False,
-                    reason="expert name conflicts with builtin definition",
-                ),
-            )
         for path in target_root.glob("*.toml"):
             try:
                 payload = tomllib.loads(path.read_text(encoding="utf-8"))
