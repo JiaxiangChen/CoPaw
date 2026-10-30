@@ -155,14 +155,22 @@ def capture_launch_dependencies(
             mcp_payload, snapshotted_mcps, skipped_mcps = (
                 _snapshot_frozen_mcps(
                     frozen_root,
-                    metadata.declared_mcps if metadata is not None else None,
+                    (
+                        (metadata.declared_mcps or [])
+                        if metadata is not None
+                        else None
+                    ),
                 )
             )
         else:
             mcp_payload, snapshotted_mcps, skipped_mcps = (
                 _snapshot_declared_mcps(
                     parent_agent_config,
-                    metadata.declared_mcps if metadata is not None else None,
+                    (
+                        (metadata.declared_mcps or [])
+                        if metadata is not None
+                        else None
+                    ),
                 )
             )
         private_path = _write_private_mcp_snapshot(

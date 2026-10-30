@@ -304,11 +304,12 @@ def test_dependency_capture_cleans_copied_skills_when_mcp_snapshot_fails(
 @pytest.mark.parametrize(
     ("mcps_value", "expected_names"),
     [
-        (None, {"github", "calendar"}),
+        (None, set()),
+        (["github"], {"github"}),
         ([], set()),
     ],
 )
-def test_dependency_capture_distinguishes_inherited_and_empty_mcps(
+def test_dependency_capture_only_includes_declared_mcps(
     tmp_path: Path,
     mcps_value: list[str] | None,
     expected_names: set[str],

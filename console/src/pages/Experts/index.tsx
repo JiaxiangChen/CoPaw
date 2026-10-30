@@ -443,7 +443,7 @@ export default function ExpertsPage() {
             <Select
               mode="multiple"
               options={mcpOptions}
-              placeholder="留空将继承主 Agent 已启用 MCP"
+              placeholder="留空则不使用 MCP"
               disabled={Boolean(selected?.definition?.agent_owned?.community)}
             />
           </Form.Item>
