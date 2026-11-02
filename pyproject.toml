@@ -49,7 +49,7 @@ dependencies = [
     "redis>=5.0.0",
     # Elasticsearch for model output storage (7.x client for ES 6.x server compat)
     # "elasticsearch[async]==7.17.9",
-    "LR34.05-AgentTraceSDK>=0.1.9",
+    "LR34.05-AgentTraceSDK==0.2.2",
 ]
 
 [tool.setuptools.dynamic]

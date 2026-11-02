@@ -2,6 +2,8 @@
 """Test fake for only the documented AgentTraceSDK surface used by Swe."""
 
 from ._impl import (
+    OperationName,
+    get_current_span,
     SpanKind,
     TraceFields,
     decorator,

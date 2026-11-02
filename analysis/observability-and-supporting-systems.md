@@ -7,6 +7,7 @@
 | 区域 | 关键文件 | 说明 |
 |------|----------|------|
 | Tracing | `src/swe/tracing/config.py`, `src/swe/tracing/manager.py`, `src/swe/tracing/models.py`, `src/swe/tracing/model_wrapper.py`, `src/swe/tracing/sanitizer.py`, `src/swe/tracing/store.py` | 追踪配置、模型包装、脱敏和落盘 |
+| AgentTraceSDK | `src/swe/tracing/agent_trace_sdk.py`, `src/swe/agents/agent_trace_output.py`, `docs/agent-trace-sdk.md` | 并行 SDK 采集；输入输出缺失与 0.2.2 升级排查见 [playbook](playbook/agent-trace-sdk-capture.md)；代码已实施，真实私有 SDK 验收待部署环境执行 |
 | Hook Telemetry | `src/swe/agents/hook_runtime/runtime.py` | Hook handler 实际执行时输出 `HOOK_TELEMETRY ` 前缀的单行 JSON 日志，用于日志采集侧分析；不写入 tracing span |
 | Runtime Diagnostic | `src/swe/app/runtime_diagnostic.py`, `src/swe/app/pod_resources.py`, `src/swe/app/middleware/sse_diagnostic.py`, `src/swe/app/_app.py` | 按 Pod 输出 `RUNTIME_DIAGNOSTIC ` 结构化日志，无特权采集 SSE 并发、事件循环延迟、当前 Python 进程资源、当前容器文件句柄与 cgroup 磁盘 IO，以及 `/opt/deployments/app` 文件系统使用情况 |
 | Token Usage | `src/swe/token_usage/manager.py`, `src/swe/token_usage/model_wrapper.py` | Token 统计与包装器 |

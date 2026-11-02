@@ -55,6 +55,7 @@ from ..providers.retry_chat_model import (
 )
 from ..token_usage import TokenRecordingModelWrapper
 from ..tracing import TracingModelWrapper, has_trace_manager, get_trace_manager
+from ..tracing.agent_trace_model_wrapper import AgentTraceModelWrapper
 
 
 def _file_url_to_path(url: str) -> str:
@@ -1014,7 +1015,10 @@ def _wrap_model_with_tracing(
     When tracing is enabled, wraps with TracingModelWrapper on top.
     """
     # Always wrap with token recording first
-    wrapped = TokenRecordingModelWrapper(provider_id, model)
+    wrapped = TokenRecordingModelWrapper(
+        provider_id,
+        AgentTraceModelWrapper(model),
+    )
 
     # Then optionally wrap with tracing
     if has_trace_manager():

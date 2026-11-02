@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Iterator, Mapping, TypeVar
@@ -19,12 +21,14 @@ def _missing_trace_sdk_is_allowed() -> bool:
 
 try:
     from trace_sdk import (
+        OperationName,
         SpanKind,
         TraceFields,
         chat_traced,
         execute_tool_traced,
         extract_trace_context,
         global_tracer,
+        get_current_span,
         use_trace_context,
     )
     from trace_sdk.global_tracer import shutdown_global_tracer
@@ -50,7 +54,16 @@ except ModuleNotFoundError as exc:
         agent_version: str
         source_id: str
 
+    class OperationName:  # type: ignore[no-redef]
+        INVOKE_AGENT = "invoke_agent"
+        CHAT = "chat"
+
+    def get_current_span() -> None:
+        return None
+
     class _NoopSpan:
+        is_recording = False
+
         async def __aenter__(self) -> "_NoopSpan":
             return self
 
@@ -110,3 +123,63 @@ def use_b3_trace_context(
         return
     with use_trace_context(extracted.span_context, extracted.trace_fields):
         yield
+
+
+_capture_disabled: ContextVar[bool] = ContextVar(
+    "sdk_capture_disabled",
+    default=False,
+)
+
+
+@contextmanager
+def sdk_capture_policy(enabled: bool):
+    """Suppress every nested SDK entry for requests outside the supported scope."""
+    token = _capture_disabled.set(not enabled)
+    try:
+        yield
+    finally:
+        _capture_disabled.reset(token)
+
+
+def _scoped_decorator(decorator):
+    def configure(**config):
+        def decorate(function):
+            traced_function = decorator(**config)(function)
+
+            @wraps(traced_function)
+            async def call(*args, **kwargs):
+                if _capture_disabled.get():
+                    return await function(*args, **kwargs)
+                return await traced_function(*args, **kwargs)
+
+            return call
+
+        return decorate
+
+    return configure
+
+
+chat_traced = _scoped_decorator(chat_traced)
+execute_tool_traced = _scoped_decorator(execute_tool_traced)
+
+
+class _SkippedSpan:
+    is_recording = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def set_attribute(self, *_args):
+        return None
+
+
+def start_child_span(name: str, operation_name: str):
+    if _capture_disabled.get():
+        return _SkippedSpan()
+    return global_tracer.start_as_current_span(
+        name,
+        operation_name=operation_name,
+    )

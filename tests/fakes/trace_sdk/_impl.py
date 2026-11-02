@@ -17,6 +17,18 @@ from typing import Any, Callable, Mapping
 from . import _records
 
 
+class OperationName:
+    INVOKE_AGENT = "invoke_agent"
+    CHAT = "chat"
+
+
+_active_span = contextvars.ContextVar("fake_active_span", default=None)
+
+
+def get_current_span():
+    return _active_span.get()
+
+
 class SpanKind(str, Enum):
     SERVER = "SERVER"
     INTERNAL = "INTERNAL"
@@ -39,7 +51,11 @@ class Span:
         name: str,
         kind: SpanKind = SpanKind.INTERNAL,
         trace_fields: TraceFields | None = None,
+        operation_name: str | None = None,
     ) -> None:
+        if not isinstance(operation_name, str) or not operation_name.strip():
+            raise ValueError(f"{name}: gen_ai.operation.name is required")
+        self.is_recording = True
         parent = _records.current_span.get()
         self.record = {
             "name": name,
@@ -49,18 +65,20 @@ class Span:
             "trace_id": parent["trace_id"] if parent else uuid.uuid4().hex,
             "sampled": parent["sampled"] if parent else True,
             "trace_fields": asdict(trace_fields) if trace_fields else None,
-            "attributes": {},
+            "attributes": {"gen_ai.operation.name": operation_name},
         }
         self._token: contextvars.Token | None = None
 
     async def __aenter__(self):
         _records.spans.append(self.record)
         self._token = _records.current_span.set(self.record)
+        self._span_token = _active_span.set(self)
         return self
 
     async def __aexit__(self, _type, _value, _traceback):
         if self._token is not None:
             _records.current_span.reset(self._token)
+            _active_span.reset(self._span_token)
 
     def set_attribute(self, key: str, value: Any) -> None:
         self.record["attributes"][key] = value
@@ -73,8 +91,14 @@ class GlobalTracer:
         *,
         kind: SpanKind = SpanKind.INTERNAL,
         trace_fields: TraceFields | None = None,
+        operation_name: str | None = None,
     ) -> Span:
-        return Span(name, kind=kind, trace_fields=trace_fields)
+        return Span(
+            name,
+            kind=kind,
+            trace_fields=trace_fields,
+            operation_name=operation_name,
+        )
 
 
 global_tracer = GlobalTracer()
@@ -114,7 +138,19 @@ def decorator(name: str, **config: Any) -> Callable:
     def decorate(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapped(*args: Any, **kwargs: Any):
-            async with global_tracer.start_as_current_span(name) as span:
+            async with global_tracer.start_as_current_span(
+                name,
+                operation_name=name,
+            ) as span:
+                input_factory = config.get("input_arguments_factory")
+                if input_factory is not None:
+                    try:
+                        span.set_attribute(
+                            "cmb.input.arguments",
+                            json.dumps(input_factory(*args, **kwargs)),
+                        )
+                    except Exception:
+                        pass
                 result = func(*args, **kwargs)
                 if inspect.isawaitable(result):
                     result = await result

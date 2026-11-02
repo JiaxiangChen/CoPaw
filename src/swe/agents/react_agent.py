@@ -79,6 +79,7 @@ from .tools import (
 from .utils import process_file_and_media_blocks_in_message
 from ..utils.fs_text import sanitize_text_for_json
 from ..tracing.agent_trace_sdk import chat_traced
+from ..tracing.agent_trace_capture import chat_capture_scope
 from ..constant import (
     AGENT_INTERRUPT_TIMEOUT,
     AGENT_WATCHDOG_TIMEOUT,
@@ -2108,6 +2109,7 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         provider_name_factory=lambda self, *args, **kwargs: (
             self._resolved_model_slot.get("provider_id")
         ),
+        input_arguments_factory=lambda *args, **kwargs: {},
         output_arguments_factory=build_chat_output_arguments,
     )
     async def _run_reasoning_with_internal_context(
@@ -2115,19 +2117,20 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         tool_choice: Literal["auto", "none", "required"] | None = None,
     ) -> Msg:
         """把 accepted plan 内部上下文只注入当前推理轮次。"""
-        request_context = getattr(self, "_request_context", {}) or {}
-        internal_msgs = _build_accepted_plan_tool_exchange(request_context)
-        if not internal_msgs:
-            return await super()._reasoning(tool_choice=tool_choice)
+        with chat_capture_scope():
+            request_context = getattr(self, "_request_context", {}) or {}
+            internal_msgs = _build_accepted_plan_tool_exchange(request_context)
+            if not internal_msgs:
+                return await super()._reasoning(tool_choice=tool_choice)
 
-        # 复用 AgentScope 的 HINT 标记，把内部上下文仅注入当前推理轮次，
-        # 避免进入会话持久化、工具执行和前端工具卡片路径。
-        for internal_msg in internal_msgs:
-            await self.memory.add(internal_msg, marks=_MemoryMark.HINT)
-        try:
-            return await super()._reasoning(tool_choice=tool_choice)
-        finally:
-            await self.memory.delete_by_mark(mark=_MemoryMark.HINT)
+            # 复用 AgentScope 的 HINT 标记，把内部上下文仅注入当前推理轮次，
+            # 避免进入会话持久化、工具执行和前端工具卡片路径。
+            for internal_msg in internal_msgs:
+                await self.memory.add(internal_msg, marks=_MemoryMark.HINT)
+            try:
+                return await super()._reasoning(tool_choice=tool_choice)
+            finally:
+                await self.memory.delete_by_mark(mark=_MemoryMark.HINT)
 
     async def _reasoning(
         self,
