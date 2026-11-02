@@ -11,6 +11,7 @@ import { DEFAULT_BBK_ID, DEFAULT_SOURCE_ID } from "../../constants/identity";
 import { getUserId } from "../../utils/identity";
 import { useAgentStore } from "../../stores/agentStore";
 import { resolveRole } from "./permissions";
+import { getWorkbenchContext, isOperationsMode } from "./operations";
 import { throwIfRequestAborted } from "./abortSignal";
 // import { Base64 } from "js-base64";
 import { SCENE_CATEGORIES } from "./mock/data";
@@ -195,7 +196,7 @@ function mapPlan(view: PlanView): Plan {
     rate: 0,
     status: view.boardStatus,
     publishStatus: view.publishStatus,
-    editable: view.editable,
+    editable: isOperationsMode() ? view.editable === true : view.editable,
     period: cycles.length === 1 ? cycles[0] : "自定义",
     start: view.periodStart ?? "",
     end: view.periodEnd ?? "",
@@ -219,7 +220,7 @@ async function fetchSceneSkills(category: string): Promise<SceneSkillItem[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    const context = getIframeContext();
+    const context = getWorkbenchContext();
     const payload = await request<SceneSkillListResponse>(
       "/agent/workspace/skill-config/list",
       {
@@ -777,7 +778,7 @@ interface PlanResult<T> {
 }
 
 function planViewer(): { sapId: string; role: string; bbkId: string } {
-  const context = getIframeContext();
+  const context = getWorkbenchContext();
   return {
     sapId: getUserId(),
     role: resolveRole(context.positionId),
@@ -863,7 +864,7 @@ function buildScenePayload(
     cycle: item.cycle,
     startDate: item.start,
     endDate: item.end,
-    cronExpr: serializeCron(item.schedule ?? DEFAULT_SCHEDULE),
+    cronExpr: serializeCron({ ...DEFAULT_SCHEDULE, ...item.schedule }),
     ...(monitoring
       ? {
           schedule:
@@ -948,7 +949,7 @@ export interface BootstrapData {
 export async function fetchBootstrap(
   accountId: string,
 ): Promise<BootstrapData> {
-  const cached = db.drafts[accountId];
+  const cached = isOperationsMode() ? undefined : db.drafts[accountId];
   let plans: Plan[];
   try {
     plans = await fetchPlans();
@@ -969,12 +970,13 @@ export async function saveDraft(
   accountId: string,
   draft: Draft,
 ): Promise<{ savedAt: string }> {
+  const operations = isOperationsMode();
   await sleep(MOCK_LATENCY_MS);
   const savedAt = new Date().toLocaleTimeString("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
   });
-  db.drafts[accountId] = { draft: clone(draft), at: savedAt };
+  if (!operations) db.drafts[accountId] = { draft: clone(draft), at: savedAt };
   return { savedAt };
 }
 
@@ -991,7 +993,7 @@ export async function publishPlan(
   editingId: string | null,
   targets: DistributeTarget[],
 ): Promise<PublishResult> {
-  const context = getIframeContext();
+  const context = getWorkbenchContext();
   const viewer = planViewer();
   const payload: PlanUpsertPayload = {
     ...viewer,
@@ -1032,11 +1034,12 @@ export async function publishPlan(
 
 /** 移除规划，返回最新规划列表；任何失败均上抛 */
 export async function removePlan(id: string): Promise<{ plans: Plan[] }> {
+  const viewer = isOperationsMode() ? planViewer() : { sapId: getUserId() };
   let deleted: boolean;
   try {
     deleted = await requestPlan<boolean>(
       `${PLAN_PATH}/${encodeURIComponent(id)}`,
-      { method: "DELETE", body: JSON.stringify({ sapId: getUserId() }) },
+      { method: "DELETE", body: JSON.stringify(viewer) },
     );
   } catch (error) {
     if (error instanceof Error && error.message === "plan not found") {

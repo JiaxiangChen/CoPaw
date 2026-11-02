@@ -10,6 +10,7 @@ from typing import Any
 from agentscope.message import Msg
 
 from ..tracing.sanitizer import sanitize_trace_value
+from ..tracing.chat_projection import project_chat_output
 
 _OUTPUT_MAX_BYTES = 2048
 _HIGH_RISK_OUTPUT_TOOLS = frozenset(
@@ -39,33 +40,9 @@ def _is_high_risk_tool(tool_name: str, mcp_server: str | None) -> bool:
     return tool_name in _HIGH_RISK_OUTPUT_TOOLS or bool(mcp_server)
 
 
-def _message_text(result: Msg) -> str:
-    blocks = result.get_content_blocks("text")
-    return "".join(
-        block.get("text", "")
-        for block in blocks
-        if isinstance(block.get("text"), str)
-    )
-
-
 def build_chat_output_arguments(result: Msg) -> dict[str, Any]:
-    """Project a model message without exporting metadata or attachments."""
-    text = _message_text(result)
-    safe_text = sanitize_trace_value(
-        text,
-        max_bytes=_OUTPUT_MAX_BYTES,
-    )
-    tool_call_names = [
-        str(block.get("name"))
-        for block in result.get_content_blocks("tool_use")
-        if block.get("name")
-    ]
-    return {
-        "role": str(result.role),
-        "text": safe_text.value,
-        "text_truncated": safe_text.truncated,
-        "tool_call_names": tool_call_names,
-    }
+    """Capture structured, redacted output within the chat byte budget."""
+    return project_chat_output(result)
 
 
 def _is_empty_output(value: Any) -> bool:

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Workflow Cron integration keeps Agent execution separate."""
 
 from __future__ import annotations
@@ -345,12 +346,13 @@ def test_workflow_success_qualifies_for_completion_notification():
     assert client._execution_needs_notification(_job(), "error") is False
 
 
-def test_workflow_target_secret_loader_uses_cron_auth_and_tenant_env(
+@pytest.mark.asyncio
+async def test_workflow_target_secret_loader_uses_cron_auth_and_tenant_env(
     monkeypatch,
 ):
     from swe.app.crons.workflow import cron_adapter
 
-    def resolve_auth(**kwargs):
+    async def resolve_auth(**kwargs):
         assert kwargs["tenant_id"]
         return SimpleNamespace(token="token-1", cookie_header="cookie-1")
 
@@ -360,7 +362,7 @@ def test_workflow_target_secret_loader_uses_cron_auth_and_tenant_env(
         resolve_auth,
     )
 
-    secrets = _default_secret_loader(
+    secrets = await _default_secret_loader(
         _job(),
         {"auth_token", "cookie", "CUSTOM_KEY"},
         {"sapId": "user-1", "CUSTOM_KEY": "secret-2"},
@@ -373,12 +375,13 @@ def test_workflow_target_secret_loader_uses_cron_auth_and_tenant_env(
     }
 
 
-def test_workflow_expired_cron_auth_uses_existing_terminal_error(
+@pytest.mark.asyncio
+async def test_workflow_expired_cron_auth_uses_existing_terminal_error(
     monkeypatch,
 ):
     from swe.app.crons.workflow import cron_adapter
 
-    def expired(**_kwargs):
+    async def expired(**_kwargs):
         raise ValueError("cron auth user_info is expired")
 
     monkeypatch.setattr(
@@ -391,7 +394,11 @@ def test_workflow_expired_cron_auth_uses_existing_terminal_error(
         RuntimeError,
         match="cron auth user_info is expired; please refresh",
     ):
-        _default_secret_loader(_job(), {"auth_token"}, {"sapId": "user-1"})
+        await _default_secret_loader(
+            _job(),
+            {"auth_token"},
+            {"sapId": "user-1"},
+        )
 
 
 def test_broadcast_child_keeps_shared_workflow_binding():

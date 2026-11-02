@@ -11,7 +11,7 @@ export interface SceneMonitoring {
 
 export function defaultMonitoring(): SceneMonitoring {
   return {
-    schedule: { type: "daily", hour: 9, minute: 0, daysOfWeek: ["mon"] },
+    schedule: { type: "daily", hour: 11, minute: 0, daysOfWeek: ["mon"] },
     cycle: "today",
     expectedCompletionRate: 60,
   };

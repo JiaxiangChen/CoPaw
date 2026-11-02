@@ -7,6 +7,14 @@ import {
 } from "./customSchedule";
 
 describe("customSchedule", () => {
+  it("自定义名单推送默认08:00", () => {
+    expect(DEFAULT_CUSTOM_SCHEDULE.hour).toBe(8);
+    expect(DEFAULT_CUSTOM_SCHEDULE.minute).toBe(0);
+    expect(buildCustomCron({ ...DEFAULT_CUSTOM_SCHEDULE, mode: "daily" })).toBe(
+      "0 8 * * *",
+    );
+  });
+
   it("将按分钟间隔转换为 cron", () => {
     expect(
       buildCustomCron({

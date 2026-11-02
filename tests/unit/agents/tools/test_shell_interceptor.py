@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,13 +22,14 @@ def _force_quoted_shell_argument(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def test_intercept_swe_cron_injects_logical_tenant_and_source():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_injects_logical_tenant_and_source():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command("swe cron list")
+        command, intercepted = await intercept_command("swe cron list")
 
     assert intercepted is True
     assert "--tenant-id tenant-a" in command
@@ -35,13 +37,14 @@ def test_intercept_swe_cron_injects_logical_tenant_and_source():
     assert "dGVuYW50" not in command
 
 
-def test_intercept_swe_cron_create_injects_source_and_user_fields():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_create_injects_source_and_user_fields():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command(
+        command, intercepted = await intercept_command(
             "swe cron create --type agent --name demo --cron '* * * * *'",
         )
 
@@ -52,13 +55,14 @@ def test_intercept_swe_cron_create_injects_source_and_user_fields():
     assert "--creator-user user-a" in command
 
 
-def test_intercept_swe_cron_list_does_not_inject_create_only_user_fields():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_list_does_not_inject_create_only_user_fields():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command("swe cron list")
+        command, intercepted = await intercept_command("swe cron list")
 
     assert intercepted is True
     assert "--tenant-id tenant-a" in command
@@ -67,13 +71,14 @@ def test_intercept_swe_cron_list_does_not_inject_create_only_user_fields():
     assert "--creator-user" not in command
 
 
-def test_intercept_swe_cron_keeps_explicit_source_id():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_keeps_explicit_source_id():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command(
+        command, intercepted = await intercept_command(
             "swe cron list --source-id explicit-source",
         )
 
@@ -82,13 +87,16 @@ def test_intercept_swe_cron_keeps_explicit_source_id():
     assert "--source-id explicit-source" in command
 
 
-def test_intercept_swe_cron_after_shell_and_operator():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_after_shell_and_operator():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command("echo ready && swe cron list")
+        command, intercepted = await intercept_command(
+            "echo ready && swe cron list",
+        )
 
     assert intercepted is True
     assert command == (
@@ -97,13 +105,16 @@ def test_intercept_swe_cron_after_shell_and_operator():
     )
 
 
-def test_intercept_swe_cron_before_shell_and_operator():
+@pytest.mark.asyncio
+async def test_intercept_swe_cron_before_shell_and_operator():
     with tenant_context(
         tenant_id="tenant-a",
         user_id="user-a",
         source_id="source-a",
     ):
-        command, intercepted = intercept_command("swe cron list && echo done")
+        command, intercepted = await intercept_command(
+            "swe cron list && echo done",
+        )
 
     assert intercepted is True
     assert command == (
@@ -111,13 +122,14 @@ def test_intercept_swe_cron_before_shell_and_operator():
     )
 
 
-def test_intercept_opencli_injects_resolved_credentials_for_effective_tenant(
+@pytest.mark.asyncio
+async def test_intercept_opencli_injects_resolved_credentials_for_effective_tenant(
     monkeypatch,
     tmp_path: Path,
 ):
     calls = []
 
-    def fake_resolve_auth_token_for_execution(**kwargs):
+    async def fake_resolve_auth_token_for_execution(**kwargs):
         calls.append(kwargs)
         return SimpleNamespace(
             token="resolved-authorization",
@@ -136,12 +148,17 @@ def test_intercept_opencli_injects_resolved_credentials_for_effective_tenant(
         source_id="source-a",
         workspace_dir=tmp_path,
     ):
-        command, intercepted = intercept_command("opencli apps list")
+        command, intercepted = await intercept_command("opencli apps list")
 
     assert intercepted is True
     assert shlex.split(command) == [
-        "opencli", "apps", "list", "--authorization",
-        "Bearer resolved-authorization", "--cookie", "resolved-cookie",
+        "opencli",
+        "apps",
+        "list",
+        "--authorization",
+        "Bearer resolved-authorization",
+        "--cookie",
+        "resolved-cookie",
     ]
     assert calls == [
         {
@@ -151,6 +168,7 @@ def test_intercept_opencli_injects_resolved_credentials_for_effective_tenant(
     ]
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command",
     [
@@ -164,11 +182,11 @@ def test_intercept_opencli_injects_resolved_credentials_for_effective_tenant(
         ),
     ],
 )
-def test_intercept_opencli_keeps_both_explicit_credentials(
+async def test_intercept_opencli_keeps_both_explicit_credentials(
     monkeypatch,
     command: str,
 ):
-    def unexpected_resolve(**_kwargs):
+    async def unexpected_resolve(**_kwargs):
         raise AssertionError("explicit credentials must not be replaced")
 
     monkeypatch.setattr(
@@ -178,12 +196,13 @@ def test_intercept_opencli_keeps_both_explicit_credentials(
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        modified, intercepted = intercept_command(command)
+        modified, intercepted = await intercept_command(command)
 
     assert intercepted is False
     assert modified == command
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("command", "resolved_authorization", "resolved_cookie", "expected"),
     [
@@ -192,7 +211,7 @@ def test_intercept_opencli_keeps_both_explicit_credentials(
             None,
             "resolved-cookie",
             (
-                'opencli --authorization explicit-authorization apps list '
+                "opencli --authorization explicit-authorization apps list "
                 '--cookie "resolved-cookie"'
             ),
         ),
@@ -201,13 +220,13 @@ def test_intercept_opencli_keeps_both_explicit_credentials(
             "resolved-authorization",
             None,
             (
-                'opencli --cookie explicit-cookie apps list '
+                "opencli --cookie explicit-cookie apps list "
                 '--authorization "Bearer resolved-authorization"'
             ),
         ),
     ],
 )
-def test_intercept_opencli_only_injects_missing_credential(
+async def test_intercept_opencli_only_injects_missing_credential(
     monkeypatch,
     command: str,
     resolved_authorization: str | None,
@@ -217,59 +236,73 @@ def test_intercept_opencli_only_injects_missing_credential(
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token=resolved_authorization,
-            cookie_header=resolved_cookie,
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token=resolved_authorization,
+                cookie_header=resolved_cookie,
+            ),
         ),
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        modified, intercepted = intercept_command(command)
+        modified, intercepted = await intercept_command(command)
 
     assert intercepted is True
     assert shlex.split(modified) == shlex.split(expected)
 
 
-def test_intercept_opencli_only_modifies_matching_and_segment(monkeypatch):
+@pytest.mark.asyncio
+async def test_intercept_opencli_only_modifies_matching_and_segment(
+    monkeypatch,
+):
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token="resolved-authorization",
-            cookie_header="resolved-cookie",
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token="resolved-authorization",
+                cookie_header="resolved-cookie",
+            ),
         ),
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        command, intercepted = intercept_command(
+        command, intercepted = await intercept_command(
             "echo ready && opencli apps list && echo done",
         )
 
     assert intercepted is True
     expected = (
-        'echo ready && opencli apps list '
+        "echo ready && opencli apps list "
         '--authorization "Bearer resolved-authorization" '
         '--cookie "resolved-cookie" && echo done'
     )
     assert shlex.split(command) == shlex.split(expected)
 
 
-def test_intercept_opencli_quotes_resolved_credentials_for_platform(monkeypatch):
+@pytest.mark.asyncio
+async def test_intercept_opencli_quotes_resolved_credentials_for_platform(
+    monkeypatch,
+):
     authorization = '{"name": "Alice Example"}'
     cookie = "session=Alice Example; mode=full"
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token=authorization,
-            cookie_header=cookie,
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token=authorization,
+                cookie_header=cookie,
+            ),
         ),
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        command, intercepted = intercept_command("opencli apps list")
+        command, intercepted = await intercept_command("opencli apps list")
 
-    quoted_authorization = _force_quoted_shell_argument(f"Bearer {authorization}")
+    quoted_authorization = _force_quoted_shell_argument(
+        f"Bearer {authorization}",
+    )
     quoted_cookie = _force_quoted_shell_argument(cookie)
     assert intercepted is True
     assert command == (
@@ -278,20 +311,23 @@ def test_intercept_opencli_quotes_resolved_credentials_for_platform(monkeypatch)
     )
 
 
-def test_intercept_opencli_quotes_trailing_backslashes(monkeypatch):
+@pytest.mark.asyncio
+async def test_intercept_opencli_quotes_trailing_backslashes(monkeypatch):
     authorization = "resolved-authorization\\"
     cookie = "resolved-cookie\\"
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token=authorization,
-            cookie_header=cookie,
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token=authorization,
+                cookie_header=cookie,
+            ),
         ),
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        command, intercepted = intercept_command("opencli apps list")
+        command, intercepted = await intercept_command("opencli apps list")
 
     assert intercepted is True
     assert command == (
@@ -301,37 +337,53 @@ def test_intercept_opencli_quotes_trailing_backslashes(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("authorization", ["Bearer existing-token", "bearer existing-token"])
-def test_intercept_opencli_does_not_duplicate_bearer_prefix(
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authorization",
+    ["Bearer existing-token", "bearer existing-token"],
+)
+async def test_intercept_opencli_does_not_duplicate_bearer_prefix(
     monkeypatch,
     authorization: str,
 ):
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token=authorization,
-            cookie_header="resolved-cookie",
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token=authorization,
+                cookie_header="resolved-cookie",
+            ),
         ),
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        command, intercepted = intercept_command("opencli apps list")
+        command, intercepted = await intercept_command("opencli apps list")
 
     assert intercepted is True
     assert shlex.split(command) == [
-        "opencli", "apps", "list", "--authorization", authorization,
-        "--cookie", "resolved-cookie",
+        "opencli",
+        "apps",
+        "list",
+        "--authorization",
+        authorization,
+        "--cookie",
+        "resolved-cookie",
     ]
 
 
-def test_intercept_opencli_fails_when_authorization_is_unavailable(monkeypatch):
+@pytest.mark.asyncio
+async def test_intercept_opencli_fails_when_authorization_is_unavailable(
+    monkeypatch,
+):
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token=None,
-            cookie_header="resolved-cookie",
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token=None,
+                cookie_header="resolved-cookie",
+            ),
         ),
     )
 
@@ -339,19 +391,22 @@ def test_intercept_opencli_fails_when_authorization_is_unavailable(monkeypatch):
         tenant_context(tenant_id="tenant-a", user_id="user-a"),
         pytest.raises(ToolExecutionError) as exc_info,
     ):
-        intercept_command("opencli apps list")
+        await intercept_command("opencli apps list")
 
     assert exc_info.value.error_type == "permission_denied"
     assert "OpenCLI authorization is not configured" in exc_info.value.detail
 
 
-def test_intercept_opencli_fails_when_cookie_is_unavailable(monkeypatch):
+@pytest.mark.asyncio
+async def test_intercept_opencli_fails_when_cookie_is_unavailable(monkeypatch):
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token="resolved-authorization",
-            cookie_header=None,
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token="resolved-authorization",
+                cookie_header=None,
+            ),
         ),
     )
 
@@ -359,14 +414,17 @@ def test_intercept_opencli_fails_when_cookie_is_unavailable(monkeypatch):
         tenant_context(tenant_id="tenant-a", user_id="user-a"),
         pytest.raises(ToolExecutionError) as exc_info,
     ):
-        intercept_command("opencli apps list")
+        await intercept_command("opencli apps list")
 
     assert exc_info.value.error_type == "permission_denied"
     assert "OpenCLI cookie is not configured" in exc_info.value.detail
 
 
-def test_intercept_opencli_maps_expired_auth_state_to_tool_failure(monkeypatch):
-    def expired_auth_state(**_kwargs):
+@pytest.mark.asyncio
+async def test_intercept_opencli_maps_expired_auth_state_to_tool_failure(
+    monkeypatch,
+):
+    async def expired_auth_state(**_kwargs):
         raise ValueError("cron auth user_info is expired")
 
     monkeypatch.setattr(
@@ -379,21 +437,24 @@ def test_intercept_opencli_maps_expired_auth_state_to_tool_failure(monkeypatch):
         tenant_context(tenant_id="tenant-a", user_id="user-a"),
         pytest.raises(ToolExecutionError) as exc_info,
     ):
-        intercept_command("opencli apps list")
+        await intercept_command("opencli apps list")
 
     assert exc_info.value.error_type == "permission_denied"
     assert "OpenCLI authentication has expired" in exc_info.value.detail
 
 
-def test_intercept_opencli_does_not_log_credentials(
+@pytest.mark.asyncio
+async def test_intercept_opencli_does_not_log_credentials(
     monkeypatch,
 ):
     monkeypatch.setattr(
         "swe.agents.tools.shell_interceptor."
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: SimpleNamespace(
-            token="secret-authorization",
-            cookie_header="secret-cookie",
+        AsyncMock(
+            side_effect=lambda **_kwargs: SimpleNamespace(
+                token="secret-authorization",
+                cookie_header="secret-cookie",
+            ),
         ),
     )
 
@@ -404,6 +465,6 @@ def test_intercept_opencli_does_not_log_credentials(
     )
 
     with tenant_context(tenant_id="tenant-a", user_id="user-a"):
-        intercept_command("opencli apps list")
+        await intercept_command("opencli apps list")
 
     assert messages == [("Shell command intercepted",)]

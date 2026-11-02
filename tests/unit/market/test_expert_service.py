@@ -1285,3 +1285,183 @@ class TestReceivedExpertLifecycle:
         )
         assert recalled.recalled_count == 1
         assert not (expert_dir / f"{installed.definition_id}.toml").exists()
+
+
+@pytest.mark.asyncio
+async def test_distribution_without_swe_package(
+    service: MarketplaceService,
+    published_dependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    _, item, _ = published_dependencies
+    original_import = builtins.__import__
+
+    def import_without_swe(name, *args, **kwargs):
+        if name == "swe" or name.startswith("swe."):
+            raise ModuleNotFoundError("No module named 'swe'", name="swe")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_swe)
+    result = await service.distribute_expert(
+        "source-a",
+        item.item_id,
+        "manager",
+        ExpertDistributionRequest(
+            target_type="user_id",
+            target_values=["alice"],
+        ),
+    )
+
+    assert result.distributed_count == 1, result.results
+    assert result.results[0].success
+
+
+@pytest.mark.asyncio
+async def test_agent_reload_stops_after_success(
+    service: MarketplaceService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = httpx.Response(200, text="ok")
+    post = AsyncMock(return_value=response)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = post
+    monkeypatch.setattr(
+        "market.marketplace.service.httpx.AsyncClient",
+        lambda **_: client,
+    )
+
+    result = await MarketplaceService._trigger_agent_reload(
+        service,
+        "alice",
+        "default",
+        "source-a",
+    )
+
+    assert result is True
+    post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_profile_publish_and_distribution_loads_skill_and_mcp(
+    service: MarketplaceService,
+    tmp_path: Path,
+) -> None:
+    from swe.app.subagents import AgentOwnedDefinitionRepository
+    from swe.app.subagents.launch_snapshot import (
+        read_and_remove_private_mcp_snapshot,
+    )
+    from swe.app.subagents.session_dependencies import (
+        capture_community_expert_session_dependencies,
+        initialize_community_expert_dependency_view,
+    )
+    from swe.config.config import AgentProfileConfig
+
+    source = get_user_expert_dir(
+        service.swe_root,
+        "author",
+        "default",
+        "source-a",
+    )
+    source.mkdir(parents=True)
+    skill = source.parent / "skills" / "skill_a"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# workspace skill\n")
+    (source.parent / "agent.json").write_text(
+        json.dumps(
+            {
+                "mcp": {"clients": {"mcp_a": {"command": "workspace-tool"}}},
+            },
+        ),
+    )
+    (source / "expert.toml").write_text(
+        'name = "Profile Expert"\n'
+        'description = "A profile expert"\n'
+        'instruction = "Use dependencies."\n'
+        'skills = ["skill_a"]\n'
+        'mcps = ["mcp_a"]\n',
+    )
+    item, _ = await service.publish_expert_from_profile(
+        "source-a",
+        "author",
+        "default",
+        "expert",
+    )
+    result = await service.distribute_expert(
+        "source-a",
+        item.item_id,
+        "manager",
+        ExpertDistributionRequest(
+            target_type="user_id",
+            target_values=["alice"],
+        ),
+    )
+    assert result.distributed_count == 1, result.results
+    expert_dir = get_user_expert_dir(
+        service.swe_root,
+        "alice",
+        "default",
+        "source-a",
+    )
+    package = AgentOwnedDefinitionRepository(
+        expert_dir,
+        owner_scope="alice/default",
+    ).get(
+        result.results[0].definition_id,
+    )
+    assert package is not None and package.valid
+    view = initialize_community_expert_dependency_view(
+        workspace_dir=expert_dir.parent,
+        chat_id="00000000-0000-4000-8000-000000000001",
+        definition=package.definition,
+    )
+    run_store = tmp_path / "run-store"
+    paths, mcp_path, diagnostics = (
+        capture_community_expert_session_dependencies(
+            run_store_dir=run_store,
+            run_id="profile-publish-test",
+            dependency_view_root=view,
+            definition=package.definition,
+            parent_agent_config=AgentProfileConfig(
+                id="default",
+                name="Default",
+            ),
+        )
+    )
+    assert diagnostics.loaded_skills == ["skill_a"]
+    assert (Path(paths[0]) / "SKILL.md").read_text() == "# workspace skill\n"
+    snapshot = read_and_remove_private_mcp_snapshot(
+        mcp_path,
+        run_store_dir=run_store,
+        run_id="profile-publish-test",
+    )
+    assert snapshot["mcp_a"]["command"] == "workspace-tool"
+
+
+@pytest.mark.asyncio
+async def test_agent_reload_retries_failed_responses(
+    service: MarketplaceService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post = AsyncMock(side_effect=[httpx.Response(503), httpx.Response(200)])
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = post
+    monkeypatch.setattr(
+        "market.marketplace.service.httpx.AsyncClient",
+        lambda **_: client,
+    )
+
+    result = await MarketplaceService._trigger_agent_reload(
+        service,
+        "alice",
+        "default",
+        "source-a",
+    )
+
+    assert result is True
+    assert post.await_count == 2

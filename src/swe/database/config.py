@@ -100,7 +100,7 @@ def get_database_config(
             return default
         # Strip first 4 characters (e.g., "BEE_" prefix)
         result = val[4:] if len(val) > 4 else val
-        logger.info("Database password loaded: %s (original: %s)", result, val)
+        logger.info("Database password loaded")
         return result
 
     def _get_int(name: str, default: int) -> int:

@@ -242,11 +242,11 @@ async def test_selected_expert_preparation_runs_in_worker(
 
     def prepare(**kwargs):
         observed.append(threading.get_ident())
-        kwargs["request_context"]["selected_expert_execution"] = True
+        kwargs["request_context"]["selected_expert_id"] = "expert"
 
     def install(**kwargs):
         assert kwargs["prepared_request_context"] == {
-            "selected_expert_execution": True,
+            "selected_expert_id": "expert",
         }
         return object()
 

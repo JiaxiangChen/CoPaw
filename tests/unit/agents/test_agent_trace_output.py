@@ -78,3 +78,26 @@ def test_build_tool_output_arguments_classifies_structured_failures():
     assert timeout["status"] == "timeout"
     assert mcp_error["status"] == "error"
     assert "output_preview" not in mcp_error
+
+
+def test_chat_output_preserves_long_text_and_structured_tool_calls():
+    text = "中文回复" * 1500
+    result = Msg(
+        name="Friday",
+        role="assistant",
+        content=[
+            {"type": "text", "text": text},
+            {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "read_file",
+                "input": {"path": "file.txt"},
+            },
+        ],
+    )
+    output = build_chat_output_arguments(result)
+    assert output["text"] == text
+    assert output["content"][1]["id"] == "call-1"
+    assert output["content"][1]["input"] == {"path": "file.txt"}
+    assert output["complete"] is True
+    assert output["capture"]["truncated"] is False

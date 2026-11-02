@@ -46,6 +46,26 @@ def _agent_config(tmp_path: Path) -> AgentProfileConfig:
     )
 
 
+def _enable_agent_definition(tmp_path: Path, name: str = "plan-researcher"):
+    repository = AgentOwnedDefinitionRepository(
+        tmp_path / "agents",
+        owner_scope="tenant-1/agent-1",
+    )
+    package = repository.create(
+        {
+            "name": name,
+            "description": f"{name} definition.",
+            "instruction": "Inspect the requested task.",
+            "enabled": True,
+        },
+    )
+    repository.enable(
+        package.definition_id,
+        expected_revision=package.revision,
+    )
+    return package
+
+
 class _FakeProcess:
     def __init__(self, pid: int = 4321):
         self.pid = pid
@@ -67,6 +87,7 @@ class _FakePopenFactory:
 
 @pytest.mark.asyncio
 async def test_start_subagent_returns_blocked_without_run_file(tmp_path):
+    _enable_agent_definition(tmp_path)
     supervisor = SimpleNamespace()
     supervisor.start = _AsyncReturn(
         BackgroundSubAgentStartBlocked(
@@ -84,18 +105,71 @@ async def test_start_subagent_returns_blocked_without_run_file(tmp_path):
             "session_id": "session-1",
             "_subagent_definition_store_dir": str(tmp_path / "definitions"),
         },
+        expert_discovery_enabled=True,
     )
 
     response = await tools["start_subagent"](
-        name="plan-researcher",
-        instruction="Act as a readonly planning researcher.",
+        expert_name="plan-researcher",
         objective="Inspect",
     )
     payload = json.loads(response.content[0]["text"])
 
     assert payload["status"] == "blocked"
     assert payload["reason"] == "background_subagent_concurrency_limit"
+    assert "run_id" not in json.dumps(payload)
+    assert "active_run_ids" not in json.dumps(payload)
     assert not (tmp_path / "subagent_runs").exists()
+
+
+@pytest.mark.asyncio
+async def test_start_subagent_projects_only_owned_active_nicknames(tmp_path):
+    package = _enable_agent_definition(tmp_path)
+    run_store_dir = tmp_path / "runs"
+    record = await PerRunSubAgentRunStore(run_store_dir).create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Earlier inspection",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        package.definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+    supervisor = SimpleNamespace(
+        start=_AsyncReturn(
+            BackgroundSubAgentStartBlocked(
+                limit=1,
+                active_run_ids=[record.run_id, "foreign"],
+            ),
+        ),
+    )
+    tools = create_background_subagent_tools(
+        supervisor=supervisor,
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+        expert_discovery_enabled=True,
+    )
+
+    payload = json.loads(
+        (
+            await tools["start_subagent"](
+                expert_name="plan-researcher",
+                objective="Inspect",
+            )
+        ).content[0]["text"],
+    )
+
+    assert payload["active_nicknames"] == ["研究员"]
+    assert "run_id" not in json.dumps(payload)
+    assert "active_run_ids" not in json.dumps(payload)
 
 
 @pytest.mark.asyncio
@@ -137,7 +211,8 @@ async def test_wait_subagent_returns_compact_snapshot(tmp_path, monkeypatch):
     payload = json.loads(response.content[0]["text"])
 
     assert payload["timed_out"] is True
-    assert payload["active_runs"][0]["run_id"] == "subagent-active"
+    assert payload["active_subagents"][0]["expert_name"] == "plan-researcher"
+    assert "run_id" not in json.dumps(payload)
 
 
 @pytest.mark.asyncio
@@ -200,12 +275,11 @@ async def test_wait_subagent_returns_parent_facing_partial_result(
 
     response = await tools["wait_subagent"](timeout_ms=1)
     payload = json.loads(response.content[0]["text"])
-    terminal = payload["terminal_runs"][0]
+    terminal = payload["terminal_subagents"][0]
 
     assert terminal == {
-        "run_id": "subagent-done",
         "status": "partial",
-        "agent_name": "plan-researcher",
+        "expert_name": "plan-researcher",
         "nickname": "研究员",
         "objective": "Inspect",
         "result": {
@@ -279,14 +353,11 @@ async def test_wait_subagent_returns_error_summary_for_failed_no_result_run(
 
     response = await tools["wait_subagent"](timeout_ms=1)
     payload = json.loads(response.content[0]["text"])
-    terminal = payload["terminal_runs"][0]
+    terminal = payload["terminal_subagents"][0]
 
     assert terminal["result"] == {
         "status": "failed",
-        "summary": (
-            "worker_exited_without_result: "
-            "Worker exited without producing a result."
-        ),
+        "summary": "SubAgent execution failed.",
     }
     assert "errors" not in terminal
 
@@ -348,20 +419,19 @@ async def test_wait_subagent_does_not_duplicate_error_code_in_summary(
 
     response = await tools["wait_subagent"](timeout_ms=1)
     payload = json.loads(response.content[0]["text"])
-    terminal = payload["terminal_runs"][0]
+    terminal = payload["terminal_subagents"][0]
 
     assert terminal["result"] == {
         "status": "failed",
-        "summary": "worker_exited_without_result: exit_code=1",
+        "summary": "SubAgent execution failed.",
     }
     assert "errors" not in terminal
 
 
 @pytest.mark.asyncio
 async def test_start_subagent_serializes_real_run_record(tmp_path):
-    definition = AgentRegistry([builtin_definition_provider()]).resolve(
-        "plan-researcher",
-    )
+    package = _enable_agent_definition(tmp_path)
+    definition = package.definition
     record = await PerRunSubAgentRunStore(tmp_path / "runs").create(
         DelegationSpec(
             name="plan-researcher",
@@ -389,7 +459,6 @@ async def test_start_subagent_serializes_real_run_record(tmp_path):
     request_context = {
         "tenant_id": "tenant-1",
         "agent_id": "agent-1",
-        "selected_expert_execution": True,
         "_subagent_definition_store_dir": str(tmp_path / "definitions"),
     }
     tools = create_background_subagent_tools(
@@ -397,19 +466,19 @@ async def test_start_subagent_serializes_real_run_record(tmp_path):
         parent_agent_config=_agent_config(tmp_path),
         workspace_dir=tmp_path,
         request_context=request_context,
+        expert_discovery_enabled=True,
     )
 
     response = await tools["start_subagent"](
-        name="plan-researcher",
-        instruction="Act as a readonly planning researcher.",
+        expert_name="plan-researcher",
         objective="Inspect",
     )
     payload = json.loads(response.content[0]["text"])
 
-    assert payload["run_id"] == record.run_id
-    assert request_context["selected_expert_run_id"] == record.run_id
+    assert payload["expert_name"] == "plan-researcher"
     assert payload["accepted"] is True
     assert payload["nickname"] == "研究员"
+    assert "run_id" not in json.dumps(payload)
     assert "definition_match" not in payload
     assert "worker" not in payload
 
@@ -418,6 +487,7 @@ async def test_start_subagent_serializes_real_run_record(tmp_path):
 async def test_start_subagent_respects_disabled_parent_readonly_tools(
     tmp_path,
 ):
+    _enable_agent_definition(tmp_path)
     captured = {}
 
     async def _start(**kwargs):
@@ -437,11 +507,11 @@ async def test_start_subagent_respects_disabled_parent_readonly_tools(
             "agent_id": "agent-1",
             "_subagent_definition_store_dir": str(tmp_path / "definitions"),
         },
+        expert_discovery_enabled=True,
     )
 
     await tools["start_subagent"](
-        name="plan-researcher",
-        instruction="Act as a readonly planning researcher.",
+        expert_name="plan-researcher",
         objective="Inspect",
     )
 
@@ -450,16 +520,10 @@ async def test_start_subagent_respects_disabled_parent_readonly_tools(
 
 
 @pytest.mark.asyncio
-async def test_start_subagent_uses_compact_request_and_falls_back_run_scoped(
+async def test_start_subagent_rejects_unlisted_expert(
     tmp_path,
 ):
-    captured = {}
-
-    async def _start(**kwargs):
-        captured.update(kwargs)
-        return BackgroundSubAgentStartBlocked(limit=1)
-
-    supervisor = SimpleNamespace(start=_start)
+    supervisor = SimpleNamespace()
     tools = create_background_subagent_tools(
         supervisor=supervisor,
         parent_agent_config=_agent_config(tmp_path),
@@ -472,21 +536,17 @@ async def test_start_subagent_uses_compact_request_and_falls_back_run_scoped(
     )
 
     response = await tools["start_subagent"](
-        name="aum-customer-analyst",
-        instruction="Act as a customer strategy analyst.",
+        expert_name="aum-customer-analyst",
         objective="Analyze 1M AUM customer maintenance.",
         background="Need structured advice.",
     )
     payload = json.loads(response.content[0]["text"])
 
-    assert payload["status"] == "blocked"
-    assert captured["spec"].name == "aum-customer-analyst"
-    assert captured["definition"].source == "run_scoped"
-    assert captured["definition"].instruction == (
-        "Act as a customer strategy analyst."
-    )
-    assert captured["start_request"].name == "aum-customer-analyst"
-    assert captured["definition_match"].matched is False
+    assert payload == {
+        "status": "not_found",
+        "reason": "subagent_definition_not_found",
+        "expert_name": "aum-customer-analyst",
+    }
 
 
 @pytest.mark.asyncio
@@ -521,7 +581,7 @@ async def test_start_subagent_resolves_skill_owned_definition_without_instructio
     )
 
     response = await tools["start_subagent"](
-        name="security:reviewer",
+        expert_name="security:reviewer",
         objective="Review this payment patch.",
     )
     payload = json.loads(response.content[0]["text"])
@@ -572,7 +632,7 @@ async def test_selected_expert_restricts_catalog_to_one_agent_owned_definition(
     )
 
     response = await tools["start_subagent"](
-        name="researcher",
+        expert_name="researcher",
         objective="Research this topic.",
     )
     payload = json.loads(response.content[0]["text"])
@@ -583,15 +643,14 @@ async def test_selected_expert_restricts_catalog_to_one_agent_owned_definition(
     assert "plan-researcher" not in tools["start_subagent"].__doc__
 
     response = await tools["start_subagent"](
-        name="plan-researcher",
+        expert_name="plan-researcher",
         objective="Use a different expert.",
     )
     payload = json.loads(response.content[0]["text"])
     assert payload == {
         "status": "not_found",
         "reason": "selected_expert_not_available",
-        "name": "plan-researcher",
-        "selected_expert_id": package.definition_id,
+        "expert_name": "plan-researcher",
     }
 
 
@@ -661,16 +720,21 @@ async def test_skill_toml_subagent_launches_with_declared_dependencies(
     )
 
     response = await tools["start_subagent"](
-        name="quality:patch-editor",
+        expert_name="quality:patch-editor",
         objective="Update the requested patch.",
         background="Keep the change minimal.",
     )
     payload = json.loads(response.content[0]["text"])
-    record = await PerRunSubAgentRunStore(run_store_dir).get(
-        payload["run_id"],
-    )
+    records = list(run_store_dir.glob("subagent-*.json"))
+    records = [
+        path for path in records if not path.name.endswith(".launch.json")
+    ]
+    assert len(records) == 1
+    record_id = records[0].stem
+    record = await PerRunSubAgentRunStore(run_store_dir).get(record_id)
+    assert record is not None
     launch_spec = load_launch_spec(
-        run_store_dir / f"{payload['run_id']}.launch.json",
+        run_store_dir / f"{record.run_id}.launch.json",
     )
 
     assert payload["accepted"] is True
@@ -685,7 +749,7 @@ async def test_skill_toml_subagent_launches_with_declared_dependencies(
     )
     assert launch_spec.definition.skill_owned.model.id == "gpt-5-mini"
     assert launch_spec.launch_snapshot.skill_snapshot_dirs == [
-        str(run_store_dir / f"{payload['run_id']}.skills" / "quality"),
+        str(run_store_dir / f"{record.run_id}.skills" / "quality"),
     ]
     assert launch_spec.launch_diagnostics.loaded_skills == ["quality"]
     assert launch_spec.launch_diagnostics.snapshotted_mcps == ["github"]
@@ -699,7 +763,7 @@ async def test_skill_toml_subagent_launches_with_declared_dependencies(
 
 
 @pytest.mark.asyncio
-async def test_start_subagent_rejects_missing_instruction(tmp_path):
+async def test_start_subagent_rejects_missing_expert_name(tmp_path):
     tools = create_background_subagent_tools(
         supervisor=SimpleNamespace(),
         parent_agent_config=_agent_config(tmp_path),
@@ -711,15 +775,8 @@ async def test_start_subagent_rejects_missing_instruction(tmp_path):
         },
     )
 
-    response = await tools["start_subagent"](
-        name="bad",
-        instruction=" ",
-        objective="Inspect",
-    )
-    payload = json.loads(response.content[0]["text"])
-
-    assert payload["status"] == "failed"
-    assert payload["reason"] == "invalid_request"
+    with pytest.raises(TypeError):
+        await tools["start_subagent"](objective="Inspect")
 
 
 @pytest.mark.asyncio
@@ -735,18 +792,15 @@ async def test_start_subagent_rejects_old_agent_name_field(tmp_path):
         },
     )
 
-    response = await tools["start_subagent"](
-        agent_name="legacy",
-        objective="Inspect",
-    )
-    payload = json.loads(response.content[0]["text"])
-
-    assert payload["status"] == "failed"
-    assert payload["reason"] == "invalid_request"
+    with pytest.raises(TypeError):
+        await tools["start_subagent"](
+            agent_name="legacy",
+            objective="Inspect",
+        )
 
 
 @pytest.mark.asyncio
-async def test_start_subagent_returns_not_found_without_instruction(tmp_path):
+async def test_start_subagent_returns_not_found_for_unknown_expert(tmp_path):
     tools = create_background_subagent_tools(
         supervisor=SimpleNamespace(),
         parent_agent_config=_agent_config(tmp_path),
@@ -759,7 +813,7 @@ async def test_start_subagent_returns_not_found_without_instruction(tmp_path):
     )
 
     response = await tools["start_subagent"](
-        name="bad",
+        expert_name="bad",
         objective="Inspect",
     )
     payload = json.loads(response.content[0]["text"])
@@ -767,7 +821,7 @@ async def test_start_subagent_returns_not_found_without_instruction(tmp_path):
     assert payload == {
         "status": "not_found",
         "reason": "subagent_definition_not_found",
-        "name": "bad",
+        "expert_name": "bad",
     }
 
 
@@ -827,8 +881,7 @@ async def test_start_subagent_uses_matched_definition(tmp_path):
     )
 
     response = await tools["start_subagent"](
-        name="risk-reviewer",
-        instruction="This should not override the matched definition.",
+        expert_name="risk-reviewer",
         objective="Review risk in this plan.",
     )
     payload = json.loads(response.content[0]["text"])
@@ -844,7 +897,7 @@ async def test_start_subagent_uses_matched_definition(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_and_cancel_invalid_run_id_return_not_found(tmp_path):
+async def test_get_and_cancel_unknown_nickname_return_not_found(tmp_path):
     supervisor = SimpleNamespace()
     supervisor.get = _AsyncRaise(ValueError("bad run id"))
     supervisor.cancel = _AsyncRaise(ValueError("bad run id"))
@@ -860,20 +913,18 @@ async def test_get_and_cancel_invalid_run_id_return_not_found(tmp_path):
 
     assert json.loads(get_response.content[0]["text"]) == {
         "status": "not_found",
-        "run_id": "../other",
+        "nickname": "../other",
     }
     assert json.loads(cancel_response.content[0]["text"]) == {
         "status": "not_found",
-        "run_id": "../other",
+        "nickname": "../other",
     }
 
 
 @pytest.mark.asyncio
-async def test_get_subagent_includes_manageable_and_stderr_tail(tmp_path):
+async def test_get_subagent_uses_nickname_without_worker_details(tmp_path):
     run_store_dir = tmp_path / "runs"
-    definition = AgentRegistry([builtin_definition_provider()]).resolve(
-        "plan-researcher",
-    )
+    definition = _enable_agent_definition(tmp_path).definition
     store = PerRunSubAgentRunStore(run_store_dir)
     record = await store.create(
         DelegationSpec(
@@ -884,6 +935,7 @@ async def test_get_subagent_includes_manageable_and_stderr_tail(tmp_path):
         ),
         definition,
         PermissionPolicy.readonly(),
+        nickname="研究员",
     )
     stderr_path = run_store_dir / f"{record.run_id}.stderr.log"
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -896,7 +948,6 @@ async def test_get_subagent_includes_manageable_and_stderr_tail(tmp_path):
     failed = await store.fail(record.run_id, "boom")
     supervisor = SimpleNamespace()
     supervisor.get = _AsyncReturn(failed)
-    supervisor.is_manageable = lambda _scope, run_id: run_id == record.run_id
     tools = create_background_subagent_tools(
         supervisor=supervisor,
         parent_agent_config=_agent_config(tmp_path),
@@ -911,24 +962,23 @@ async def test_get_subagent_includes_manageable_and_stderr_tail(tmp_path):
     )
 
     response = await tools["get_subagent"](
-        record.run_id,
+        "研究员",
         include_details=True,
     )
     payload = json.loads(response.content[0]["text"])
 
-    assert payload["manageable"] is True
-    assert payload["stderr_tail"] == "x" * 4096
+    assert payload["nickname"] == "研究员"
+    assert payload["expert_name"] == "plan-researcher"
     assert "stderr_log_path" not in json.dumps(payload)
+    assert "worker" not in payload
 
 
 @pytest.mark.asyncio
-async def test_get_subagent_exposes_launch_diagnostics_only_in_details(
+async def test_get_subagent_hides_launch_diagnostics_even_in_details(
     tmp_path,
 ):
     run_store_dir = tmp_path / "runs"
-    definition = AgentRegistry([builtin_definition_provider()]).resolve(
-        "plan-researcher",
-    )
+    definition = _enable_agent_definition(tmp_path).definition
     store = PerRunSubAgentRunStore(run_store_dir)
     record = await store.create(
         DelegationSpec(
@@ -939,6 +989,7 @@ async def test_get_subagent_exposes_launch_diagnostics_only_in_details(
         ),
         definition,
         PermissionPolicy.readonly(),
+        nickname="研究员",
         launch_diagnostics={
             "loaded_skills": ["quality"],
         },
@@ -961,25 +1012,23 @@ async def test_get_subagent_exposes_launch_diagnostics_only_in_details(
     )
 
     compact = json.loads(
-        (await tools["get_subagent"](record.run_id)).content[0]["text"],
+        (await tools["get_subagent"]("研究员")).content[0]["text"],
     )
     detailed = json.loads(
-        (
-            await tools["get_subagent"](record.run_id, include_details=True)
-        ).content[0]["text"],
+        (await tools["get_subagent"]("研究员", include_details=True)).content[
+            0
+        ]["text"],
     )
 
     assert "launch_diagnostics" not in compact
-    assert detailed["launch_diagnostics"] == {"loaded_skills": ["quality"]}
+    assert "launch_diagnostics" not in detailed
 
 
 @pytest.mark.asyncio
 async def test_get_subagent_defaults_to_parent_facing_partial_projection(
     tmp_path,
 ):
-    definition = AgentRegistry([builtin_definition_provider()]).resolve(
-        "plan-researcher",
-    )
+    definition = _enable_agent_definition(tmp_path).definition
     store = PerRunSubAgentRunStore(tmp_path / "runs")
     record = await store.create(
         DelegationSpec(
@@ -990,6 +1039,7 @@ async def test_get_subagent_defaults_to_parent_facing_partial_projection(
         ),
         definition,
         PermissionPolicy.readonly(),
+        nickname="研究员",
     )
     partial = await store.finish(
         record.run_id,
@@ -1017,7 +1067,7 @@ async def test_get_subagent_defaults_to_parent_facing_partial_projection(
         },
     )
 
-    response = await tools["get_subagent"](record.run_id)
+    response = await tools["get_subagent"]("研究员")
     payload = json.loads(response.content[0]["text"])
 
     assert payload["status"] == "partial"
@@ -1031,9 +1081,7 @@ async def test_get_subagent_defaults_to_parent_facing_partial_projection(
 async def test_get_subagent_returns_error_summary_for_failed_no_result_run(
     tmp_path,
 ):
-    definition = AgentRegistry([builtin_definition_provider()]).resolve(
-        "plan-researcher",
-    )
+    definition = _enable_agent_definition(tmp_path).definition
     store = PerRunSubAgentRunStore(tmp_path / "runs")
     record = await store.create(
         DelegationSpec(
@@ -1044,6 +1092,7 @@ async def test_get_subagent_returns_error_summary_for_failed_no_result_run(
         ),
         definition,
         PermissionPolicy.readonly(),
+        nickname="研究员",
     )
     failed = await store.fail(record.run_id, "worker failed to start")
     supervisor = SimpleNamespace()
@@ -1062,14 +1111,278 @@ async def test_get_subagent_returns_error_summary_for_failed_no_result_run(
         },
     )
 
-    response = await tools["get_subagent"](record.run_id)
+    response = await tools["get_subagent"]("研究员")
     payload = json.loads(response.content[0]["text"])
 
     assert payload["result"] == {
         "status": "failed",
-        "summary": "runtime_error: worker failed to start",
+        "summary": "SubAgent execution failed.",
     }
     assert "errors" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
+async def test_supervisor_operation_errors_do_not_leak_private_details(
+    tmp_path,
+    method,
+):
+    run_store_dir = tmp_path / "runs"
+    definition = _enable_agent_definition(tmp_path).definition
+    store = PerRunSubAgentRunStore(run_store_dir)
+    await store.create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Inspect",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+
+    async def broken_operation(*_args, **_kwargs):
+        raise RuntimeError(
+            "run_id=subagent-secret pid=421 worker=/private/secret.log",
+        )
+
+    supervisor = SimpleNamespace(
+        **{"get" if method == "get_subagent" else "cancel": broken_operation},
+    )
+    tools = create_background_subagent_tools(
+        supervisor=supervisor,
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+    )
+
+    payload = json.loads(
+        (await tools[method]("研究员")).content[0]["text"],
+    )
+
+    assert payload == {
+        "status": "failed",
+        "reason": "subagent_operation_failed",
+        "nickname": "研究员",
+    }
+    rendered = json.dumps(payload)
+    for private_value in (
+        "subagent-secret",
+        "pid",
+        "worker",
+        "/private/secret.log",
+    ):
+        assert private_value not in rendered
+
+
+@pytest.mark.asyncio
+async def test_failed_record_summary_does_not_leak_persisted_error_details(
+    tmp_path,
+):
+    run_store_dir = tmp_path / "runs"
+    definition = _enable_agent_definition(tmp_path).definition
+    store = PerRunSubAgentRunStore(run_store_dir)
+    record = await store.create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Inspect",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+    failed = await store.fail(
+        record.run_id,
+        "worker pid=421 run_id=subagent-secret path=/private/secret.log",
+    )
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(get=_AsyncReturn(failed)),
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+    )
+
+    payload = json.loads(
+        (await tools["get_subagent"]("研究员")).content[0]["text"],
+    )
+
+    assert payload["result"] == {
+        "status": "failed",
+        "summary": "SubAgent execution failed.",
+    }
+    rendered = json.dumps(payload)
+    for private_value in (
+        "subagent-secret",
+        "pid",
+        "worker",
+        "/private/secret.log",
+    ):
+        assert private_value not in rendered
+
+
+@pytest.mark.asyncio
+async def test_failed_agent_result_projection_redacts_raw_summary_and_errors(
+    tmp_path,
+):
+    run_store_dir = tmp_path / "runs"
+    definition = _enable_agent_definition(tmp_path).definition
+    store = PerRunSubAgentRunStore(run_store_dir)
+    record = await store.create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Inspect",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+    raw_failure = AgentResult(
+        task_id="task-1",
+        agent_run_id=record.run_id,
+        agent_name="plan-researcher",
+        status="failed",
+        summary=(
+            "run_id=subagent-secret pid=421 worker=/private/secret.log "
+            "api_key=top-secret"
+        ),
+        errors=[
+            AgentError(
+                code="runtime_error",
+                message="token=top-secret process=421 path=/private/secret.log",
+            ),
+        ],
+    )
+    failed = record.model_copy(
+        update={"status": "failed", "result": raw_failure},
+    )
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(get=_AsyncReturn(failed)),
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+    )
+
+    payload = json.loads(
+        (await tools["get_subagent"]("研究员")).content[0]["text"],
+    )
+
+    assert payload["result"] == {"summary": "SubAgent execution failed."}
+    rendered = json.dumps(payload)
+    for private_value in (
+        "subagent-secret",
+        "pid",
+        "worker",
+        "/private/secret.log",
+        "top-secret",
+    ):
+        assert private_value not in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["get_subagent", "cancel_subagent"])
+async def test_nickname_resolution_errors_return_safe_failure(
+    tmp_path,
+    monkeypatch,
+    method,
+):
+    def corrupt_lookup(*_args, **_kwargs):
+        raise RuntimeError(
+            "run_id=subagent-secret pid=421 worker=/private/secret.log",
+        )
+
+    monkeypatch.setattr(
+        "swe.agents.tools.subagent_background.read_chat_run_by_nickname",
+        corrupt_lookup,
+    )
+    tools = create_background_subagent_tools(
+        supervisor=SimpleNamespace(),
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={"tenant_id": "tenant-1", "agent_id": "agent-1"},
+    )
+
+    payload = json.loads(
+        (await tools[method]("研究员")).content[0]["text"],
+    )
+
+    assert payload == {
+        "status": "failed",
+        "reason": "subagent_operation_failed",
+        "nickname": "研究员",
+    }
+
+
+@pytest.mark.asyncio
+async def test_cancel_not_manageable_returns_persisted_safe_projection(
+    tmp_path,
+):
+    run_store_dir = tmp_path / "runs"
+    definition = _enable_agent_definition(tmp_path).definition
+    store = PerRunSubAgentRunStore(run_store_dir)
+    record = await store.create(
+        DelegationSpec(
+            name="plan-researcher",
+            objective="Inspect",
+            parent_thread_id="session-1",
+            parent_chat_id="chat-1",
+        ),
+        definition,
+        PermissionPolicy.readonly(),
+        nickname="研究员",
+    )
+    supervisor = SimpleNamespace(
+        cancel=_AsyncReturn(
+            BackgroundSubAgentNotManageable(run_id=record.run_id),
+        ),
+    )
+    tools = create_background_subagent_tools(
+        supervisor=supervisor,
+        parent_agent_config=_agent_config(tmp_path),
+        workspace_dir=tmp_path,
+        request_context={
+            "tenant_id": "tenant-1",
+            "agent_id": "agent-1",
+            "session_id": "session-1",
+            "chat_id": "chat-1",
+            "_subagent_run_store_dir": str(run_store_dir),
+        },
+    )
+
+    payload = json.loads(
+        (await tools["cancel_subagent"]("研究员")).content[0]["text"],
+    )
+
+    assert payload == {
+        "expert_name": "plan-researcher",
+        "nickname": "研究员",
+        "status": "pending",
+        "objective": "Inspect",
+        "manageable": False,
+    }
+    assert "run_id" not in json.dumps(payload)
 
 
 def _mock_owned_wait_records(monkeypatch, snapshot):

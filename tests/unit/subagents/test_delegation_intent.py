@@ -105,15 +105,23 @@ async def test_plan_start_intersects_parent_with_readonly_policy(
         captured.update(kwargs)
         return BackgroundSubAgentStartBlocked(limit=1)
 
+    skill_root = tmp_path / "skills" / "research"
+    (skill_root / "agents").mkdir(parents=True)
+    (skill_root / "agents" / "researcher.toml").write_text(
+        'name = "researcher"\ndescription = "Research"\n'
+        'instruction = "Research the requested task."\n',
+        encoding="utf-8",
+    )
     tools = create_background_subagent_tools(
         supervisor=SimpleNamespace(start=start),
         parent_agent_config=AgentProfileConfig(id="agent-1", name="Agent 1"),
         workspace_dir=tmp_path,
         request_context={"plan_mode_enabled": True},
+        effective_skill_names=["research"],
+        skill_snapshot_dirs={"research": skill_root},
     )
     await tools["start_subagent"](
-        name="researcher",
-        instruction="Research",
+        expert_name="research:researcher",
         objective="Inspect",
     )
     parent = captured["parent_policy"]
@@ -163,19 +171,12 @@ async def test_hidden_expert_name_cannot_resolve_its_instruction(
         request_context={"tenant_id": "tenant-1", "agent_id": "agent-1"},
     )
     missing = await tools["start_subagent"](
-        name="reviewer",
+        expert_name="reviewer",
         objective="Review",
     )
     assert json.loads(missing.content[0]["text"])["status"] == "not_found"
-    await tools["start_subagent"](
-        name="reviewer",
-        instruction="One-off instruction",
-        objective="Review",
-    )
-    assert captured["definition"].source == "run_scoped"
-    assert captured["definition"].instruction == "One-off instruction"
-    assert not captured["effective_skill_names"]
-    assert "instruction" in tools["start_subagent"].__doc__
+    assert not captured
+    assert "reviewer: Hidden reviewer" not in tools["start_subagent"].__doc__
 
 
 def test_skill_owned_directory_remains_available_with_discovery_off(

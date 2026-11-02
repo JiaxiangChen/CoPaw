@@ -20,6 +20,7 @@
 | 最终回复需要结合完整会话历史审查 | `Stop` | `command` + 外部 HTTP | [stop-history-http-guard-demo](stop-history-http-guard-demo/SKILL.md) |
 | 控制 `Stop` 自动续跑次数 | Agent 运行配置 | `running.hook_runtime` | 见下方“完成门禁预算配置” |
 | 当前轮结束时发送审计、埋点或外部通知 | `Stop` | `command` | [stop-command-summary-demo](stop-command-summary-demo/SKILL.md) |
+| 保留正文流式输出，最终放行后追加独立消息 | `Stop + outputAppend` | `command` / `http` / `prompt` | [特性总结](stop-appended-message.md)、[脚本示例](stop-output-append-command-demo/SKILL.md) |
 
 ## 再按配置层级选放置位置
 
@@ -41,6 +42,7 @@
 | 改写工具输入 | `hookSpecificOutput.updatedInput` | [pre-tool-use-command-demo](pre-tool-use-command-demo/SKILL.md) |
 | 注入上下文 | `hookSpecificOutput.additionalContext` | [hook-http-demo](hook-http-demo/SKILL.md)、[mcp-failure-fallback-demo](mcp-failure-fallback-demo/SKILL.md) |
 | 设置会话标题 | `hookSpecificOutput.sessionTitle` | [user-prompt-submit-command-demo](user-prompt-submit-command-demo/SKILL.md) |
+| 最终放行后追加独立文本/Markdown 消息 | `outputAppend: true` + `hookSpecificOutput.appendText` | [stop-output-append-command-demo](stop-output-append-command-demo/SKILL.md) |
 | 终止当前回合 | `continue = false` 或 `decision = "stop"` | 使用 `SessionStart`、`UserPromptSubmit` 或工具事件的对应 demo；`Stop` 不参与控制 |
 
 ## 完成门禁预算配置
@@ -71,9 +73,9 @@
 ## 不建议混用的点
 
 - 不要把 `tool_response` 和 `conversation_snapshot` 混成一个概念；前者是当前工具结果，后者是最近对话裁剪。
-- 不要在 `Stop` 返回 `additionalContext` 或 `continue: false`；它只适合 `allow` / `block`。
-- `Stop` 就是完成 gate：只返回 `allow` 或 `block`。任一显式 `block` 会续跑；`failPolicy: block` 的 handler 失败则以未完成结束而不续跑。
+- 不要在 `Stop` 返回 `additionalContext` 或 `continue: false`；需要真实 assistant 附加消息时，使用 `outputAppend: true` 和 `appendText`。
+- 普通 `Stop` 校验只返回 `allow` / `block`。显式 `block` 可触发有上限的续跑；`failPolicy: block` 的 handler 失败则以未完成结束而不续跑。输出转换与追加模式仅接受 `allow`，分别返回 `replacementText` / `appendText`；追加失败固定尽力跳过，不否决正文。
 - 不要把工具后置事件的普通 `block` 当成回合终止；要结束当前回合，使用 `continue: false` 或 `decision: "stop"`。终止会取消尚未完成的并行工具调用，但不会撤销已经发生的外部副作用。
 - 不要在 Skill 级 `command` handler 使用 `command` 字符串；用 `argv`。
 - 不要让多个 handler 同时返回 `updatedInput`；运行时会阻断以避免结果不确定。
-- 不要依赖多个 handler 的执行顺序；同一分组下 handler 会并发执行。
+- 不要依赖普通 handler 的执行顺序；它们通常并发执行。Stop 转换器按固定顺序串行执行；Stop 追加处理器并发执行，但按固定来源及配置顺序展示消息。

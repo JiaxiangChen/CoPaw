@@ -39,12 +39,12 @@ def test_app_installs_liveness_probe_as_outermost_middleware() -> None:
 
 def test_lifespan_starts_and_stops_runtime_diagnostic_manager() -> None:
     from swe.app._app import (
-        _shutdown_lifespan_resources,
+        _shutdown_lifespan_resources_impl,
         _start_lifespan_background_services,
     )
 
     start_source = inspect.getsource(_start_lifespan_background_services)
-    stop_source = inspect.getsource(_shutdown_lifespan_resources)
+    stop_source = inspect.getsource(_shutdown_lifespan_resources_impl)
 
     assert "await runtime_diagnostic_manager.start()" in start_source
     assert "await runtime_diagnostic_manager.stop()" in stop_source
@@ -62,9 +62,9 @@ def test_lifespan_does_not_schedule_batch_dispatch_startup_scan() -> None:
 
 
 def test_shutdown_stops_managed_background_processes() -> None:
-    from swe.app._app import _shutdown_lifespan_resources
+    from swe.app._app import _shutdown_lifespan_resources_impl
 
-    source = inspect.getsource(_shutdown_lifespan_resources)
+    source = inspect.getsource(_shutdown_lifespan_resources_impl)
 
     assert "managed_background_process_manager.stop_all()" in source
 

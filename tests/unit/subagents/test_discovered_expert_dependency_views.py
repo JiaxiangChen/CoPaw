@@ -98,7 +98,7 @@ async def test_concurrent_experts_get_private_contexts_and_frozen_views(
     tools, request_context = _tools(tmp_path, monkeypatch, definitions, start)
     await asyncio.gather(
         *(
-            tools["start_subagent"](name=name, objective="Inspect")
+            tools["start_subagent"](expert_name=name, objective="Inspect")
             for name in definitions
         ),
     )
@@ -119,7 +119,7 @@ async def test_concurrent_experts_get_private_contexts_and_frozen_views(
         tmp_path / "agents" / f"{first.agent_owned.definition_id}.dependencies"
     )
     (source / "skills/frozen/SKILL.md").write_text("updated")
-    await tools["start_subagent"](name="first", objective="Again")
+    await tools["start_subagent"](expert_name="first", objective="Again")
     assert (
         Path(contexts[-1]["_expert_dependency_view_root"])
         / "skills/frozen/SKILL.md"
@@ -151,7 +151,7 @@ async def test_broken_frozen_package_fails_before_supervisor(
 
     tools, _ = _tools(tmp_path, monkeypatch, {"broken": definition}, start)
     response = await tools["start_subagent"](
-        name="broken",
+        expert_name="broken",
         objective="Inspect",
     )
     payload = json.loads(response.content[0]["text"])
@@ -191,7 +191,7 @@ async def test_same_expert_concurrent_first_starts_reuse_published_view(
     )
     responses = await asyncio.gather(
         *(
-            tools["start_subagent"](name="shared", objective="Inspect")
+            tools["start_subagent"](expert_name="shared", objective="Inspect")
             for _ in range(2)
         ),
     )

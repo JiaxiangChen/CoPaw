@@ -79,6 +79,7 @@ from .tools import (
 from .utils import process_file_and_media_blocks_in_message
 from ..utils.fs_text import sanitize_text_for_json
 from ..tracing.agent_trace_sdk import chat_traced
+from ..tracing.agent_trace_capture import chat_capture_scope
 from ..constant import (
     AGENT_INTERRUPT_TIMEOUT,
     AGENT_WATCHDOG_TIMEOUT,
@@ -1042,7 +1043,7 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
             names.append("wait_subagent")
         if intent:
             names.extend(
-                ["get_subagent", "cancel_subagent", "wait_selected_expert"],
+                ["get_subagent", "cancel_subagent"],
             )
         return names
 
@@ -2108,6 +2109,7 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         provider_name_factory=lambda self, *args, **kwargs: (
             self._resolved_model_slot.get("provider_id")
         ),
+        input_arguments_factory=lambda *args, **kwargs: {},
         output_arguments_factory=build_chat_output_arguments,
     )
     async def _run_reasoning_with_internal_context(
@@ -2115,19 +2117,20 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         tool_choice: Literal["auto", "none", "required"] | None = None,
     ) -> Msg:
         """把 accepted plan 内部上下文只注入当前推理轮次。"""
-        request_context = getattr(self, "_request_context", {}) or {}
-        internal_msgs = _build_accepted_plan_tool_exchange(request_context)
-        if not internal_msgs:
-            return await super()._reasoning(tool_choice=tool_choice)
+        with chat_capture_scope():
+            request_context = getattr(self, "_request_context", {}) or {}
+            internal_msgs = _build_accepted_plan_tool_exchange(request_context)
+            if not internal_msgs:
+                return await super()._reasoning(tool_choice=tool_choice)
 
-        # 复用 AgentScope 的 HINT 标记，把内部上下文仅注入当前推理轮次，
-        # 避免进入会话持久化、工具执行和前端工具卡片路径。
-        for internal_msg in internal_msgs:
-            await self.memory.add(internal_msg, marks=_MemoryMark.HINT)
-        try:
-            return await super()._reasoning(tool_choice=tool_choice)
-        finally:
-            await self.memory.delete_by_mark(mark=_MemoryMark.HINT)
+            # 复用 AgentScope 的 HINT 标记，把内部上下文仅注入当前推理轮次，
+            # 避免进入会话持久化、工具执行和前端工具卡片路径。
+            for internal_msg in internal_msgs:
+                await self.memory.add(internal_msg, marks=_MemoryMark.HINT)
+            try:
+                return await super()._reasoning(tool_choice=tool_choice)
+            finally:
+                await self.memory.delete_by_mark(mark=_MemoryMark.HINT)
 
     async def _reasoning(
         self,
@@ -2203,9 +2206,6 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         no tools are provided.  We set ``_in_summarizing`` so that
         ``print`` can strip tool_use blocks from streaming chunks.
         """
-        selected_expert_reply = await self._selected_expert_before_summary()
-        if selected_expert_reply is not None:
-            return selected_expert_reply
         with self.agent_phase(AgentPhase.SUMMARIZING, reason="summarizing"):
             if getattr(self, "_request_context", {}).get(
                 "expert_main_execution",
@@ -2260,7 +2260,6 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
                     msg = await super()._summarizing()
             finally:
                 self._in_summarizing = False
-                self._selected_expert_summary_evidence = None
 
             metadata = getattr(msg, "metadata", None)
             if isinstance(metadata, dict) and metadata.pop(
@@ -2646,7 +2645,6 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
         If the reply task does not finish within
         ``AGENT_INTERRUPT_TIMEOUT`` seconds, the wait is abandoned.
         """
-        await self._cancel_selected_expert_run()
         self._stop_watchdog()
         if self._reply_task and not self._reply_task.done():
             task = self._reply_task
@@ -2668,41 +2666,3 @@ class SWEAgent(ToolGuardMixin, ToolOutputBudgetMixin, ReActAgent):
                     "Exception occurred during interrupt cleanup",
                     exc_info=True,
                 )
-
-    async def _cancel_selected_expert_run(self) -> None:
-        """Best-effort cancellation for the expert synchronously awaiting this turn."""
-        request_context = getattr(self, "_request_context", {}) or {}
-        if not request_context.get("selected_expert_execution"):
-            return
-        run_id = str(
-            request_context.get("selected_expert_run_id") or "",
-        ).strip()
-        if not run_id:
-            return
-        agent_config = getattr(self, "_agent_config", None)
-        if agent_config is None:
-            return
-        supervisor = (
-            request_context.get("_subagent_supervisor")
-            or get_default_background_subagent_supervisor()
-        )
-        try:
-            scope = build_background_subagent_scope(
-                parent_agent_config=agent_config,
-                request_context=request_context,
-            )
-            cancel = getattr(supervisor, "cancel_run", None)
-            if cancel is None:
-                cancel = supervisor.cancel
-            await asyncio.wait_for(
-                cancel(scope, run_id),
-                timeout=5,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.warning(
-                "Failed to cancel selected expert run %s during interrupt",
-                run_id,
-                exc_info=True,
-            )

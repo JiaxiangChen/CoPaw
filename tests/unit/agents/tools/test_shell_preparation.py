@@ -366,3 +366,96 @@ async def test_repeated_cancel_waits_for_guard_cleanup_worker(
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, 5)
     assert cleaned.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("background", [False, True])
+async def test_opencli_refresh_mirrors_before_foreground_or_background_launch(
+    monkeypatch,
+    shell_roots,
+    background,
+):
+    import shlex
+    from datetime import timedelta
+    from unittest.mock import AsyncMock
+    from swe.agents.tools import shell, background_process
+    from swe.app.crons import auth_state, auth_mirror
+
+    tenant_dir = shell_roots / "alice"
+    tenant_dir.mkdir()
+    secret_dir = tenant_dir / ".secret"
+    monkeypatch.setattr(
+        auth_state,
+        "get_tenant_secrets_dir",
+        lambda _: secret_dir,
+    )
+    monkeypatch.setattr(auth_state, "get_auth_token", lambda _: "new-token")
+    await auth_state.save_cron_auth_state(
+        auth_state.CronAuthState(
+            user_info={"id": "alice"},
+            user_info_expires_at=auth_state.utc_now() + timedelta(days=1),
+            cookie_header="identity=alice",
+        ),
+        tenant_id="alice",
+    )
+    repository = SimpleNamespace(upsert=AsyncMock(), delete=AsyncMock())
+    auth_mirror.set_cron_auth_repository(repository)
+    commands = []
+    loop_thread = threading.get_ident()
+
+    async def record_mirror(scope, state):
+        assert threading.get_ident() == loop_thread
+        assert scope == "alice"
+        assert state.auth_token == "new-token"
+
+    repository.upsert.side_effect = record_mirror
+
+    def launched(command):
+        repository.upsert.assert_awaited_once()
+        commands.append(shlex.split(command))
+
+    async def foreground(command, *_args, **_kwargs):
+        launched(command)
+        return 0, "ok", ""
+
+    def background_launch(command, **_kwargs):
+        launched(command)
+        return SimpleNamespace(
+            process_id="p1",
+            pid=1,
+            status="running",
+            cwd=tenant_dir,
+            name=None,
+        )
+
+    monkeypatch.setattr(shell, "_execute_platform_subprocess", foreground)
+    monkeypatch.setattr(
+        background_process.managed_background_process_manager,
+        "start",
+        background_launch,
+    )
+    try:
+        with tenant_context(
+            tenant_id="alice",
+            user_id="alice",
+            workspace_dir=tenant_dir,
+        ):
+            execute = (
+                background_process.start_background_process
+                if background
+                else shell.execute_shell_command
+            )
+            await execute("opencli apps list", cwd=str(tenant_dir))
+    finally:
+        auth_mirror.set_cron_auth_repository(None)
+    assert commands == [
+        [
+            "opencli",
+            "apps",
+            "list",
+            "--authorization",
+            "Bearer new-token",
+            "--cookie",
+            "identity=alice; com.cmb.dw.rtl.sso.token=new-token",
+        ],
+    ]

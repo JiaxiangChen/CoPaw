@@ -7,7 +7,7 @@
  * 机构参数缺失或接口查询失败时返回空列表，
  * 由页面展示无数据态，不做假数据兜底。
  */
-import { useIframeStore } from "../../stores/iframeStore";
+import { getWorkbenchContext } from "./operations";
 import { request } from "../../api/request";
 import type { DistributeTarget } from "./types";
 
@@ -20,6 +20,7 @@ export interface DistributeBranch {
 
 const USER_POSITION_PATH = "/zt/wealth/wmadm/getUserPostionByBrn";
 const BRANCH_TREE_PATH = "/zt/wealth/wmadm/branchTreeInfo";
+const EXCLUDED_BRANCH_NAME_KEYWORDS = ["停用", "私人银行", "信贷部"];
 
 interface DistributionResponse<T> {
   code: string;
@@ -56,18 +57,27 @@ async function fetchDistributionData<T>(
 export async function fetchDistributeBranches(
   branch?: DistributeBranch,
 ): Promise<DistributeBranch[] | null> {
-  const { bbk, sysId, orgLvl } = useIframeStore.getState();
+  const { bbk, sysId, orgLvl } = getWorkbenchContext();
   const mOrgCode = branch?.mOrgCode ?? bbk;
   const level = branch ? String(branch.mOrgLvl) : orgLvl;
   if (!mOrgCode || !sysId || !level?.trim()) return branch ? null : [];
   const mOrgLvl = Number(level);
   if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return branch ? null : [];
   try {
-    return await fetchDistributionData<DistributeBranch>(BRANCH_TREE_PATH, {
-      mmOrgCode: mOrgCode,
-      mmOrgLvl: mOrgLvl,
-      sysId,
-    });
+    const branches = await fetchDistributionData<DistributeBranch>(
+      BRANCH_TREE_PATH,
+      {
+        mmOrgCode: mOrgCode,
+        mmOrgLvl: mOrgLvl,
+        sysId,
+      },
+    );
+    return branches.filter(
+      (item) =>
+        !EXCLUDED_BRANCH_NAME_KEYWORDS.some((keyword) =>
+          item.mOrgName.includes(keyword),
+        ),
+    );
   } catch (error) {
     console.warn("[Wealth] 分发支行查询失败", error);
     return null;
@@ -90,7 +100,7 @@ interface UserPosition {
 export async function fetchDistributeTargets(
   branch?: DistributeBranch,
 ): Promise<DistributeTarget[]> {
-  const { bbk, orgCode, orgLvl } = useIframeStore.getState();
+  const { bbk, orgCode, orgLvl } = getWorkbenchContext();
   const mOrgCode = branch?.mOrgCode ?? orgCode;
   const level = branch ? String(branch.mOrgLvl) : orgLvl;
   if (!bbk || !mOrgCode || !level?.trim()) {

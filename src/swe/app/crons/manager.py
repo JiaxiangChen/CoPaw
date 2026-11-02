@@ -1277,7 +1277,9 @@ class CronManager:  # pylint: disable=too-many-public-methods
         from .batch_run_state_client import initialize_run_state
 
         await initialize_run_state(
-            saved, self._monitor_sync_client, self._agent_id or "default"
+            saved,
+            self._monitor_sync_client,
+            self._agent_id or "default",
         )
         return saved
 
@@ -1849,7 +1851,7 @@ class CronManager:  # pylint: disable=too-many-public-methods
             ext_id = self._states.get(job_id, CronJobState()).external_job_id
             if ext_id and self._scheduler_adapter:
                 if is_batch_dispatch_parent(
-                    job
+                    job,
                 ) or is_batch_dispatch_managed_broadcast_child(job):
                     await self._scheduler_adapter.pause_job(ext_id)
                 else:
@@ -2950,7 +2952,10 @@ class CronManager:  # pylint: disable=too-many-public-methods
         """Push success notification when an agent task completes."""
         # 只对 agent 类型的任务发送通知
         if job.task_type not in {"agent", "workflow"}:
-            logger.debug("Skip notification: job %s has no completion push", job.id)
+            logger.debug(
+                "Skip notification: job %s has no completion push",
+                job.id,
+            )
             return
 
         task_session_id = job.meta.get("task_session_id")
@@ -4494,7 +4499,7 @@ class CronManager:  # pylint: disable=too-many-public-methods
                             source_id=source_id,
                             scope_id=scope_id,
                         ):
-                            prefetch_auth_token(
+                            await prefetch_auth_token(
                                 tenant_id=runtime_tenant_id,
                                 workspace_dir=workspace_dir,
                             )

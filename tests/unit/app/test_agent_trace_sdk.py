@@ -55,6 +55,7 @@ async def test_query_handler_creates_one_server_root_span(tmp_path) -> None:
     assert len(spans) == 1
     root = spans[0]
     assert root["name"] == "agent.run"
+    assert root["attributes"]["gen_ai.operation.name"] == "invoke_agent"
     assert root["kind"] == "SERVER"
     assert root["parent_span_id"] is None
     assert root["trace_fields"]["user_id"] == "user-1"
@@ -238,6 +239,7 @@ async def test_admission_is_a_child_span_of_agent_run() -> None:
 
     async with global_tracer.start_as_current_span(
         "agent.run",
+        operation_name="invoke_agent",
         trace_fields=fields,
     ):
         frames = [
@@ -327,6 +329,7 @@ async def test_retry_attempt_is_a_child_span_of_agent_run() -> None:
 
     async with global_tracer.start_as_current_span(
         "agent.run",
+        operation_name="invoke_agent",
         trace_fields=fields,
     ):
         frames = [
@@ -348,8 +351,42 @@ async def test_retry_attempt_is_a_child_span_of_agent_run() -> None:
 
 
 def test_lifespan_shutdown_calls_documented_global_tracer_shutdown() -> None:
-    from swe.app._app import _shutdown_lifespan_resources
+    from swe.app._app import _shutdown_lifespan_resources_impl
 
     assert "shutdown_global_tracer()" in inspect.getsource(
-        _shutdown_lifespan_resources,
+        _shutdown_lifespan_resources_impl,
     )
+
+
+@pytest.mark.asyncio
+async def test_root_records_standard_input_and_output(tmp_path):
+    import json
+
+    reset()
+    runner = AgentRunner(agent_id="agent-1", workspace_dir=tmp_path)
+    runner._query_execution = QueryExecution(_Adapter())
+    request = SimpleNamespace(
+        session_id="session-1",
+        user_id="user-1",
+        channel_meta={
+            "answer_turn_identity": TurnIdentity.create(
+                chat_id="chat-1",
+                msgid="msg-1",
+            ),
+        },
+    )
+    _ = [
+        frame
+        async for frame in runner.query_handler(
+            [Msg(name="user", role="user", content="question")],
+            request=request,
+        )
+    ]
+    attrs = spans[0]["attributes"]
+    assert (
+        json.loads(attrs["cmb.input.arguments"])["messages"][0]["content"]
+        == "question"
+    )
+    output = json.loads(attrs["cmb.output.arguments"])
+    assert output["messages"][0]["content"][0]["text"] == "done"
+    assert output["status"] == "completed"

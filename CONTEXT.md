@@ -382,8 +382,8 @@ The Definition-ID-bound companion directory `agents/<definition-id>.dependencies
 _Avoid_: shared workspace dependency directory, Agent-wide Skill/MCP directory, Definition Package migration
 
 **Expert Dependency Session Initialization**:
-The one-time initialization of a Chat's Session-scoped Expert Dependency View when the user first selects or invokes a Community Expert. The resulting frozen dependency view remains available through later turns of that Chat and is released when the Chat ends.
-_Avoid_: per-turn dependency loading, Agent Profile installation, cross-chat dependency reuse
+In SubAgent execution mode, the one-time initialization of a Chat's Session-scoped Expert Dependency View when the user first selects or invokes a Community Expert. Expert Main Execution instead uses the private dependencies of its selected local Expert version for each message, with already-started messages retaining their original snapshot.
+_Avoid_: Agent Profile installation, cross-chat dependency reuse, mixed-version expert dependencies
 
 **Explicit Expert Selection**:
 The structured user action in the Chat composer's Expert control that selects one enabled Agent-owned or Received Community Expert. It produces a per-message Selected Expert Execution by default, or a Chat Expert Binding when the Expert Main Execution Switch is enabled, independently of keyword delegation and autonomous discovery.
@@ -405,8 +405,24 @@ _Avoid_: SubAgent Run, Main Agent summary, Profile memory inheritance, recursive
 The searchable list of valid enabled local and Received Community Experts in the currently selected Agent Profile, shown by the Chat composer's Expert control. Community listings are not directly callable; an expert must first be received by that Agent Profile.
 _Avoid_: global expert chooser, direct community invocation, disabled expert catalog, cross-Agent expert list
 
+**Expert-as-Main Model Resolution**:
+The model choice for Expert Main Execution: a usable model configured for the Expert takes precedence, otherwise the Chat's currently selected model is used. Model choice does not change the Expert's capability boundaries.
+_Avoid_: unconditional Chat model override, unavailable expert model enforcement, fallback to Default Agent
+
+**Expert Main Execution Limit**:
+The per-message, per-dimension upper bound on Expert Main Execution, taking the stricter of the Expert's configured execution limit and the Main Agent's applicable global limit. Successive messages receive independent budgets rather than consuming a lifetime Chat allowance.
+_Avoid_: unlimited expert conversation, automatic Main Agent budget expansion
+
+**Unavailable Chat Expert Binding**:
+A retained Chat Expert Binding whose Expert is disabled, deleted, withdrawn, or invalid and therefore cannot execute the submitted message. It is presented as unavailable rather than silently substituted by another Expert or the Default Agent.
+_Avoid_: automatic Default Agent fallback, successful expert execution, hidden binding reset
+
+**Chat Expert Binding Recovery**:
+The return of an unavailable Chat Expert Binding to executable status when the same Expert identity becomes valid again, subject to validation before the next message. A newly created Expert with the same display name is a different identity, and this recovery does not restore a binding released by the user, mode change, reset, or disabled Source switch.
+_Avoid_: same-name expert replacement, restoration of released binding, approval bypass
+
 **Selected Expert Execution**:
-The direct start of the single Expert named by an Explicit Expert Selection for that submitted message. The Main Agent may hand off the objective and summarize the result but cannot skip, substitute, or select another expert.
+In SubAgent execution mode, the direct start of the single Expert named by an Explicit Expert Selection for that submitted message. The Main Agent may hand off the objective and summarize the result but cannot skip, substitute, or select another expert.
 _Avoid_: optional selected-expert use, multiple expert fan-out, Main Agent routing decision
 
 **Selected Expert Model Resolution**:
@@ -418,7 +434,7 @@ The composer interaction rule that Explicit Expert Selection and Plan Mode canno
 _Avoid_: disabled mode switch, hidden expert clearing, expert-assisted Plan Mode, conflicting execution modes
 
 **Synchronous Expert Conversation**:
-The Chat interaction in which a Selected Expert Execution displays progress and cancellation while the current message awaits the SubAgent Run, then automatically presents the Main Agent's summary in that same conversation turn. Failures, timeouts, and cancellation are likewise reported in the current turn while the underlying SubAgent Run remains observable.
+The SubAgent-mode Chat interaction in which a Selected Expert Execution displays progress and cancellation while the current message awaits the SubAgent Run, then automatically presents the Main Agent's summary in that same conversation turn. Failures, timeouts, and cancellation are likewise reported in the current turn while the underlying SubAgent Run remains observable.
 _Avoid_: result-polling follow-up, detached-only expert run, hidden failure state
 
 **Expert Dependency Publication Scan**:
@@ -1088,6 +1104,10 @@ _Avoid_: one-shot plan flag, global plan switch
 **Scheduled Job**:
 A recurring task definition owned by a tenant and executed by the runtime at configured times. One **Scheduled Job** can have many **Scheduled Runs**.
 _Avoid_: cron config, timer task
+
+**Scheduled Execution Credentials (定时执行凭据)**:
+同一租户与来源作用域中，供定时执行使用的用户身份信息、访问凭据及其有效期与刷新状态。该作用域内的多个 Agent 和 Scheduled Job 共用这份状态，清理凭据表示移除整份状态。
+_Avoid_: 单任务凭据、Agent 专属凭据、仅 Token
 
 **Scheduler-managed Scheduled Job**:
 A Scheduled Job created under the Cron Scheduling Service's management responsibility, including its distributed child jobs. This ownership is distinct from creation date or the presence of an imported snapshot.
@@ -2030,6 +2050,38 @@ _Avoid_: logical chat session, UI session, conversation identity
 **Chat Record Last Updated Time**:
 The timestamp of the most recent persisted change to a **Chat Record**. It establishes recency when Chat Records are listed.
 _Avoid_: Chat Record creation time, message timestamp, Logical Chat Session time
+
+**Conversation Metadata**:
+The authoritative identity, ownership, relationships, lifecycle state, ordering, and content references of Chats, Logical Chat Sessions, Answer Turns, messages, compaction archives, checkpoints, and shares. It includes Chat titles and content locations and extents, but excludes conversation bodies and semantic summaries; related SubAgent and Goal state remains owned by those domains.
+_Avoid_: Chat-list fields only, arbitrary JSON payload, duplicated conversation body
+
+**Conversation Content**:
+The retained user and assistant messages, tool arguments and results, semantic summaries and checkpoint facts, and Agent recovery snapshot payloads belonging to a conversation. Its identity, ownership, ordering, lifecycle, and extent are described by Conversation Metadata.
+_Avoid_: plain text only, current model context only, conversation metadata
+
+**Conversation Message Occurrence**:
+One distinct retained occurrence of a canonical conversation message, including its position and context membership. Different occurrences may share the same original message ID, and one occurrence may produce multiple display blocks without becoming multiple canonical messages.
+_Avoid_: globally unique Msg.id, rendered message card, text block
+
+**Committed Conversation History**:
+The conversation content and associated metadata that have completed durable publication and are available for subsequent history reads and restart recovery. Live output that has only been displayed is not part of this history until it is committed.
+_Avoid_: every displayed token, local stream replay, uncommitted Agent output
+
+**Concurrent Session Submission**:
+A second independent user question submitted while the same identity-scoped Logical Chat Session already has an executing Answer Turn. It receives a busy result rather than being implicitly queued; approvals, Stop commands, and reconnect requests for the current turn are not independent submissions.
+_Avoid_: parallel mutation of shared context, implicit request queue, approval response
+
+**Session Execution Authority**:
+The current owner's exclusive permission to advance an Answer Turn and publish changes to its identity-scoped Logical Chat Session. Superseded execution authority cannot publish late results, and obtaining new authority does not itself resume an interrupted Agent execution.
+_Avoid_: request routing affinity, automatic failover execution, permission to replay tools
+
+**Conversation Migration Snapshot**:
+The complete, internally consistent final legacy conversation state captured after legacy writers have drained and stopped. It includes every conversation change committed before that boundary and remains the source of truth for migration validation.
+_Avoid_: live working directory copy, earlier rehearsal snapshot, ordinary backup recovery point
+
+**Conversation Rollback Export**:
+The complete conversation state prepared for the fixed pre-cutover application version, including changes committed after cutover. It is distinct from restoring the original Conversation Migration Snapshot.
+_Avoid_: image-only rollback, pre-cutover snapshot restore, older-version compatibility archive
 
 **Conversation Compaction Boundary**:
 The durable, user-visible separator within one **Chat Record** marking the point where automatic context compaction or an explicit `/compact` archived earlier messages. It appears immediately through a non-message stream event and is restored from the archive on reload; its archived-message count is the number of display-safe history messages, not rendered cards; it never represents `/new` or `/clear`.

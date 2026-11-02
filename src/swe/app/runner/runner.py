@@ -144,11 +144,14 @@ from ...tracing import (
     get_trace_manager,
 )
 from ...tracing.agent_trace_sdk import (
+    OperationName,
+    sdk_capture_policy,
     SpanKind,
     TraceFields,
     global_tracer,
     use_b3_trace_context,
 )
+from ...tracing.agent_trace_capture import TurnCapture
 from ...tracing.models import TraceStatus
 from ...config.context import (
     get_current_passthrough_headers,
@@ -709,11 +712,6 @@ def _approved_tool_call_from_record(record) -> dict[str, Any] | None:
         source_key="thinking_blocks",
         target_key="_thinking_blocks",
     )
-    selected_expert_replay = record.extra.get("selected_expert_replay")
-    if isinstance(selected_expert_replay, dict):
-        approved_tool_call["_selected_expert_replay"] = dict(
-            selected_expert_replay,
-        )
     replay_metadata = _approval_replay_metadata(record)
     if replay_metadata is not None:
         approved_tool_call["_approval_replay"] = replay_metadata
@@ -2353,111 +2351,6 @@ def _request_selected_expert_id(request: AgentRequest) -> str | None:
     if isinstance(value, str):
         value = value.strip()
     return value or None
-
-
-def _selected_expert_replay_matches_request(
-    replay: Any,
-    selected_expert_id: str | None,
-    request_context: dict[str, Any],
-    tenant_id: str,
-    agent_id: str,
-) -> bool:
-    if not isinstance(replay, dict):
-        return False
-    if replay.get("phase") != "wait_selected_expert":
-        return False
-    if not replay.get("run_id") or not replay.get("selected_expert_id"):
-        return False
-    expert_id = replay["selected_expert_id"]
-    if selected_expert_id and selected_expert_id != expert_id:
-        return False
-    expected_identity = {
-        "tenant_id": str(tenant_id or "default"),
-        "agent_id": str(agent_id or "default"),
-        "session_id": str(request_context.get("session_id") or ""),
-        "chat_id": str(request_context.get("chat_id") or ""),
-    }
-    return all(
-        str(replay.get(key) or "") == value
-        for key, value in expected_identity.items()
-    )
-
-
-def _selected_expert_wait_approval_error() -> str:
-    return (
-        "The selected expert's status could not be confirmed. "
-        "It may still be running; it was not replaced by the Main Agent."
-    )
-
-
-def _selected_expert_start_tool_call(
-    *,
-    workspace_dir: Path,
-    tenant_id: str | None,
-    agent_id: str,
-    selected_expert_id: str,
-    objective: str,
-) -> dict[str, Any] | None:
-    """Build the exact forced start call for one enabled local expert.
-
-    The Definition ID is a management identity, whereas the Background
-    SubAgent tool deliberately accepts only its runtime name.  Resolve that
-    mapping server-side so a submitted composer selection cannot be silently
-    skipped or changed by the Main Agent.
-    """
-    from ..subagents import (
-        AgentOwnedDefinitionRepository,
-        builtin_definition_provider,
-    )
-
-    try:
-        builtin_names = {
-            item.name
-            for item in builtin_definition_provider().list_definitions()
-        }
-        package = AgentOwnedDefinitionRepository(
-            workspace_dir / "agents",
-            owner_scope=f"{tenant_id or 'default'}/{agent_id}",
-            builtin_names=builtin_names,
-        ).get(selected_expert_id)
-    except ValueError:
-        return None
-    definition = package.definition if package is not None else None
-    if (
-        definition is None
-        or not definition.enabled
-        or definition.name in builtin_names
-    ):
-        return None
-    normalized_objective = objective.strip()
-    if not normalized_objective:
-        return None
-    return {
-        "id": f"selected-expert-{uuid4().hex}",
-        "name": "start_subagent",
-        "input": {
-            "name": definition.name,
-            "objective": normalized_objective,
-        },
-    }
-
-
-def _is_selected_expert_start_approval(
-    approved_tool_call: dict[str, Any] | None,
-    selected_expert_call: dict[str, Any],
-) -> bool:
-    """Keep a matching approved start call's identity and hook replay."""
-    if not isinstance(approved_tool_call, dict):
-        return False
-    if approved_tool_call.get("name") != "start_subagent":
-        return False
-    approved_input = approved_tool_call.get("input")
-    selected_input = selected_expert_call.get("input")
-    return (
-        isinstance(approved_input, dict)
-        and isinstance(selected_input, dict)
-        and approved_input.get("name") == selected_input.get("name")
-    )
 
 
 def _initialize_selected_expert_dependency_view(
@@ -4417,8 +4310,6 @@ class AgentRunner(Runner):
             request_context=request_context,
             selected_expert_id=selected_expert_id,
             chat=chat,
-            objective=current_user_text,
-            approved_tool_call=approved_tool_call,
         )
         if (
             values.get("agent_config") is not None
@@ -4614,41 +4505,7 @@ class AgentRunner(Runner):
         request_context: dict[str, Any],
         selected_expert_id: str | None,
         chat: Any,
-        objective: str,
-        approved_tool_call: dict[str, Any] | None,
     ) -> None:
-        replay = (
-            approved_tool_call.get("_selected_expert_replay")
-            if isinstance(approved_tool_call, dict)
-            else None
-        )
-        if (
-            isinstance(approved_tool_call, dict)
-            and approved_tool_call.get("name") == "wait_selected_expert"
-        ):
-            if not _selected_expert_replay_matches_request(
-                replay,
-                selected_expert_id,
-                request_context,
-                self.tenant_id,
-                self.agent_id,
-            ):
-                request_context["selected_expert_execution_error"] = (
-                    _selected_expert_wait_approval_error()
-                )
-                return
-            assert isinstance(replay, dict)
-            run_id = str(replay["run_id"]).strip()
-            expert_id = str(replay["selected_expert_id"]).strip()
-            request_context["selected_expert_id"] = expert_id
-            request_context["selected_expert_execution"] = True
-            request_context["selected_expert_run_id"] = run_id
-            request_context["_selected_expert_wait_authorized"] = True
-            request_context["forced_tool_call_json"] = json.dumps(
-                approved_tool_call,
-                ensure_ascii=False,
-            )
-            return
         if selected_expert_id is None:
             return
         request_context["selected_expert_id"] = selected_expert_id
@@ -4661,57 +4518,12 @@ class AgentRunner(Runner):
                 selected_expert_id=selected_expert_id,
                 chat_id=chat.id if chat is not None else "",
             )
-        except OSError as exc:
+        except OSError:
             dependency_view_root = None
-            request_context["selected_expert_execution_error"] = str(exc)
         if dependency_view_root is not None:
             request_context["_expert_dependency_view_root"] = str(
                 dependency_view_root,
             )
-        self._set_selected_expert_tool_call(
-            request_context=request_context,
-            workspace_dir=workspace_dir,
-            selected_expert_id=selected_expert_id,
-            objective=objective,
-            approved_tool_call=approved_tool_call,
-        )
-
-    def _set_selected_expert_tool_call(
-        self,
-        *,
-        request_context: dict[str, Any],
-        workspace_dir: Path,
-        selected_expert_id: str,
-        objective: str,
-        approved_tool_call: dict[str, Any] | None,
-    ) -> None:
-        selected_expert_call = _selected_expert_start_tool_call(
-            workspace_dir=workspace_dir,
-            tenant_id=self.tenant_id,
-            agent_id=self.agent_id,
-            selected_expert_id=selected_expert_id,
-            objective=objective,
-        )
-        if selected_expert_call is None:
-            if "selected_expert_execution_error" not in request_context:
-                request_context["selected_expert_execution_error"] = (
-                    "The selected expert is unavailable or disabled. "
-                    "Choose an enabled expert and try again."
-                )
-            return
-        request_context["selected_expert_execution"] = True
-        approved_start = (
-            approved_tool_call
-            if _is_selected_expert_start_approval(
-                approved_tool_call,
-                selected_expert_call,
-            )
-            else None
-        )
-        request_context["forced_tool_call_json"] = json.dumps(
-            approved_start or selected_expert_call,
-            ensure_ascii=False,
-        )
 
     @staticmethod
     def _source_tool_versions(request_context: dict[str, Any]) -> Any:
@@ -6790,13 +6602,17 @@ class AgentRunner(Runner):
         request: AgentRequest | None,
         context: _QueryHandlerContext,
     ):
-        with use_b3_trace_context(
-            getattr(request, "b3_context", None),
-            context.trace_fields,
+        with (
+            sdk_capture_policy(context.trace_fields is not None),
+            use_b3_trace_context(
+                getattr(request, "b3_context", None),
+                context.trace_fields,
+            ),
         ):
             trace_scope = (
                 global_tracer.start_as_current_span(
                     "agent.run",
+                    operation_name=OperationName.INVOKE_AGENT,
                     kind=SpanKind.SERVER,
                     trace_fields=context.trace_fields,
                 )
@@ -6809,14 +6625,26 @@ class AgentRunner(Runner):
                         "agent.user_message",
                         context.query or "",
                     )
-                async for msg, last in self._stream_query_frames(
-                    msgs,
-                    request=request,
-                    query=context.query,
-                    session_id=context.session_id,
-                    user_id=context.user_id,
-                ):
-                    yield msg, last
+                capture = TurnCapture(span, msgs)
+                status = "completed"
+                try:
+                    async for msg, last in self._stream_query_frames(
+                        msgs,
+                        request=request,
+                        query=context.query,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                    ):
+                        capture.observe(msg, last)
+                        yield msg, last
+                except (asyncio.CancelledError, GeneratorExit):
+                    status = "cancelled"
+                    raise
+                except Exception:
+                    status = "failed"
+                    raise
+                finally:
+                    capture.finish(status)
 
     async def _settle_query_handler_outcome(
         self,
@@ -7286,11 +7114,6 @@ class AgentRunner(Runner):
             ):
                 yield item
             return
-        request_context = getattr(agent, "_request_context", {}) or {}
-        if request_context.get("selected_expert_execution"):
-            request_context["_selected_expert_request_deadline"] = (
-                time.monotonic() + max(float(timeout_seconds), 0.0)
-            )
         start = time.monotonic()
         async for msg, last in msg_stream:
             elapsed = time.monotonic() - start

@@ -822,7 +822,8 @@ def test_build_agent_request_removes_stale_trace_id():
     assert "trace_id" not in req
 
 
-def test_apply_auth_token_uses_runtime_scope(monkeypatch):
+@pytest.mark.asyncio
+async def test_apply_auth_token_uses_runtime_scope(monkeypatch):
     """Cron auth 读取必须使用 scope_id，不能回退到逻辑 tenant。"""
     observed = {}
     executor = CronExecutor(
@@ -838,7 +839,11 @@ def test_apply_auth_token_uses_runtime_scope(monkeypatch):
         },
     )
 
-    def fake_resolve_auth_token_for_execution(*, tenant_id, workspace_dir):
+    async def fake_resolve_auth_token_for_execution(
+        *,
+        tenant_id,
+        workspace_dir,
+    ):
         observed["tenant_id"] = tenant_id
         observed["workspace_dir"] = workspace_dir
         return types.SimpleNamespace(token=None, cookie_header=None)
@@ -849,7 +854,7 @@ def test_apply_auth_token_uses_runtime_scope(monkeypatch):
         fake_resolve_auth_token_for_execution,
     )
 
-    executor._apply_auth_token(
+    await executor._apply_auth_token(
         job,
         {"workspace_dir": "/tmp/tenant-a/workspaces/beta"},
         {},
@@ -932,7 +937,7 @@ def test_execute_aborts_agent_job_when_user_info_expired(monkeypatch):
     )
     job = _build_agent_job("/tmp/tenant-a/workspaces/beta")
 
-    def fake_resolve_auth_token_for_execution(
+    async def fake_resolve_auth_token_for_execution(
         *,
         tenant_id=None,
         workspace_dir=None,
@@ -971,7 +976,7 @@ def test_execute_allows_agent_job_when_user_info_missing(monkeypatch):
     )
     job = _build_agent_job("/tmp/tenant-a/workspaces/beta")
 
-    def fake_resolve_auth_token_for_execution(
+    async def fake_resolve_auth_token_for_execution(
         *,
         tenant_id=None,
         workspace_dir=None,
@@ -1023,7 +1028,7 @@ def test_execute_injects_auth_token_and_cookie_into_agent_request(monkeypatch):
     )
     job = _build_agent_job("/tmp/tenant-a/workspaces/beta")
 
-    def fake_resolve_auth_token_for_execution(
+    async def fake_resolve_auth_token_for_execution(
         *,
         tenant_id=None,
         workspace_dir=None,

@@ -196,6 +196,7 @@ Hook 管理页可为三种 handler 开启“追加独立消息”，显示固定
 handler 本身的外部副作用仍然真实发生。单项测试不能证明跨来源顺序、累计预算或恢复行为。
 运行诊断只保留来源、handler、turn/trace、消息 ID、顺序、耗时、字节数、哈希和失败类别。
 
+特性总结：[Stop 附加消息](stop-appended-message.md)。
 可运行样例：[stop-output-append-command-demo](stop-output-append-command-demo/SKILL.md)。
 
 ## 配置写在哪里

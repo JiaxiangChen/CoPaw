@@ -155,14 +155,22 @@ def capture_launch_dependencies(
             mcp_payload, snapshotted_mcps, skipped_mcps = (
                 _snapshot_frozen_mcps(
                     frozen_root,
-                    metadata.declared_mcps if metadata is not None else None,
+                    (
+                        (metadata.declared_mcps or [])
+                        if metadata is not None
+                        else None
+                    ),
                 )
             )
         else:
             mcp_payload, snapshotted_mcps, skipped_mcps = (
                 _snapshot_declared_mcps(
                     parent_agent_config,
-                    metadata.declared_mcps if metadata is not None else None,
+                    (
+                        (metadata.declared_mcps or [])
+                        if metadata is not None
+                        else None
+                    ),
                 )
             )
         private_path = _write_private_mcp_snapshot(
@@ -382,7 +390,11 @@ def _write_private_snapshot(
 
 def _ensure_private_run_store_dir(path: Path) -> None:
     """Create a private run store without accepting a symlinked root."""
+    if path.is_symlink():
+        raise OSError("SubAgent run store must not be a symlink")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink():
+        raise OSError("SubAgent run store must not be a symlink")
     descriptor = os.open(
         path,
         os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),

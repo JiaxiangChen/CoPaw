@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from pathlib import Path
@@ -44,7 +45,10 @@ def _discover_cron_auth_tenant_ids() -> list[str]:
     tenant_ids: list[str] = []
     if not WORKING_DIR.is_dir():
         return tenant_ids
-    for tenant_dir in sorted(WORKING_DIR.iterdir(), key=lambda item: item.name):
+    for tenant_dir in sorted(
+        WORKING_DIR.iterdir(),
+        key=lambda item: item.name,
+    ):
         if not tenant_dir.is_dir() or tenant_dir.name.startswith("."):
             continue
         auth_path = tenant_dir / ".secret" / CRON_AUTH_FILE_NAME
@@ -53,9 +57,9 @@ def _discover_cron_auth_tenant_ids() -> list[str]:
     return tenant_ids
 
 
-def _sync_cron_auth_to_envs(tenant_id: str | None) -> tuple[str, str]:
+async def _sync_cron_auth_to_envs(tenant_id: str | None) -> tuple[str, str]:
     try:
-        resolved = prefetch_auth_token(tenant_id=tenant_id)
+        resolved = await prefetch_auth_token(tenant_id=tenant_id)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -69,10 +73,10 @@ def _sync_cron_auth_to_envs(tenant_id: str | None) -> tuple[str, str]:
         )
 
     envs_path = get_tenant_secrets_dir(tenant_id) / "envs.json"
-    envs = load_envs(envs_path)
+    envs = await asyncio.to_thread(load_envs, envs_path)
     envs[CRON_AUTH_TOKEN_ENV_KEY] = resolved.token
     envs[CRON_AUTH_COOKIE_ENV_KEY] = resolved.cookie_header
-    save_envs(envs, envs_path)
+    await asyncio.to_thread(save_envs, envs, envs_path)
 
     status = "reused" if resolved.reused else "refreshed"
     expires_at = (
@@ -84,6 +88,7 @@ def _sync_cron_auth_to_envs(tenant_id: str | None) -> tuple[str, str]:
         f"{CRON_AUTH_COOKIE_ENV_KEY} to {envs_path} "
         f"(expires_at={expires_at})."
     )
+
 
 @auth_group.command("refresh-token")
 @click.option("--tenant-id", default=None, hidden=True)
@@ -98,8 +103,10 @@ def refresh_token_cmd(
         if tenant_id is not None
         else get_current_effective_tenant_id()
     )
-    tenant_ids = [effective_tenant_id] if effective_tenant_id is not None else (
-        _discover_cron_auth_tenant_ids()
+    tenant_ids = (
+        [effective_tenant_id]
+        if effective_tenant_id is not None
+        else (_discover_cron_auth_tenant_ids())
     )
     if not tenant_ids:
         raise click.ClickException(
@@ -107,10 +114,21 @@ def refresh_token_cmd(
             "configure cron auth first.",
         )
 
+    asyncio.run(_refresh_tokens(tenant_ids))
+
+
+async def _refresh_tokens(tenant_ids: list[str | None]) -> None:
+    from ..app.crons.auth_mirror import cli_cron_auth_mirror
+
+    async with cli_cron_auth_mirror():
+        await _sync_tenant_tokens(tenant_ids)
+
+
+async def _sync_tenant_tokens(tenant_ids: list[str | None]) -> None:
     messages: list[str] = []
     refreshed_count = 0
     for target_tenant_id in tenant_ids:
-        status, message = _sync_cron_auth_to_envs(target_tenant_id)
+        status, message = await _sync_cron_auth_to_envs(target_tenant_id)
         if status == "refreshed":
             refreshed_count += 1
         messages.append(message)
@@ -169,4 +187,3 @@ def reset_password_cmd() -> None:
         "✓ Password reset successfully. "
         "All existing sessions have been invalidated.",
     )
-    

@@ -1,5 +1,9 @@
 # AgentTraceSDK Output Redaction Design
 
+> 2026-11-02：模型 chat 2KB 摘要契约由
+> `2026-11-02-agent-trace-sdk-022-design.md` 的结构化有界 I/O 替代。
+> 本文件的工具输出限制继续有效。
+
 ## Goal
 
 Enable meaningful, bounded `cmb.output.arguments` values for Main Agent

@@ -11,6 +11,14 @@ import type { ReactNode } from "react";
 import type { CronParts } from "@/utils/parseCron";
 import { useIframeStore } from "../../stores/iframeStore";
 import * as api from "./api";
+import {
+  canUseOperations,
+  getOperationsBranches,
+  getWorkbenchContext,
+  isOperationsMode,
+  operationsIdentity,
+  useWealthOperations,
+} from "./operations";
 import { throwIfRequestAborted } from "./abortSignal";
 import { defaultMonitoring, type SceneMonitoring } from "./monitoring";
 import {
@@ -72,6 +80,13 @@ export interface DialogState {
 
 interface WealthState {
   initialized: boolean;
+  /** 模式/分行切换代次，隔离页面、缓存和迟到请求。 */
+  contextVersion: number;
+  setOperationsMode: (
+    enabled: boolean,
+    branchId?: string | null,
+    resetOnExit?: boolean,
+  ) => Promise<boolean>;
   /** 生效角色：由父系统 positionId 经 resolveRole 解析（见 permissions.ts） */
   accountId: WealthRole;
   /** 按大类缓存的经营场景（/wealth/scene-skills）；键为大类英文 code，空串表示全部 */
@@ -187,7 +202,10 @@ let accountCacheKey = "";
 let accountCache: Account | null = null;
 
 function accountForRole(role: WealthRole): Account {
-  const { userName, orgCode } = useIframeStore.getState();
+  const { userName, orgCode } =
+    isOperationsMode() && !useWealthOperations.getState().branchId
+      ? useIframeStore.getState()
+      : getWorkbenchContext();
   const key = `${role}|${userName ?? ""}|${orgCode ?? ""}`;
   if (accountCache && accountCacheKey === key) {
     return accountCache;
@@ -287,6 +305,59 @@ let todayCustomersRequestSeq = 0;
 
 export const useWealthStore = create<WealthState>()((set, get) => ({
   initialized: false,
+  contextVersion: 0,
+  setOperationsMode: async (enabled, branchId = null, resetOnExit = false) => {
+    if (get().acting && !(resetOnExit && !enabled)) return false;
+    if (
+      enabled &&
+      (!canUseOperations() ||
+        (branchId &&
+          !getOperationsBranches().some((branch) => branch.value === branchId)))
+    )
+      return false;
+    const previous = useWealthOperations.getState();
+    if (
+      previous.enabled === enabled &&
+      previous.branchId === branchId &&
+      (!enabled || previous.identity === operationsIdentity())
+    )
+      return true;
+    useWealthOperations.setState({
+      enabled,
+      branchId: enabled ? branchId : null,
+      identity: enabled ? operationsIdentity() : "",
+    });
+    targetRequestSeq += 1;
+    todayCustomersRequestSeq += 1;
+    const contextVersion = get().contextVersion + 1;
+    const accountId = enabled
+      ? "middle"
+      : resolveRole(useIframeStore.getState().positionId);
+    set({
+      ...useWealthStore.getInitialState(),
+      initialized: true,
+      contextVersion,
+      accountId,
+    });
+    if ((enabled && !branchId) || accountId === FALLBACK_ROLE || resetOnExit) {
+      set({
+        plansLoaded: true,
+        ...(resetOnExit ? { initialized: false } : {}),
+      });
+      return true;
+    }
+    const emptyDraft = get().draft;
+    const data = await api.fetchBootstrap(accountId);
+    if (get().contextVersion === contextVersion)
+      set({
+        plans: data.plans,
+        plansLoaded: true,
+        ...(!enabled && get().draft === emptyDraft
+          ? { draft: data.draft, savedAt: data.savedAt }
+          : {}),
+      });
+    return true;
+  },
   accountId: "rm",
   scenesByCategory: {},
   scenesLoading: false,
@@ -321,6 +392,7 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
 
   init: async () => {
     if (get().initialized) return;
+    const contextVersion = get().contextVersion;
     // 生效角色由父系统 positionId 解析；未识别身份（unknown）整页拦截，不加载业务数据
     const accountId = resolveRole(useIframeStore.getState().positionId);
     if (accountId === FALLBACK_ROLE) {
@@ -330,12 +402,15 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     // 身份已经解析完成即可渲染工作台框架；规划数据在后台加载并随后填充。
     set({ initialized: true, accountId, plansLoaded: false });
     const data = await api.fetchBootstrap(accountId);
+    if (get().contextVersion !== contextVersion) return;
     set({ ...data, plansLoaded: true });
   },
 
   refreshPlans: async (throwOnError = false, signal) => {
+    const contextVersion = get().contextVersion;
     const plans = await api.fetchPlanList(throwOnError, signal);
     throwIfRequestAborted(signal);
+    if (get().contextVersion !== contextVersion) return;
     set({ plans });
   },
 
@@ -350,13 +425,17 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
       if (requestSeq !== todayCustomersRequestSeq) return;
       await get().loadTodayCustomers(view, skillId ?? state.todaySkillId);
     } catch (error) {
+      if (get().contextVersion !== state.contextVersion) return;
       get().toast(
         error instanceof Error
           ? `刷新失败：${error.message}`
           : "刷新失败，请重试",
       );
     } finally {
-      if (requestSeq === todayCustomersRequestSeq)
+      if (
+        requestSeq === todayCustomersRequestSeq &&
+        get().contextVersion === state.contextVersion
+      )
         set({ customersLoading: false });
     }
   },
@@ -376,15 +455,20 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     set({ taskListsRefreshing: true });
     try {
       await get().refreshTodayCustomers(state.todayCustomerView);
+      if (get().contextVersion !== state.contextVersion) return;
       const results = await Promise.allSettled([
         get().pendingLoading ? Promise.resolve() : get().loadPendingCustomers(),
         get().doneLoading ? Promise.resolve() : get().loadDoneCustomers(),
       ]);
-      if (results.some((result) => result.status === "rejected")) {
+      if (
+        get().contextVersion === state.contextVersion &&
+        results.some((result) => result.status === "rejected")
+      ) {
         get().toast("任务名单刷新失败，请重试");
       }
     } finally {
-      set({ taskListsRefreshing: false });
+      if (get().contextVersion === state.contextVersion)
+        set({ taskListsRefreshing: false });
     }
   },
 
@@ -425,6 +509,7 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   },
 
   loadTodayCustomerCount: async () => {
+    const contextVersion = get().contextVersion;
     const { accountId, plans } = get();
     if (!canAccessPage(accountId, "tasks")) return;
     const sapId = useIframeStore.getState().userId || undefined;
@@ -433,18 +518,18 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
       sapId,
       "customer",
     );
-    set({ todayCustomerCount: result.customers.length });
+    if (get().contextVersion === contextVersion)
+      set({ todayCustomerCount: result.customers.length });
   },
 
   loadPendingCustomers: async () => {
+    const contextVersion = get().contextVersion;
     const { accountId, plans } = get();
     if (!canAccessPage(accountId, "tasks")) return;
     set({ pendingLoading: true });
     const sapId = useIframeStore.getState().userId || undefined;
-    const result = await api.fetchPendingCustomers(
-      todayTaskRefs(plans),
-      sapId,
-    );
+    const result = await api.fetchPendingCustomers(todayTaskRefs(plans), sapId);
+    if (get().contextVersion !== contextVersion) return;
     set({
       pendingCustomers: result.customers,
       pendingCounts: result.counts,
@@ -453,14 +538,13 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   },
 
   loadDoneCustomers: async () => {
+    const contextVersion = get().contextVersion;
     const { accountId, plans } = get();
     if (!canAccessPage(accountId, "tasks")) return;
     set({ doneLoading: true });
     const sapId = useIframeStore.getState().userId || undefined;
-    const result = await api.fetchDoneCustomers(
-      todayTaskRefs(plans),
-      sapId,
-    );
+    const result = await api.fetchDoneCustomers(todayTaskRefs(plans), sapId);
+    if (get().contextVersion !== contextVersion) return;
     set({
       doneCustomers: result.customers,
       doneCounts: result.counts,
@@ -508,10 +592,12 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   },
 
   loadScenes: async (categoryCode) => {
+    const contextVersion = get().contextVersion;
     // 每次点击分类都重新查询最新数据；按大类分键存储，
     // 快速切换标签时各响应只写自己的 key，天然免疫乱序覆盖
     set({ scenesLoading: true });
     const scenes = await api.fetchScenesByCategory(categoryCode);
+    if (get().contextVersion !== contextVersion) return;
     set((s) => ({
       scenesByCategory: { ...s.scenesByCategory, [categoryCode]: scenes },
       scenesLoading: false,
@@ -670,6 +756,7 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
     const state = get();
     const draft = normalizeItems(state.draft);
     const { savedAt } = await api.saveDraft(state.accountId, draft);
+    if (get().contextVersion !== state.contextVersion) return;
     set({ draft, savedAt });
     get().toast("草稿已保存，可在当前会话继续编辑");
   },
@@ -693,6 +780,7 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
   editPlan: (id) => {
     const p = get().plans.find((x) => x.id === id);
     if (!p) return;
+    if (isOperationsMode() && p.editable !== true) return;
     const items = p.items ? JSON.parse(JSON.stringify(p.items)) : [];
     const draft = normalizeItems({ name: p.name, items });
     const targetSapIds = p.targetSapIds ?? [];
@@ -719,6 +807,14 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
 
   publishPlan: async () => {
     const state = get();
+    if (
+      isOperationsMode() &&
+      state.editingId &&
+      !state.plans.some(
+        (plan) => plan.id === state.editingId && plan.editable === true,
+      )
+    )
+      return false;
     const error = validateDraft(state.draft);
     if (error) {
       get().toast(error);
@@ -741,6 +837,7 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
         state.editingId,
         targets,
       );
+      if (get().contextVersion !== state.contextVersion) return false;
       // 请求仍会完成并更新列表；已切换表单时不回写旧草稿，也不触发旧页面跳转。
       const isCurrentForm = get().planFormVersion === state.planFormVersion;
       set({
@@ -762,28 +859,37 @@ export const useWealthStore = create<WealthState>()((set, get) => ({
       return isCurrentForm;
     } catch (error) {
       // HTTP 业务错误（409 发布中 / 403 非创建人 / 认证失效等）原样提示
+      if (get().contextVersion !== state.contextVersion) return false;
       get().toast(
         error instanceof Error ? `发布失败：${error.message}` : "发布失败",
       );
       return false;
     } finally {
-      set({ acting: false });
+      if (get().contextVersion === state.contextVersion) set({ acting: false });
     }
   },
 
   removePlan: async (id) => {
     if (get().acting) return; // 防重复提交
+    if (
+      isOperationsMode() &&
+      !get().plans.some((plan) => plan.id === id && plan.editable === true)
+    )
+      return;
+    const contextVersion = get().contextVersion;
     set({ acting: true });
     try {
       const { plans } = await api.removePlan(id);
+      if (get().contextVersion !== contextVersion) return;
       set({ plans, dialog: null });
       get().toast("规划已移除");
     } catch (error) {
+      if (get().contextVersion !== contextVersion) return;
       get().toast(
         error instanceof Error ? `移除失败：${error.message}` : "移除失败",
       );
     } finally {
-      set({ acting: false });
+      if (get().contextVersion === contextVersion) set({ acting: false });
     }
   },
 

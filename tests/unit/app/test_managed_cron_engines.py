@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -79,7 +80,7 @@ async def test_real_agent_executor_preserves_execution_identity_and_committed_ou
     monkeypatch.setattr(
         executor_module.CronExecutor,
         "_apply_auth_token",
-        lambda *_: None,
+        AsyncMock(),
     )
     db = execution_setup[0]
     row = await queue_kind(

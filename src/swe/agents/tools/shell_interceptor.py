@@ -86,11 +86,11 @@ def _is_swe_cron_group_help(tokens: List[str]) -> bool:
     )
 
 
-def _resolve_opencli_credentials() -> ResolvedAuthToken:
+async def _resolve_opencli_credentials() -> ResolvedAuthToken:
     """Resolve the current tenant's execution credentials for OpenCLI."""
 
     try:
-        return resolve_auth_token_for_execution(
+        return await resolve_auth_token_for_execution(
             tenant_id=get_current_effective_tenant_id(),
             workspace_dir=get_current_workspace_dir(),
         )
@@ -131,7 +131,7 @@ def _quote_shell_argument(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def _intercept_opencli_command(
+async def _intercept_opencli_command(
     command_body: str,
     tokens: List[str],
 ) -> str | None:
@@ -145,7 +145,7 @@ def _intercept_opencli_command(
     if has_authorization and has_cookie:
         return None
 
-    resolved = _resolve_opencli_credentials()
+    resolved = await _resolve_opencli_credentials()
     inject_parts: List[str] = []
     if not has_authorization:
         authorization = _require_opencli_credential(
@@ -240,7 +240,7 @@ def _build_inject_parts(
     return inject_parts
 
 
-def _intercept_command_segment(
+async def _intercept_command_segment(
     command: str,
     *,
     tenant_id: str | None,
@@ -263,7 +263,7 @@ def _intercept_command_segment(
     if not tokens or _is_swe_cron_group_help(tokens):
         return command, False
 
-    opencli_command = _intercept_opencli_command(command_body, tokens)
+    opencli_command = await _intercept_opencli_command(command_body, tokens)
     if opencli_command is not None:
         return leading + opencli_command + trailing, True
 
@@ -294,7 +294,7 @@ def _intercept_command_segment(
     return command, False
 
 
-def intercept_command(command: str) -> Tuple[str, bool]:
+async def intercept_command(command: str) -> Tuple[str, bool]:
     """按当前请求上下文为匹配的 shell 命令注入隔离参数。
 
     支持单条命令和 ``xxx && swe cron ...`` 形式的链式命令；只修改真正
@@ -315,7 +315,7 @@ def intercept_command(command: str) -> Tuple[str, bool]:
         if part == "&&":
             modified_parts.append(part)
             continue
-        modified_part, part_intercepted = _intercept_command_segment(
+        modified_part, part_intercepted = await _intercept_command_segment(
             part,
             tenant_id=tenant_id,
             source_id=source_id,

@@ -1254,10 +1254,6 @@ def prepare_shell_command(
         else raw_cmd
     )
 
-    from .shell_interceptor import intercept_command
-
-    cmd, _was_intercepted = intercept_command(cmd)
-
     from ...security.shell_installation_policy import shell_installation_denial
 
     policy_denial = shell_installation_denial(cmd)
@@ -1302,6 +1298,9 @@ async def _prepared_shell_execution(
     cwd: Path | str | None,
 ) -> AsyncIterator[tuple[PreparedShellCommand, CurrentProcessLimitPolicy]]:
     """Own preparation and guard files through cancellation and execution."""
+    from .shell_interceptor import intercept_command
+
+    command, _was_intercepted = await intercept_command(command)
     resources = ExitStack()
 
     def prepare() -> tuple[PreparedShellCommand, CurrentProcessLimitPolicy]:

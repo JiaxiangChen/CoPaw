@@ -165,7 +165,7 @@ async def configure_cron_auth(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     workspace = await get_agent_for_request(request)
-    save_user_info_from_access_token(
+    await save_user_info_from_access_token(
         access_token,
         cookie_header=cookie_header,
         tenant_id=workspace.tenant_id,
@@ -211,7 +211,7 @@ async def refresh_cron_auth_token(
     """Return a reusable or freshly issued cron auth token and cookie."""
     workspace = await get_agent_for_request(request)
     try:
-        resolved = resolve_auth_token_for_execution(
+        resolved = await resolve_auth_token_for_execution(
             tenant_id=workspace.tenant_id,
             workspace_dir=workspace.workspace_dir,
         )
@@ -243,7 +243,7 @@ async def cleanup_cron_auth(req: CronAuthCleanupRequest):
     """手动清理非指定来源租户的 cron 授权状态文件。"""
     keep_source_id = req.keep_source_id.strip()
     try:
-        result = cleanup_cron_auth_except_source(
+        result = await cleanup_cron_auth_except_source(
             keep_source_id=keep_source_id,
             force_delete_tenant_ids=req.force_delete_tenant_ids,
             dry_run=req.dry_run,

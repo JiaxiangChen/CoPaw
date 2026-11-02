@@ -10,7 +10,7 @@ from agentscope.message import Msg
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 
 from swe.tracing.models import TraceStatus
-from swe.tracing.agent_trace_sdk import global_tracer
+from swe.tracing.agent_trace_sdk import start_child_span
 
 from ..command_dispatch import _is_command, run_command_path
 from ..query_attempt import _query_session_execution
@@ -27,7 +27,10 @@ async def stream_admission(
     user_id: str,
 ) -> AsyncIterator[tuple[Msg, bool]]:
     """Resolve admission before command or normal query execution."""
-    async with global_tracer.start_as_current_span("agent.admission"):
+    async with start_child_span(
+        "agent.admission",
+        operation_name="swe.admission",
+    ):
         async with _query_session_execution(
             owner,
             session_id,

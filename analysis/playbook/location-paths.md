@@ -1,5 +1,10 @@
 # 定位路径
 
+## 定时执行凭据数据库镜像
+
+- src/swe/app/crons/auth_migration*.py：POST /api/internal/cron/auth-migration/tasks，GET 按 task_id 与 after_page 查询。
+- 在线镜像 auth_mirror.py、严格仓库 auth_repository.py；[排查说明](cron-auth-database-mirror.md)、[运维操作](../../docs/deploy/cron-auth-database-mirror.md)。
+
 ## Console 全局侧栏菜单
 
 - 菜单定义、可见性规则和展开／折叠数据转换集中在 `console/src/layouts/sidebarNavigation.tsx`；`Sidebar.tsx` 保留状态订阅、渲染和交互。新增显示条件时先检查 `getSidebarVisibility`，避免在两种渲染分支各写一遍。
@@ -366,6 +371,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 - 级联查询失败时显示重试，不当作末级，也不阻塞当前级人员查询和选择；切换机构清空当前候选人员并使旧请求失效，立即查询新选机构的人员，但保留跨支行累计的人员选择。子支行按需加载并缓存，搜索范围仅包含已经加载的机构。
 - 业务例外：`mOrgCode=121516` 在任意层级直接视为末级，跳过下级支行查询，用该条目的 `mOrgCode/mOrgLvl` 查询人员。
+- 分发支行前端过滤：`distributeTargets.ts::fetchDistributeBranches` 在首次加载与各级下属机构查询结果中，排除 `mOrgName` 包含“停用”“私人银行”“信贷部”任一关键词的机构；规则集中在 `EXCLUDED_BRANCH_NAME_KEYWORDS`，回归见 `distributeTargets.test.ts`。
 - 修改规划的人员回显：`api.ts::mapPlan` 保留计划返回的 `targets.sap_id/name`；`store.ts::editPlan` 恢复 ID 与姓名缓存，并重置当前支行候选状态。后续人员加载保留编辑计划的历史目标信息；历史目标无姓名时回显 ID。计划未保存机构路径，修改页的级联路径需重新选择，但已选人员无需重新勾选。
 
 ## 财富任务列表后台刷新显示
@@ -451,3 +457,45 @@ document.body.appendChild(frame);
 - 计划历史只读展示：看板回答 renderer 保留原始 planReviewCard 供 PlanReviewSnapshot 展示，但传给 RuntimeResponseCard 的副本移除该字段以禁用交互。独立 PlanInteraction 保持为空避免双份计划；不得修改共享组件或把计划摘要/步骤一并隐藏。当前消息、归档页、任务分组均走该局部配置。
 - “有会话卡片但无正文”先核对 Monitor 的 session_id 是否存在对应 ChatSpec，再核对目标 source/user/Agent 工作区和共享存储。映射缺失、详情失败和正常空内容使用不同反馈；归档失败保留当前消息和游标，可重试。Kubernetes 各实例必须访问同一持久化会话与 dialog 存档；已清理的文件不能通过本接口恢复。
 - 回归：`tests/unit/routers/test_tracing_chat_history_parity.py` 固定存档对比两个入口的普通/任务/失败/v3 分轮消息和连续归档页；前端 `ReadOnlySessionChat.test.tsx` 覆盖归档、重试、去重和切换隔离。
+
+
+## 财富工作台运维模式
+
+### 入口与配置
+
+- 前端入口白名单：`console/public/env-grey-control.js` 的 `window.__env__.operationsUsersByBranch`，当前为 `{ V00001: ["80008888"] }`。追加用户保持字符串编号，不转换为数字；修改部署后的配置文件并重新加载页面即可，无需重新构建。缺失、格式错误、空对象或分行的空数组均不开放入口，不支持 `"*"`；代码中没有隐藏的默认名单。
+- 同时匹配真实登录分行与用户编号，默认关闭。分行候选来自 `console/src/constants/bbk.ts` 的 `BBK_ID_MAP`，排除总行 `100`；仓库中的列表有意省略了其他分行，不在运维代码中重复维护。
+- `hideLogo=true` 不提供运维入口；进入后若头部被隐藏则退出模式。离开工作台、真实身份发生变化或刷新页面也退出模式。
+- 白名单用户原岗位未识别时，普通模式仍显示无权限，仅额外提供主动开启运维的入口；其他未知岗位用户保持整页拦截。
+
+### 状态和请求边界
+
+运维状态仅存在工作台内存，不写 Cookie 或 sessionStorage，不覆盖 `iframeStore`。统一 `request()` 及 `buildAuthHeaders()` 保留真实登录身份，包括真实分行、岗位、用户及租户等请求头；只有财富业务参数使用目标分行和中台身份。
+
+- 开启后先选择分行；未选时不挂载业务页面，不请求规划、场景或机构人员。
+- 选定后规划列表、场景池和分发机构人员跟随目标分行，按中台角色选择支行与客户经理，来源为“分行关注”。
+- `setOperationsMode()` 统一清理工作台状态，递增 `contextVersion` 并重挂载页面，清空统计缓存。列表、初始化、场景及任务请求检查代次，人员选择继续由请求序号隔离。
+- 运维草稿不写入普通角色草稿缓存；切换前有草稿、编辑对象或已选人员时提示清空。发布/删除在途时禁止手动切换，身份变化或退出时仍必须清理旧状态，迟到写结果不能回写新环境。
+- 切换后的导航立即执行，初始化只补充数据，不在请求结束后跳转，也不覆盖新输入的运维草稿。
+- 编辑/删除依赖服务端明确返回 `editable=true`；运维模式中缺失值按只读处理，store 写入口再次检查。不扩大中台规划查询范围，不丢弃冲突校验所需的可见规划。
+
+### Java 联调确认项
+
+本次只改前端，不代表 Java 已支持跨分行授权。完整请求差异见 `docs/api/wealth-plans-java-gateway.md` 的运维模式章节。需要服务端同事确认：
+
+1. 基于可信登录态校验真实分行 V00001、用户 80008888 及允许的目标分行；前端白名单不构成授权。
+2. 允许授权用户的业务 role=middle、bbkId=目标分行与真实身份头不同。真实用户编号/姓名仍作为创建人，不能把规划归属写回测试分行，也不能把分发用户当创建人。
+3. 列表返回正确的 editable；更新和删除独立校验本人代建归属、目标分行和来源，不能只相信 editable 或请求体。
+4. 运维模式分行根的 `bbkOrgId/orgCode` 使用目标分行编码，业务上下文 `orgLvl` 固定为 "30"，根机构和根人员查询的 `mmOrgLvl` 传数字 30；`sysId` 沿用真实上下文。下级机构继续使用服务返回的 mOrgCode/mOrgLvl，普通模式层级取值保持不变。
+5. 场景池、机构树、人员与统计服务接受授权的业务范围；鉴权失败沿用现有错误处理，不自动回退真实分行继续发布。
+
+### 验证入口
+
+```bash
+cd console
+npm run test:run -- src/pages/WealthWorkbench src/App.wealth.test.ts --maxWorkers=2
+npm run typecheck
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
+
+专项用例：`operations.test.ts`、`operations.api.test.ts`、`operations.ui.test.tsx`。真实浏览器使用模拟接口验证，不将其视为 Java 联调；Chromium 108 / Windows 360 仍需目标环境复测。
