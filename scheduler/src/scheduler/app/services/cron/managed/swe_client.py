@@ -7,6 +7,7 @@ import logging
 import httpx
 
 from .identity import encode_scope
+from .diagnostics import format_swe_response_body
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,16 @@ class ManagedSweClient:
             operation["job_id"],
             response.status_code,
         )
+        if not response.is_success:
+            logger.error(
+                "SWE 执行资源接口失败 action=%s operation_id=%s job_id=%s "
+                "http_status=%s response_body=%s",
+                action,
+                operation["operation_id"],
+                operation["job_id"],
+                response.status_code,
+                format_swe_response_body(response),
+            )
         response.raise_for_status()
         value = response.json()
         if not isinstance(value, dict):

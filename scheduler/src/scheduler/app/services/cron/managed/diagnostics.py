@@ -1,10 +1,56 @@
 # -*- coding: utf-8 -*-
 """输出可定位的异常链，不输出请求、任务正文或异常内携带的私密输入。"""
 
+import json
 import re
 import traceback
 
 import httpx
+
+from ..tracking_common import public_value, secret_key
+
+_RESPONSE_BODY_LIMIT = 4096
+_RESPONSE_PRIVATE_FIELDS = {
+    "input",
+    "ctx",
+    "spec",
+    "request",
+    "text",
+    "body",
+    "headers",
+    "client_key",
+    "clientkey",
+    "apikey",
+    "accesstoken",
+}
+
+
+def _response_object(value):
+    """JSON 自内向外解析时整体遮蔽凭据、任务正文和校验输入。"""
+    return {
+        key: (
+            "[redacted]"
+            if secret_key(key) or key.lower() in _RESPONSE_PRIVATE_FIELDS
+            else item
+        )
+        for key, item in value.items()
+    }
+
+
+def format_swe_response_body(response):
+    """失败 JSON 保留定位信息，拒绝过大或不安全正文，再脱敏限长。"""
+    try:
+        content = response.content
+        if len(content) > 8192:
+            return "[omitted oversized response body]"
+        value = json.loads(content, object_hook=_response_object)
+        if not isinstance(value, (dict, list)):
+            return "[omitted scalar JSON response body]"
+        text = json.dumps(public_value(value), ensure_ascii=False)
+    except (ValueError, RuntimeError):
+        return "[omitted invalid or unavailable JSON response body]"
+    suffix = "[truncated]" if len(text) > _RESPONSE_BODY_LIMIT else ""
+    return text[:_RESPONSE_BODY_LIMIT] + suffix
 
 
 def _safe_code(value):

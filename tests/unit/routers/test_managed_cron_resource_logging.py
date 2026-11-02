@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """SWE 保留公共错误语义，同时输出可定位且不含私密输入的诊断。"""
 
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -170,6 +171,71 @@ async def test_public_http_error_is_not_reclassified_as_storage_failure(
     assert response.status_code == 409
     assert response.json() == {"detail": "cron_operation_superseded"}
     assert "cron_resource_storage_unavailable" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_prepare_failure_logs_safe_cause_before_returning_fixed_422(
+    resource_api,
+    monkeypatch,
+    caplog,
+):
+    from swe.app.crons import managed_api
+    from swe.app.crons.managed_resources import ResourcePreparer
+
+    app, _, operation, chats = resource_api
+
+    async def invalid_model(_spec):
+        try:
+            raise RuntimeError("private-input password=private-token")
+        except RuntimeError as exc:
+            raise ValueError("cron_model_not_found") from exc
+
+    async def factory(_request):
+        return ResourcePreparer(
+            chats,
+            agent_id="default",
+            validate_model=invalid_model,
+        )
+
+    monkeypatch.setattr(managed_api, "get_resource_preparer", factory)
+    caplog.set_level(logging.ERROR, logger="swe.app.crons.managed_api")
+    response = await _prepare(app, operation)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "cron_resource_preparation_failed"}
+    assert operation["operation_id"] in caplog.text
+    assert operation["job_id"] in caplog.text
+    assert "stage=prepare" in caplog.text
+    assert "ValueError" in caplog.text
+    assert "cron_model_not_found" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "invalid_model" in caplog.text
+    assert "private-input" not in caplog.text
+    assert "private-token" not in caplog.text
+    assert chats.created == 0
+
+
+@pytest.mark.asyncio
+async def test_prepare_validation_log_keeps_field_path_not_input_or_context(
+    resource_api,
+    caplog,
+):
+    app, db, operation, chats = resource_api
+    payload = json.loads(operation["payload_json"])
+    payload["spec"]["schedule"]["cron"] = "private-invalid-cron"
+    await db.execute(
+        "UPDATE swe_cron_registration_journal SET payload_json=%s WHERE operation_id=%s",
+        (json.dumps(payload), operation["operation_id"]),
+    )
+    caplog.set_level(logging.ERROR, logger="swe.app.crons.managed_api")
+    response = await _prepare(app, operation)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "cron_resource_preparation_failed"}
+    assert "ValidationError" in caplog.text
+    assert "schedule.cron" in caplog.text
+    assert "value_error" in caplog.text
+    assert "private-invalid-cron" not in caplog.text
+    assert "private-token" not in caplog.text
+    assert chats.created == 0
 
 
 @pytest.mark.parametrize(
