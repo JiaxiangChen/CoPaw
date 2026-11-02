@@ -72,6 +72,43 @@ describe("机构岗位人员分发目标", () => {
     ).toBe("RCZT");
   });
 
+  it.each([
+    undefined,
+    { mOrgCode: "102", mOrgName: "父支行", mOrgLvl: 50, leaf: false },
+  ])("各层支行过滤名称包含指定关键词的机构（%j）", async (parent) => {
+    useIframeStore.getState().setContext({ sysId: "retail" });
+    const names = [
+      "正常支行",
+      "停用支行",
+      "某支行（停用）",
+      "某私人银行中心",
+      "某分行信贷部",
+      "另一个正常支行",
+    ];
+    const branches = names.map((mOrgName, index) => ({
+      mOrgCode: String(index),
+      mOrgName,
+      mOrgLvl: 70,
+      leaf: true,
+    }));
+    mockRequest.mockResolvedValueOnce({ code: "200", data: branches });
+    expect(await fetchDistributeBranches(parent)).toEqual([
+      branches[0],
+      branches[5],
+    ]);
+  });
+
+  it("机构全部命中过滤关键词时返回空列表", async () => {
+    useIframeStore.getState().setContext({ sysId: "retail" });
+    mockRequest.mockResolvedValueOnce({
+      code: "200",
+      data: [
+        { mOrgCode: "102", mOrgName: "停用支行", mOrgLvl: 70, leaf: true },
+      ],
+    });
+    expect(await fetchDistributeBranches()).toEqual([]);
+  });
+
   it("支行缺少上下文时不查询，子层上下文无效仍返回 null", async () => {
     expect(await fetchDistributeBranches()).toEqual([]);
     expect(

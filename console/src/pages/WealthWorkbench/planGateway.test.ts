@@ -106,6 +106,29 @@ afterEach(() => {
 });
 
 describe("Java 规划网关契约", () => {
+  it.each(["daily", "weekly"] as const)(
+    "%s 名单推送未设置时间时提交08:00，督办仍为11:00",
+    async (type) => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(ok({ id: "plan-a" }))
+        .mockResolvedValueOnce(ok({ items: [view] }));
+      await api.publishPlan(
+        account,
+        {
+          ...draft,
+          items: [{ ...draft.items[0], schedule: { type } }],
+        },
+        null,
+        [],
+      );
+      const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+      expect(body.scenes[0]).toMatchObject({
+        cronExpr: type === "daily" ? "0 8 * * *" : "0 8 * * mon",
+        monitorTimeCron: "0 11 * * *",
+      });
+    },
+  );
+
   it.each([
     [null, "RCZT"],
     ["plan-a", "RCZT"],

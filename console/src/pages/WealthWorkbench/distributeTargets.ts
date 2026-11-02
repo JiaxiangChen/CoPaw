@@ -20,6 +20,7 @@ export interface DistributeBranch {
 
 const USER_POSITION_PATH = "/zt/wealth/wmadm/getUserPostionByBrn";
 const BRANCH_TREE_PATH = "/zt/wealth/wmadm/branchTreeInfo";
+const EXCLUDED_BRANCH_NAME_KEYWORDS = ["停用", "私人银行", "信贷部"];
 
 interface DistributionResponse<T> {
   code: string;
@@ -63,11 +64,20 @@ export async function fetchDistributeBranches(
   const mOrgLvl = Number(level);
   if (!Number.isInteger(mOrgLvl) || mOrgLvl < 0) return branch ? null : [];
   try {
-    return await fetchDistributionData<DistributeBranch>(BRANCH_TREE_PATH, {
-      mmOrgCode: mOrgCode,
-      mmOrgLvl: mOrgLvl,
-      sysId,
-    });
+    const branches = await fetchDistributionData<DistributeBranch>(
+      BRANCH_TREE_PATH,
+      {
+        mmOrgCode: mOrgCode,
+        mmOrgLvl: mOrgLvl,
+        sysId,
+      },
+    );
+    return branches.filter(
+      (item) =>
+        !EXCLUDED_BRANCH_NAME_KEYWORDS.some((keyword) =>
+          item.mOrgName.includes(keyword),
+        ),
+    );
   } catch (error) {
     console.warn("[Wealth] 分发支行查询失败", error);
     return null;

@@ -120,10 +120,10 @@ const WEEKDAY_LABELS: Record<string, string> = {
 
 const WEEKDAY_BY_INDEX = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
-/** 默认排程：每日 09:00（与控制台定时任务表单的缺省一致） */
+/** 名单推送默认排程：每日 08:00 */
 export const DEFAULT_SCHEDULE: CronParts = {
   type: "daily",
-  hour: 9,
+  hour: 8,
   minute: 0,
 };
 
@@ -131,10 +131,10 @@ function pad2(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-/** 排程的人类可读摘要：每日 09:00 / 每周一、四 08:30 / 每小时整点 / 自定义表达式 */
+/** 排程的人类可读摘要：每日 08:00 / 每周一、四 08:30 / 每小时整点 / 自定义表达式 */
 export function scheduleLabel(parts: CronParts | undefined): string {
   const schedule = parts ?? DEFAULT_SCHEDULE;
-  const time = `${pad2(schedule.hour ?? 9)}:${pad2(schedule.minute ?? 0)}`;
+  const time = `${pad2(schedule.hour ?? 8)}:${pad2(schedule.minute ?? 0)}`;
   switch (schedule.type) {
     case "hourly":
       return "每小时整点";

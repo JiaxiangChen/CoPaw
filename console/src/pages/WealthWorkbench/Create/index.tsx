@@ -279,7 +279,7 @@ export function ScheduleEditor({
         <div className={styles.scheduleField}>
           <span>{PUSH_TIME_LABEL}</span>
           <TimeField
-            hour={schedule.hour ?? 9}
+            hour={schedule.hour ?? 8}
             minute={schedule.minute ?? 0}
             onChange={(hour, minute) =>
               updateSchedule(item.id, { hour, minute })
