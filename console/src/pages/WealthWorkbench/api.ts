@@ -864,7 +864,7 @@ function buildScenePayload(
     cycle: item.cycle,
     startDate: item.start,
     endDate: item.end,
-    cronExpr: serializeCron(item.schedule ?? DEFAULT_SCHEDULE),
+    cronExpr: serializeCron({ ...DEFAULT_SCHEDULE, ...item.schedule }),
     ...(monitoring
       ? {
           schedule:
