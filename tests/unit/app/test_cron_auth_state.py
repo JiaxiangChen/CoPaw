@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -42,7 +43,8 @@ def test_get_cron_auth_file_path_uses_tenant_secret_dir(
     )
 
 
-def test_save_cron_auth_state_uses_tenant_secret_dir_even_with_workspace_dir(
+@pytest.mark.asyncio
+async def test_save_cron_auth_state_uses_tenant_secret_dir_even_with_workspace_dir(
     tmp_path,
     monkeypatch,
 ):
@@ -55,7 +57,7 @@ def test_save_cron_auth_state_uses_tenant_secret_dir_even_with_workspace_dir(
         lambda _tenant: tenant_secret,
     )
 
-    path = auth_state.save_cron_auth_state(
+    path = await auth_state.save_cron_auth_state(
         auth_state.CronAuthState(user_info={"id": 1}),
         tenant_id="tenant-a",
         workspace_dir=workspace_dir,
@@ -65,7 +67,8 @@ def test_save_cron_auth_state_uses_tenant_secret_dir_even_with_workspace_dir(
     assert path.is_file()
 
 
-def test_cleanup_cron_auth_except_source_keeps_rmassist_only(tmp_path):
+@pytest.mark.asyncio
+async def test_cleanup_cron_auth_except_source_keeps_rmassist_only(tmp_path):
     keep_scope = encode_scope_id("tenant-a", "RMASSIST")
     force_delete_scope = encode_scope_id("tenant-force", "RMASSIST")
     delete_scope = encode_scope_id("tenant-b", "PORTAL")
@@ -87,7 +90,7 @@ def test_cleanup_cron_auth_except_source_keeps_rmassist_only(tmp_path):
         )
     (tmp_path / "tenant-without-auth").mkdir()
 
-    result = auth_state.cleanup_cron_auth_except_source(
+    result = await auth_state.cleanup_cron_auth_except_source(
         force_delete_tenant_ids=["tenant-force"],
         working_dir=tmp_path,
     )
@@ -125,7 +128,10 @@ def test_cleanup_cron_auth_except_source_keeps_rmassist_only(tmp_path):
     ).exists()
 
 
-def test_cleanup_cron_auth_except_source_dry_run_does_not_delete(tmp_path):
+@pytest.mark.asyncio
+async def test_cleanup_cron_auth_except_source_dry_run_does_not_delete(
+    tmp_path,
+):
     delete_scope = encode_scope_id("tenant-b", "PORTAL")
     auth_path = (
         tmp_path / delete_scope / ".secret" / auth_state.CRON_AUTH_FILE_NAME
@@ -133,7 +139,7 @@ def test_cleanup_cron_auth_except_source_dry_run_does_not_delete(tmp_path):
     auth_path.parent.mkdir(parents=True)
     auth_path.write_text("{}", encoding="utf-8")
 
-    result = auth_state.cleanup_cron_auth_except_source(
+    result = await auth_state.cleanup_cron_auth_except_source(
         working_dir=tmp_path,
         dry_run=True,
     )
@@ -151,11 +157,12 @@ def test_merge_auth_token_into_cookie_uses_token_when_cookie_is_empty():
     )
 
 
-def test_ensure_user_info_reuses_existing_state_when_not_near_expiry(
+@pytest.mark.asyncio
+async def test_ensure_user_info_reuses_existing_state_when_not_near_expiry(
     monkeypatch,
     workspace_dir,
 ):
-    state = auth_state.save_user_info_from_access_token(
+    state = await auth_state.save_user_info_from_access_token(
         "access-1",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-1",
         workspace_dir=workspace_dir,
@@ -170,7 +177,7 @@ def test_ensure_user_info_reuses_existing_state_when_not_near_expiry(
 
     monkeypatch.setattr(auth_state, "get_user_info", fake_get_user_info)
 
-    reused = auth_state.ensure_user_info_from_access_token(
+    reused = await auth_state.ensure_user_info_from_access_token(
         "access-2",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-2",
         workspace_dir=workspace_dir,
@@ -185,17 +192,18 @@ def test_ensure_user_info_reuses_existing_state_when_not_near_expiry(
     )
 
 
-def test_ensure_user_info_refreshes_when_near_expiry(
+@pytest.mark.asyncio
+async def test_ensure_user_info_refreshes_when_near_expiry(
     monkeypatch,
     workspace_dir,
 ):
-    state = auth_state.save_user_info_from_access_token(
+    state = await auth_state.save_user_info_from_access_token(
         "access-1",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-1",
         workspace_dir=workspace_dir,
     )
     state.user_info_expires_at = auth_state.utc_now() + timedelta(hours=1)
-    auth_state.save_cron_auth_state(state, workspace_dir=workspace_dir)
+    await auth_state.save_cron_auth_state(state, workspace_dir=workspace_dir)
 
     get_user_info_calls: list[str] = []
 
@@ -208,7 +216,7 @@ def test_ensure_user_info_refreshes_when_near_expiry(
 
     monkeypatch.setattr(auth_state, "get_user_info", fake_get_user_info)
 
-    refreshed = auth_state.ensure_user_info_from_access_token(
+    refreshed = await auth_state.ensure_user_info_from_access_token(
         "access-2",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-2",
         workspace_dir=workspace_dir,
@@ -225,11 +233,12 @@ def test_ensure_user_info_refreshes_when_near_expiry(
     )
 
 
-def test_issue_auth_token_persists_plain_auth_token(
+@pytest.mark.asyncio
+async def test_issue_auth_token_persists_plain_auth_token(
     monkeypatch,
     workspace_dir,
 ):
-    auth_state.save_user_info_from_access_token(
+    await auth_state.save_user_info_from_access_token(
         "access-1",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-1",
         workspace_dir=workspace_dir,
@@ -243,7 +252,7 @@ def test_issue_auth_token_persists_plain_auth_token(
 
     monkeypatch.setattr(auth_state, "get_auth_token", fake_get_auth_token)
 
-    resolved = auth_state.issue_auth_token(workspace_dir=workspace_dir)
+    resolved = await auth_state.issue_auth_token(workspace_dir=workspace_dir)
     state = auth_state.load_cron_auth_state(workspace_dir=workspace_dir)
 
     assert captured["user_info"] == {"value": "access-1"}
@@ -251,10 +260,11 @@ def test_issue_auth_token_persists_plain_auth_token(
     assert state.auth_token == "plain-auth-token"
 
 
-def test_resolve_auth_token_for_execution_returns_empty_when_user_info_missing(
+@pytest.mark.asyncio
+async def test_resolve_auth_token_for_execution_returns_empty_when_user_info_missing(
     workspace_dir,
 ):
-    resolved = auth_state.resolve_auth_token_for_execution(
+    resolved = await auth_state.resolve_auth_token_for_execution(
         workspace_dir=workspace_dir,
     )
 
@@ -263,7 +273,8 @@ def test_resolve_auth_token_for_execution_returns_empty_when_user_info_missing(
     assert resolved.expires_at is None
 
 
-def test_resolve_auth_token_returns_cookie_for_empty_stored_cookie(
+@pytest.mark.asyncio
+async def test_resolve_auth_token_returns_cookie_for_empty_stored_cookie(
     monkeypatch,
     workspace_dir,
 ):
@@ -272,7 +283,7 @@ def test_resolve_auth_token_returns_cookie_for_empty_stored_cookie(
         user_info_expires_at=auth_state.utc_now() + timedelta(hours=1),
         cookie_header="",
     )
-    auth_state.save_cron_auth_state(state, workspace_dir=workspace_dir)
+    await auth_state.save_cron_auth_state(state, workspace_dir=workspace_dir)
 
     monkeypatch.setattr(
         auth_state,
@@ -280,18 +291,19 @@ def test_resolve_auth_token_returns_cookie_for_empty_stored_cookie(
         lambda _payload: "auth-123",
     )
 
-    resolved = auth_state.resolve_auth_token_for_execution(
+    resolved = await auth_state.resolve_auth_token_for_execution(
         workspace_dir=workspace_dir,
     )
 
     assert resolved.cookie_header == "com.cmb.dw.rtl.sso.token=auth-123"
 
 
-def test_resolve_auth_token_for_execution_includes_cookie_header(
+@pytest.mark.asyncio
+async def test_resolve_auth_token_for_execution_includes_cookie_header(
     monkeypatch,
     workspace_dir,
 ):
-    auth_state.save_user_info_from_access_token(
+    await auth_state.save_user_info_from_access_token(
         "access-1",
         cookie_header="foo=bar; com.cmb.dw.rtl.sso.token=access-1; theme=dark",
         workspace_dir=workspace_dir,
@@ -303,7 +315,7 @@ def test_resolve_auth_token_for_execution_includes_cookie_header(
         lambda _payload: "auth-123",
     )
 
-    resolved = auth_state.resolve_auth_token_for_execution(
+    resolved = await auth_state.resolve_auth_token_for_execution(
         workspace_dir=workspace_dir,
     )
 
@@ -368,7 +380,7 @@ async def test_configure_cron_auth_always_refreshes_user_info(monkeypatch):
         lambda cookie: "token-from-cookie",
     )
 
-    def fake_save_user_info_from_access_token(*args, **kwargs):
+    async def fake_save_user_info_from_access_token(*args, **kwargs):
         saved_args["args"] = args
         saved_args["kwargs"] = kwargs
         return auth_state.CronAuthState()
@@ -421,7 +433,9 @@ async def test_configure_cron_auth_returns_refreshed_status(monkeypatch):
     monkeypatch.setattr(
         auth_router,
         "save_user_info_from_access_token",
-        lambda *args, **kwargs: auth_state.CronAuthState(),
+        AsyncMock(
+            side_effect=lambda *args, **kwargs: auth_state.CronAuthState(),
+        ),
     )
     monkeypatch.setattr(
         auth_router,
@@ -463,15 +477,13 @@ async def test_refresh_cron_auth_token_returns_latest_credentials(monkeypatch):
         fake_get_agent_for_request,
     )
 
-    def fake_resolve_auth_token_for_execution(**kwargs):
+    async def fake_resolve_auth_token_for_execution(**kwargs):
         captured.update(kwargs)
         return auth_state.ResolvedAuthToken(
             token="latest-token",
             expires_at=expires_at,
             reused=False,
-            cookie_header=(
-                "foo=bar; com.cmb.dw.rtl.sso.token=latest-token"
-            ),
+            cookie_header=("foo=bar; com.cmb.dw.rtl.sso.token=latest-token"),
         )
 
     monkeypatch.setattr(
@@ -516,11 +528,13 @@ async def test_refresh_cron_auth_token_rejects_unconfigured_state(monkeypatch):
     monkeypatch.setattr(
         auth_router,
         "resolve_auth_token_for_execution",
-        lambda **_kwargs: auth_state.ResolvedAuthToken(
-            token=None,
-            expires_at=None,
-            reused=False,
-            cookie_header=None,
+        AsyncMock(
+            side_effect=lambda **_kwargs: auth_state.ResolvedAuthToken(
+                token=None,
+                expires_at=None,
+                reused=False,
+                cookie_header=None,
+            ),
         ),
     )
 
@@ -545,7 +559,7 @@ async def test_refresh_cron_auth_token_rejects_expired_user_info(monkeypatch):
         fake_get_agent_for_request,
     )
 
-    def fake_resolve_auth_token_for_execution(**_kwargs):
+    async def fake_resolve_auth_token_for_execution(**_kwargs):
         raise ValueError("cron auth user_info is expired")
 
     monkeypatch.setattr(
@@ -568,7 +582,7 @@ async def test_refresh_cron_auth_token_rejects_expired_user_info(monkeypatch):
 async def test_cleanup_cron_auth_endpoint_returns_summary(monkeypatch):
     observed = {}
 
-    def fake_cleanup_cron_auth_except_source(**kwargs):
+    async def fake_cleanup_cron_auth_except_source(**kwargs):
         observed.update(kwargs)
         return auth_state.CronAuthCleanupResult(
             deleted_tenant_ids=["tenant-a"],

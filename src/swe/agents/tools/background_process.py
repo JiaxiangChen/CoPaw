@@ -235,9 +235,7 @@ class ManagedBackgroundProcessManager:
             for record in records:
                 self._refresh_record(record, now=now)
             return [
-                record
-                for record in records
-                if record.owner_key == owner_key
+                record for record in records if record.owner_key == owner_key
             ]
 
     def _find_for_owner(
@@ -569,6 +567,9 @@ async def _start_in_thread(
 ) -> ManagedBackgroundProcess:
     import asyncio
 
+    from .shell_interceptor import intercept_command
+
+    command, _was_intercepted = await intercept_command(command)
     return await asyncio.to_thread(
         managed_background_process_manager.start,
         command,
@@ -583,9 +584,7 @@ def _format_list(records: list[ManagedBackgroundProcess]) -> str:
 
     lines = ["Background processes:"]
     for record in records:
-        stopped_at = (
-            record.stopped_at.isoformat() if record.stopped_at else ""
-        )
+        stopped_at = record.stopped_at.isoformat() if record.stopped_at else ""
         lines.extend(
             [
                 f"process_id: {record.process_id}",

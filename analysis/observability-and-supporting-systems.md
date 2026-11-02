@@ -17,6 +17,7 @@
 | 区域 | 关键文件 | 说明 |
 |------|----------|------|
 | Cron | `src/swe/app/crons/manager.py`, `src/swe/app/crons/executor.py`, `src/swe/app/crons/coordination.py`, `src/swe/app/crons/api.py`, `src/swe/app/crons/models.py` | 定时任务管理、执行与协调 |
+| Cron Auth Mirror | src/swe/app/crons/auth_mirror.py, auth_repository.py, auth_migration*.py | 文件权威凭据镜像与内部异步运维任务；见 docs/deploy/cron-auth-database-mirror.md |
 | Cron Repo | `src/swe/app/crons/repo/base.py`, `src/swe/app/crons/repo/json_repo.py` | Cron 配置持久化 |
 | Skill Readiness | `src/swe/app/skill_readiness/*.py`, `console/src/pages/Market/SkillReadinessModal.tsx` | 技能市场管理侧的用户可执行性检查，按 `skill_id` 聚合拥有用户、读取自检配置、启动异步检查并展示最近一次结果 |
 | Instance | `src/swe/app/instance/service.py`, `src/swe/app/instance/store.py`, `src/swe/app/instance/router.py`, `src/swe/app/instance/models.py` | 实例状态与实例管理接口 |

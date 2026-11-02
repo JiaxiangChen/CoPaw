@@ -348,8 +348,8 @@ async def test_retry_attempt_is_a_child_span_of_agent_run() -> None:
 
 
 def test_lifespan_shutdown_calls_documented_global_tracer_shutdown() -> None:
-    from swe.app._app import _shutdown_lifespan_resources
+    from swe.app._app import _shutdown_lifespan_resources_impl
 
     assert "shutdown_global_tracer()" in inspect.getsource(
-        _shutdown_lifespan_resources,
+        _shutdown_lifespan_resources_impl,
     )

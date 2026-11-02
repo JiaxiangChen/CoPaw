@@ -1,5 +1,10 @@
 # 定位路径
 
+## 定时执行凭据数据库镜像
+
+- src/swe/app/crons/auth_migration*.py：POST /api/internal/cron/auth-migration/tasks，GET 按 task_id 与 after_page 查询。
+- 在线镜像 auth_mirror.py、严格仓库 auth_repository.py；[排查说明](cron-auth-database-mirror.md)、[运维操作](../../docs/deploy/cron-auth-database-mirror.md)。
+
 ## Console 全局侧栏菜单
 
 - 菜单定义、可见性规则和展开／折叠数据转换集中在 `console/src/layouts/sidebarNavigation.tsx`；`Sidebar.tsx` 保留状态订阅、渲染和交互。新增显示条件时先检查 `getSidebarVisibility`，避免在两种渲染分支各写一遍。

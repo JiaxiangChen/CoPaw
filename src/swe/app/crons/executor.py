@@ -1485,7 +1485,7 @@ class CronExecutor:
         internal_trace_id = created_trace_id or requested_trace_id
 
         try:
-            self._apply_auth_token(job, dispatch_meta, req)
+            await self._apply_auth_token(job, dispatch_meta, req)
         except Exception as exc:
             await self._handle_agent_generic_exception(
                 job,
@@ -2254,7 +2254,7 @@ class CronExecutor:
             job.source_id,
         )
 
-    def _apply_auth_token(
+    async def _apply_auth_token(
         self,
         job: CronJobSpec,
         dispatch_meta: Dict[str, Any],
@@ -2278,7 +2278,7 @@ class CronExecutor:
             )
         )
         try:
-            resolved = resolve_auth_token_for_execution(
+            resolved = await resolve_auth_token_for_execution(
                 tenant_id=runtime_tenant_id,
                 workspace_dir=dispatch_meta.get("workspace_dir"),
             )

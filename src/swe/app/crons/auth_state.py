@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Coroutine, Mapping, TypeVar
 
 from pydantic import BaseModel, Field
 from fastapi import HTTPException
+from .auth_mirror import mirror_delete, mirror_upsert
 from ...agents.memory.agent_md_manager import AgentMdManager
 from ...constant import WORKING_DIR
 from ...config.context import decode_scope_id
@@ -22,6 +24,7 @@ from ...utils.tools import (
 )
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 CRON_AUTH_FILE_NAME = "cron_auth.json"
 DEFAULT_USER_INFO_TTL = timedelta(days=7)
@@ -256,7 +259,7 @@ def _matches_force_delete_tenant(
     return tenant_id in force_delete_tenant_ids if tenant_id else False
 
 
-def cleanup_cron_auth_except_source(
+async def cleanup_cron_auth_except_source(
     *,
     keep_source_id: str = "RMASSIST",
     force_delete_tenant_ids: list[str] | set[str] | None = None,
@@ -274,15 +277,7 @@ def cleanup_cron_auth_except_source(
     }
 
     base_dir = Path(working_dir) if working_dir is not None else WORKING_DIR
-    if not base_dir.exists():
-        return CronAuthCleanupResult(
-            deleted_tenant_ids=[],
-            deleted_dirs=[],
-            forced_deleted_tenant_ids=[],
-            kept_tenant_ids=[],
-            missing_tenant_ids=[],
-            dry_run=dry_run,
-        )
+    candidates = await asyncio.to_thread(_scan_cron_auth_cleanup, base_dir)
 
     deleted_tenant_ids: list[str] = []
     deleted_dirs: list[str] = []
@@ -290,12 +285,8 @@ def cleanup_cron_auth_except_source(
     kept_tenant_ids: list[str] = []
     missing_tenant_ids: list[str] = []
 
-    for tenant_dir in sorted(base_dir.iterdir(), key=lambda item: item.name):
-        if not tenant_dir.is_dir() or tenant_dir.name.startswith("."):
-            continue
-
-        auth_path = tenant_dir / ".secret" / CRON_AUTH_FILE_NAME
-        if not auth_path.is_file():
+    for tenant_dir, auth_path, has_auth_file in candidates:
+        if not has_auth_file:
             missing_tenant_ids.append(tenant_dir.name)
             continue
 
@@ -311,7 +302,7 @@ def cleanup_cron_auth_except_source(
             continue
 
         if not dry_run:
-            auth_path.unlink()
+            await _await_cron_auth_mutation(_delete_and_mirror(auth_path))
         deleted_tenant_ids.append(tenant_dir.name)
         deleted_dirs.append(str(tenant_dir))
         if force_delete:
@@ -325,6 +316,20 @@ def cleanup_cron_auth_except_source(
         missing_tenant_ids=missing_tenant_ids,
         dry_run=dry_run,
     )
+
+
+def _scan_cron_auth_cleanup(
+    base_dir: Path,
+) -> list[tuple[Path, Path, bool]]:
+    if not base_dir.exists():
+        return []
+    candidates = []
+    for tenant_dir in sorted(base_dir.iterdir(), key=lambda item: item.name):
+        if not tenant_dir.is_dir() or tenant_dir.name.startswith("."):
+            continue
+        auth_path = tenant_dir / ".secret" / CRON_AUTH_FILE_NAME
+        candidates.append((tenant_dir, auth_path, auth_path.is_file()))
+    return candidates
 
 
 def load_cron_auth_state(
@@ -353,7 +358,7 @@ def load_cron_auth_state(
         return CronAuthState(last_error=f"load_failed: {exc}")
 
 
-def save_cron_auth_state(
+def _save_cron_auth_file(
     state: CronAuthState,
     *,
     tenant_id: str | None = None,
@@ -373,6 +378,60 @@ def save_cron_auth_state(
         )
     _chmod_best_effort(path, 0o600)
     return path
+
+
+async def save_cron_auth_state(
+    state: CronAuthState,
+    *,
+    tenant_id: str | None = None,
+    workspace_dir: str | Path | None = None,
+) -> Path:
+    return await _await_cron_auth_mutation(
+        _save_and_mirror(
+            state.model_copy(deep=True),
+            tenant_id=tenant_id,
+            workspace_dir=workspace_dir,
+        ),
+    )
+
+
+async def _save_and_mirror(
+    snapshot: CronAuthState,
+    *,
+    tenant_id: str | None,
+    workspace_dir: str | Path | None,
+) -> Path:
+    path = await asyncio.to_thread(
+        _save_cron_auth_file,
+        snapshot,
+        tenant_id=tenant_id,
+        workspace_dir=workspace_dir,
+    )
+    await mirror_upsert(path.parent.parent.name, snapshot)
+    return path
+
+
+async def _delete_and_mirror(path: Path) -> None:
+    await asyncio.to_thread(path.unlink)
+    await mirror_delete(path.parent.parent.name)
+
+
+async def _await_cron_auth_mutation(work: Coroutine[Any, Any, _T]) -> _T:
+    """Own a started file mutation and its mirror through caller cancellation."""
+    task = asyncio.create_task(work)
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            break
+    if cancelled:
+        if not task.cancelled():
+            task.exception()
+        raise asyncio.CancelledError
+    return task.result()
 
 
 def _parse_expire_time(raw: Any, default_ttl: timedelta) -> datetime:
@@ -428,16 +487,17 @@ def _raise_if_user_info_expired(state: CronAuthState) -> None:
         raise ValueError("cron auth user_info is expired")
 
 
-def save_user_info_from_access_token(
+async def save_user_info_from_access_token(
     access_token: str,
     *,
     cookie_header: str | None = None,
     tenant_id: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> CronAuthState:
-    payload = get_user_info(access_token)
+    payload = await asyncio.to_thread(get_user_info, access_token)
     user_info, expires_at = _normalize_user_info_payload(payload)
-    state = load_cron_auth_state(
+    state = await asyncio.to_thread(
+        load_cron_auth_state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
@@ -449,7 +509,7 @@ def save_user_info_from_access_token(
     if cookie_header is not None:
         state.cookie_header = cookie_header
     state.last_error = None
-    save_cron_auth_state(
+    await save_cron_auth_state(
         state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
@@ -457,7 +517,7 @@ def save_user_info_from_access_token(
     return state
 
 
-def ensure_user_info_from_access_token(
+async def ensure_user_info_from_access_token(
     access_token: str,
     *,
     cookie_header: str | None = None,
@@ -465,7 +525,8 @@ def ensure_user_info_from_access_token(
     workspace_dir: str | Path | None = None,
     min_remaining: timedelta = USER_INFO_REFRESH_MARGIN,
 ) -> CronUserInfoEnsureResult:
-    state = load_cron_auth_state(
+    state = await asyncio.to_thread(
+        load_cron_auth_state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
@@ -478,7 +539,7 @@ def ensure_user_info_from_access_token(
     ):
         if cookie_header is not None:
             state.cookie_header = cookie_header
-            save_cron_auth_state(
+            await save_cron_auth_state(
                 state,
                 tenant_id=tenant_id,
                 workspace_dir=workspace_dir,
@@ -488,7 +549,7 @@ def ensure_user_info_from_access_token(
             reused=True,
         )
     return CronUserInfoEnsureResult(
-        state=save_user_info_from_access_token(
+        state=await save_user_info_from_access_token(
             access_token,
             cookie_header=cookie_header,
             tenant_id=tenant_id,
@@ -537,19 +598,22 @@ def _is_auth_token_reusable(
     return expires_at - utc_now() > min_remaining
 
 
-def issue_auth_token(
+async def issue_auth_token(
     *,
     tenant_id: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ResolvedAuthToken:
-    state = require_valid_user_info(
+    state = await asyncio.to_thread(
+        require_valid_user_info,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
     if not state.user_info:
         raise ValueError("cron auth user_info is not configured")
 
-    auth_token = _normalize_auth_token_payload(get_auth_token(state.user_info))
+    auth_token = _normalize_auth_token_payload(
+        await asyncio.to_thread(get_auth_token, state.user_info),
+    )
     expires_at = utc_now() + DEFAULT_AUTH_TOKEN_TTL
     cookie_header = merge_auth_token_into_cookie(
         state.cookie_header,
@@ -559,7 +623,7 @@ def issue_auth_token(
     state.auth_token_expires_at = expires_at
     state.cookie_header = cookie_header
     state.last_error = None
-    save_cron_auth_state(
+    await save_cron_auth_state(
         state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
@@ -572,19 +636,20 @@ def issue_auth_token(
     )
 
 
-def prefetch_auth_token(
+async def prefetch_auth_token(
     *,
     tenant_id: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ResolvedAuthToken:
-    state = load_cron_auth_state(
+    state = await asyncio.to_thread(
+        load_cron_auth_state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
     if _is_auth_token_reusable(state, min_remaining=timedelta(0)):
         state.last_prefetch_at = utc_now()
         state.last_error = None
-        save_cron_auth_state(
+        await save_cron_auth_state(
             state,
             tenant_id=tenant_id,
             workspace_dir=workspace_dir,
@@ -602,17 +667,18 @@ def prefetch_auth_token(
             ),
         )
 
-    resolved = issue_auth_token(
+    resolved = await issue_auth_token(
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
-    state = load_cron_auth_state(
+    state = await asyncio.to_thread(
+        load_cron_auth_state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
     state.last_prefetch_at = utc_now()
     state.last_error = None
-    save_cron_auth_state(
+    await save_cron_auth_state(
         state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
@@ -620,12 +686,13 @@ def prefetch_auth_token(
     return resolved
 
 
-def resolve_auth_token_for_execution(
+async def resolve_auth_token_for_execution(
     *,
     tenant_id: str | None = None,
     workspace_dir: str | Path | None = None,
 ) -> ResolvedAuthToken:
-    state = load_cron_auth_state(
+    state = await asyncio.to_thread(
+        load_cron_auth_state,
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )
@@ -652,7 +719,7 @@ def resolve_auth_token_for_execution(
                 state.auth_token or "",
             ),
         )
-    return issue_auth_token(
+    return await issue_auth_token(
         tenant_id=tenant_id,
         workspace_dir=workspace_dir,
     )

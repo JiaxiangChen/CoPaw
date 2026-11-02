@@ -44,7 +44,7 @@ async def test_initialize_history_without_database_stays_unavailable():
 def test_shutdown_drains_history_before_closing_database():
     import inspect
 
-    source = inspect.getsource(app_module._shutdown_lifespan_resources)
+    source = inspect.getsource(app_module._shutdown_lifespan_resources_impl)
 
     recorder_stop = source.index("history_recorder.stop()")
     assert source.index("await _stop_multi_agent_manager(app)") < recorder_stop

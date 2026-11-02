@@ -304,11 +304,12 @@ def test_dependency_capture_cleans_copied_skills_when_mcp_snapshot_fails(
 @pytest.mark.parametrize(
     ("mcps_value", "expected_names"),
     [
-        (None, {"github", "calendar"}),
+        (None, set()),
+        (["github"], {"github"}),
         ([], set()),
     ],
 )
-def test_dependency_capture_distinguishes_inherited_and_empty_mcps(
+def test_dependency_capture_only_includes_declared_mcps(
     tmp_path: Path,
     mcps_value: list[str] | None,
     expected_names: set[str],
@@ -1523,7 +1524,9 @@ async def test_worker_exception_writes_failed(monkeypatch, tmp_path):
             self.store = store
 
         async def run(self, **kwargs):
-            raise RuntimeError("provider unavailable")
+            raise RuntimeError(
+                "run_id=subagent-secret path=/private/secret.log token=top-secret",
+            )
 
     launch_path, run_id, run_store_dir = await _write_launch_spec(tmp_path)
     monkeypatch.setattr(worker_module, "SubAgentRuntime", RaisingRuntime)
@@ -1535,4 +1538,5 @@ async def test_worker_exception_writes_failed(monkeypatch, tmp_path):
     assert record is not None
     assert record.status == "failed"
     assert record.errors
-    assert "provider unavailable" in record.errors[-1].message
+    assert record.errors[-1].code == "worker_runtime_error"
+    assert record.errors[-1].message == "SubAgent execution failed."

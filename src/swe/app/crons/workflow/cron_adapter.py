@@ -1,12 +1,14 @@
+# -*- coding: utf-8 -*-
 """Cron integration for the independent workflow HTTP engine."""
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
 
 from swe.envs.runtime import load_tenant_runtime_env
@@ -82,7 +84,7 @@ def _secret_keys(config: Any) -> set[str]:
     return keys
 
 
-def _default_secret_loader(
+async def _default_secret_loader(
     job: CronJobSpec,
     keys: set[str],
     env: Mapping[str, str],
@@ -93,7 +95,7 @@ def _default_secret_loader(
     scope_id = job.scope_id or resolve_scope_id(job.tenant_id, job.source_id)
     workspace_dir = (job.dispatch.meta or {}).get("workspace_dir")
     try:
-        resolved = resolve_auth_token_for_execution(
+        resolved = await resolve_auth_token_for_execution(
             tenant_id=scope_id,
             workspace_dir=workspace_dir,
         )
@@ -123,7 +125,8 @@ class WorkflowCronExecutor:
             _default_env_loader
         ),
         secret_loader: Callable[
-            [CronJobSpec, set[str], Mapping[str, str]], dict[str, str]
+            [CronJobSpec, set[str], Mapping[str, str]],
+            dict[str, str] | Awaitable[dict[str, str]],
         ] = _default_secret_loader,
         trace_manager: Callable[[], Any] | None = None,
     ) -> None:
@@ -175,17 +178,19 @@ class WorkflowCronExecutor:
                     },
                 )
                 span_id = await self._start_skill_span(
-                    trace, trace_id, config, job
+                    trace,
+                    trace_id,
+                    config,
+                    job,
                 )
                 env = self._env_loader(job)
+                secrets = self._secret_loader(job, _secret_keys(config), env)
+                if inspect.isawaitable(secrets):
+                    secrets = await secrets
                 result = await self._engine.execute(
                     config,
                     env=env,
-                    secrets=self._secret_loader(
-                        job,
-                        _secret_keys(config),
-                        env,
-                    ),
+                    secrets=secrets,
                     target_user_id=target.user_id,
                     runtime={
                         "job_id": job.id,
@@ -222,7 +227,11 @@ class WorkflowCronExecutor:
                 )
             except BaseException as exc:
                 await self._record_failure(
-                    exc, execution_meta, trace, trace_id, span_id
+                    exc,
+                    execution_meta,
+                    trace,
+                    trace_id,
+                    span_id,
                 )
                 raise
 
@@ -335,7 +344,11 @@ class WorkflowCronExecutor:
                 else TraceStatus.ERROR
             )
             await self._finish_trace(
-                trace, trace_id, span_id, status, str(exc)[:512]
+                trace,
+                trace_id,
+                span_id,
+                status,
+                str(exc)[:512],
             )
             setattr(exc, "cron_trace_id", trace_id)
         setattr(exc, "cron_execution_meta", execution_meta)

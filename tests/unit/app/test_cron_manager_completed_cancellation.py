@@ -3385,7 +3385,7 @@ def test_auth_failure_preserves_trace_id_and_raises(monkeypatch):
     async def fake_end_trace(*args, **_kwargs):
         end_trace_calls.append(args)
 
-    def fake_resolve_auth_token_for_execution(**_kwargs):
+    async def fake_resolve_auth_token_for_execution(**_kwargs):
         raise ValueError("cron auth user_info is expired")
 
     monkeypatch.setattr(

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 from agentscope.message import Msg
@@ -54,21 +53,19 @@ async def test_query_timeout_marks_run_stopping_before_interrupting_agent():
 
 
 @pytest.mark.asyncio
-async def test_selected_expert_receives_deadline_before_stream_waits():
+async def test_selected_expert_does_not_receive_special_request_deadline():
     agent = _FakeAgent()
     agent._request_context = {
         "selected_expert_execution": True,
-        "_selected_expert_request_deadline": time.monotonic() + 60,
+        "selected_expert_id": "expert-1",
     }
     runner = AgentRunner()
-    started = time.monotonic()
 
     async def stream():
         deadline = agent._request_context.get(
             "_selected_expert_request_deadline",
         )
-        assert deadline is not None
-        assert started <= deadline <= time.monotonic() + 1
+        assert deadline is None
         yield Msg(name="Friday", role="assistant", content="done"), True
 
     assert (

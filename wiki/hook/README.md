@@ -3,6 +3,9 @@
 本文档汇总 `wiki/hook/hook-runtime.md` 对应的可运行样例。面向客户交付时，建议先看
 [customer-hook-demo-guide.md](customer-hook-demo-guide.md)，按客户目标挑选 1 到 3 个示例。
 
+特性总结：[Stop 附加消息](stop-appended-message.md)——最终放行后追加独立文本/Markdown
+气泡，保留正文流式输出，并进入历史和后续模型上下文。
+
 除租户级示例外，样例都只放在 `wiki/hook/` 下，目录结构统一遵循 skill 级 hook 的真实布局：
 
 ```text

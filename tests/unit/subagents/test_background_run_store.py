@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from swe.app.subagents import (
@@ -14,6 +16,7 @@ from swe.app.subagents import (
     SubAgentStartRequest,
     SubAgentDefinition,
 )
+from swe.app.subagents.models import AgentError
 
 
 def _definition():
@@ -127,6 +130,81 @@ async def test_per_run_store_loads_record_from_individual_file(tmp_path):
     assert reloaded.status == "partial"
     assert reloaded.result is not None
     assert reloaded.result.status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_per_run_store_sanitizes_terminal_failure_text(tmp_path):
+    store = PerRunSubAgentRunStore(tmp_path)
+    record = await store.create(
+        _spec(),
+        _definition(),
+        PermissionPolicy.readonly(),
+    )
+    raw_result = AgentResult(
+        task_id="task-1",
+        agent_run_id=record.run_id,
+        agent_name="plan-researcher",
+        status="failed",
+        summary="run_id=subagent-secret worker=/private/secret.log api_key=top-secret",
+        errors=[
+            AgentError(
+                code="runtime_error",
+                message="pid=421 token=top-secret path=/private/secret.log",
+            ),
+        ],
+    )
+
+    failed = await store.fail(
+        record.run_id,
+        "worker=/private/secret.log token=top-secret",
+        result=raw_result,
+    )
+    persisted = json.loads((tmp_path / f"{record.run_id}.json").read_text())
+
+    assert failed.result is not None
+    assert failed.result.summary == "SubAgent execution failed."
+    assert failed.errors[0].code == "runtime_error"
+    assert failed.errors[0].message == "SubAgent execution failed."
+    rendered = json.dumps(persisted)
+    for private_value in (
+        "subagent-secret",
+        "/private/secret.log",
+        "top-secret",
+        "pid=421",
+    ):
+        assert private_value not in rendered
+
+
+@pytest.mark.asyncio
+async def test_per_run_store_sanitizes_failed_result_finished_directly(
+    tmp_path,
+):
+    store = PerRunSubAgentRunStore(tmp_path)
+    record = await store.create(
+        _spec(),
+        _definition(),
+        PermissionPolicy.readonly(),
+    )
+    failed = await store.finish(
+        record.run_id,
+        AgentResult(
+            task_id="task-1",
+            agent_run_id=record.run_id,
+            agent_name="plan-researcher",
+            status="failed",
+            summary="run_id=subagent-secret path=/private/secret.log",
+            errors=[
+                AgentError(
+                    code="runtime_error",
+                    message="token=top-secret",
+                ),
+            ],
+        ),
+    )
+
+    assert failed.result is not None
+    assert failed.result.summary == "SubAgent execution failed."
+    assert failed.result.errors[0].message == "SubAgent execution failed."
 
 
 @pytest.mark.asyncio

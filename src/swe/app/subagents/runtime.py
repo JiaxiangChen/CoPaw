@@ -36,6 +36,7 @@ _RESEARCH_TURN_LIMIT_MESSAGE = (
 _TEXT_FINALIZATION_MESSAGE = (
     "SubAgent text finalization did not produce a summary."
 )
+_GENERIC_FAILURE_MESSAGE = "SubAgent execution failed."
 
 
 class SubAgentRuntime:
@@ -191,10 +192,14 @@ class SubAgentRuntime:
                 spec,
                 run.run_id,
                 "runtime_error",
-                str(exc),
+                _GENERIC_FAILURE_MESSAGE,
                 "failed",
             )
-            await self._store.fail(run.run_id, str(exc), result=result)
+            await self._store.fail(
+                run.run_id,
+                _GENERIC_FAILURE_MESSAGE,
+                result=result,
+            )
             return result
 
     def _subagent_config(

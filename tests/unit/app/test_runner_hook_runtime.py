@@ -46,6 +46,7 @@ from swe.app.runner.runner import (
 from swe.app.runner.turn_lifecycle import (
     _is_bufferable_assistant_text,
     _stream_standard_completion_lifecycle,
+    stream_agent_turns,
 )
 from swe.app.runner.session import SafeJSONSession
 from swe.agents.skill_tool_registry import SkillToolRegistry
@@ -3369,6 +3370,81 @@ async def test_query_handler_pre_tool_terminal_stop_is_final_and_allows_next_tur
     ]
     assert terminal_stop_agent.calls == 2
     assert terminal_stop_agent.reset_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_turns_skips_retired_selected_expert_cancellation() -> (
+    None
+):
+    class Agent:
+        def __init__(self) -> None:
+            self.memory = _FakeMemory()
+            self._request_context = {
+                "selected_expert_execution": True,
+            }
+            self.legacy_cancel_calls = 0
+
+        async def __call__(self, _turn_msgs) -> None:
+            raise PreToolUseTerminalStop("hook stopped")
+
+        async def _cancel_selected_expert_run(self) -> None:
+            self.legacy_cancel_calls += 1
+
+        def consume_pre_tool_terminal_stop(self) -> str:
+            return "hook stopped"
+
+    class Owner:
+        def _resolve_max_stop_turns(self, _agent_config) -> int:
+            return 1
+
+        def _resolve_max_automatic_follow_up_turns(
+            self,
+            _agent_config,
+            _stop_turns,
+        ) -> int:
+            return 1
+
+        async def _stream_printing_messages(
+            self,
+            *,
+            coroutine_task,
+            **_kwargs,
+        ):
+            await coroutine_task
+            if not coroutine_task.done():
+                yield None
+
+        async def _enforce_query_timeout(self, stream, **_kwargs):
+            async for item in stream:
+                yield item
+
+    agent = Agent()
+    outcome = SimpleNamespace(
+        assistant_response="",
+        buffered_assistant_messages=[],
+        stop_output_buffer_required=False,
+    )
+
+    outputs = [
+        item
+        async for item in stream_agent_turns(
+            Owner(),
+            runtime=SimpleNamespace(
+                agent=agent,
+                agent_config=SimpleNamespace(),
+                session_id="session-1",
+                chat=None,
+            ),
+            plan=SimpleNamespace(turn_msgs=[]),
+            outcome=outcome,
+            plan_interaction_card_metadata_key="plan_card",
+        )
+    ]
+
+    assert [msg.get_text_content() for msg, _last in outputs] == [
+        "hook stopped",
+    ]
+    assert agent.legacy_cancel_calls == 0
 
 
 @pytest.mark.asyncio

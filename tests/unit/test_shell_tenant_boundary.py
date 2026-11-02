@@ -1159,11 +1159,14 @@ class TestExecuteShellCommand:
         assert "PATH" in prepared.env
         assert prepared.python_runtime_guard is not None
 
-    def test_prepare_shell_command_injects_opencli_execution_credentials(
+    @pytest.mark.asyncio
+    async def test_shell_execution_preparation_injects_opencli_credentials(
         self,
         mock_working_dir: Path,
     ):
         """Shared shell preparation should apply OpenCLI auth interception."""
+        from swe.agents.tools.shell import _prepared_shell_execution
+
         tenant_dir = mock_working_dir / "test_tenant"
 
         with (
@@ -1179,16 +1182,22 @@ class TestExecuteShellCommand:
         ):
             resolve_token.return_value.token = "resolved-authorization"
             resolve_token.return_value.cookie_header = "resolved-cookie"
-            prepared = prepare_shell_command(
+            async with _prepared_shell_execution(
                 "opencli apps list",
                 cwd=str(tenant_dir),
-            )
+            ) as (prepared, _policy):
+                command = prepared.command
 
-        assert shlex.split(prepared.command) == [
-            "opencli", "apps", "list", "--authorization",
-            "Bearer resolved-authorization", "--cookie", "resolved-cookie",
+        assert shlex.split(command) == [
+            "opencli",
+            "apps",
+            "list",
+            "--authorization",
+            "Bearer resolved-authorization",
+            "--cookie",
+            "resolved-cookie",
         ]
-        resolve_token.assert_called_once_with(
+        resolve_token.assert_awaited_once_with(
             tenant_id="test_tenant",
             workspace_dir=tenant_dir,
         )
