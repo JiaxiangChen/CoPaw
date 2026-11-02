@@ -144,11 +144,14 @@ from ...tracing import (
     get_trace_manager,
 )
 from ...tracing.agent_trace_sdk import (
+    OperationName,
+    sdk_capture_policy,
     SpanKind,
     TraceFields,
     global_tracer,
     use_b3_trace_context,
 )
+from ...tracing.agent_trace_capture import TurnCapture
 from ...tracing.models import TraceStatus
 from ...config.context import (
     get_current_passthrough_headers,
@@ -6599,13 +6602,17 @@ class AgentRunner(Runner):
         request: AgentRequest | None,
         context: _QueryHandlerContext,
     ):
-        with use_b3_trace_context(
-            getattr(request, "b3_context", None),
-            context.trace_fields,
+        with (
+            sdk_capture_policy(context.trace_fields is not None),
+            use_b3_trace_context(
+                getattr(request, "b3_context", None),
+                context.trace_fields,
+            ),
         ):
             trace_scope = (
                 global_tracer.start_as_current_span(
                     "agent.run",
+                    operation_name=OperationName.INVOKE_AGENT,
                     kind=SpanKind.SERVER,
                     trace_fields=context.trace_fields,
                 )
@@ -6618,14 +6625,26 @@ class AgentRunner(Runner):
                         "agent.user_message",
                         context.query or "",
                     )
-                async for msg, last in self._stream_query_frames(
-                    msgs,
-                    request=request,
-                    query=context.query,
-                    session_id=context.session_id,
-                    user_id=context.user_id,
-                ):
-                    yield msg, last
+                capture = TurnCapture(span, msgs)
+                status = "completed"
+                try:
+                    async for msg, last in self._stream_query_frames(
+                        msgs,
+                        request=request,
+                        query=context.query,
+                        session_id=context.session_id,
+                        user_id=context.user_id,
+                    ):
+                        capture.observe(msg, last)
+                        yield msg, last
+                except (asyncio.CancelledError, GeneratorExit):
+                    status = "cancelled"
+                    raise
+                except Exception:
+                    status = "failed"
+                    raise
+                finally:
+                    capture.finish(status)
 
     async def _settle_query_handler_outcome(
         self,

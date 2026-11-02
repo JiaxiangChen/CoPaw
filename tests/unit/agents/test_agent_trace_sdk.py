@@ -69,7 +69,7 @@ async def test_fake_sdk_does_not_record_output_for_failed_call():
     assert "cmb.output.arguments" not in spans[0]["attributes"]
 
 
-def test_reasoning_uses_chat_traced_without_output_capture() -> None:
+def test_reasoning_uses_chat_traced_with_structured_output_capture() -> None:
     config = SWEAgent._run_reasoning_with_internal_context._trace_sdk_config
     agent = SimpleNamespace(
         _resolved_model_slot={"provider_id": "provider-1", "model": "model-1"},
