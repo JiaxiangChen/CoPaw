@@ -21,6 +21,7 @@ from ...config.context import (
 )
 from ...runtime_invocation_claims import runtime_invocation_claims_context
 from ...tracing.models import TraceStatus
+from ...tracing.agent_trace_capture import mark_turn_cancelled
 from ...tracing.agent_trace_sdk import OperationName, start_child_span
 from ..agent_context import set_current_agent_id
 from .query_contracts import (
@@ -516,6 +517,7 @@ async def _stream_retry_attempt(
             ):
                 yield item
     except asyncio.CancelledError as exc:
+        mark_turn_cancelled()
         settle_stopped_turn = getattr(owner, "_settle_stopped_turn", None)
         if callable(settle_stopped_turn):
             await settle_stopped_turn(

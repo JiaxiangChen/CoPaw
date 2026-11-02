@@ -57,15 +57,16 @@ def project_content(content: Any) -> Any:
                     "name",
                     "tool_use_id",
                     "is_error",
-                    "output",
                 )
             )
             projected = {
                 "type": kind,
                 **{k: block[k] for k in allowed if k in block},
             }
-            if kind == "tool_result" and "content" in block:
-                projected["content"] = project_content(block["content"])
+            if kind == "tool_result":
+                for field in ("output", "content"):
+                    if field in block:
+                        projected[field] = project_content(block[field])
             blocks.append(projected)
         else:
             blocks.append(
