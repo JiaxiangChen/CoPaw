@@ -94,7 +94,10 @@ export default createGlobalStyle`
 .chat-sidebar-content {
   flex: 1;
   // overflow-y: auto;
+}
 
+.chat-sidebar-content,
+.chat-sidebar-content-record-list {
   &::-webkit-scrollbar {
     width: 4px;
   }
@@ -119,8 +122,6 @@ export default createGlobalStyle`
 .chat-sidebar-content-record-list {
   height: calc(100vh - 139px);
   overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 }
 
 .chat-sidebar-content-record-list--without-header {

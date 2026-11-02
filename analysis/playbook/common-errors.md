@@ -31,6 +31,13 @@
   同时覆盖阻塞 body send 和锁竞争，并断言释放订阅后 producer 继续运行；
   `tests/unit/routers/test_sse_response.py` 覆盖 callback 抛错时关闭 source。
 
+## 聊天在 360 Chromium 108 中能滚动但不显示滚动条
+
+- **原因**：聊天 Layout 与 Runtime Chat 样式对 `::-webkit-scrollbar` 设置了 `display: none`。`Chat/index.module.less` 原先只给外层 `.chatMessagesArea` 设置滚动条，实际滚动的是内部 `.swe-bubble-list-scroll`。Chromium 108 不支持 `scrollbar-width`、`scrollbar-color`（Chrome 121 起支持），因此不能依赖现代浏览器的标准属性覆盖效果。兼容说明见 [Chrome 官方文档](https://developer.chrome.com/docs/css-ui/scrollbar-styling)。
+- **处理**：页面内使用 `.chatMessagesArea .swe-chat-anywhere-message-list .swe-bubble-list-scroll`，以高于 Runtime 隐藏规则的选择器优先级显式设置 `display: block`，并复用已有宽度、滑块颜色和悬停样式。不要只设置 `width`，也不要依赖动态样式注入顺序。
+- **侧栏同类问题**：“历史记录／我的任务”展开时共用 `.chat-sidebar-content-record-list`，收起后的弹出列表实际滚动容器为 `.expandable-panel-content`。WebKit 伪元素样式不会从外层继承；这两个实际容器必须同时具有 4px WebKit 样式与标准 `thin` 样式，不能只给 `.chat-sidebar-content`、`.expandable-panel` 设置。
+- **验证**：在实际溢出的消息容器上检查 `getComputedStyle(element, '::-webkit-scrollbar').display` 和宽度，覆盖样式延迟注入、长消息滚动与键盘翻页。当前 Chrome 的标准属性禁用实验只能验证 WebKit 回退分支，不能替代真实 360 / Chromium 108 验收。
+
 ## 财富规划看板在旧内核浏览器点击刷新不发请求
 
 - 排查入口：`Board/index.tsx` → `useBoardRefresh.ts` → `requestTimeout.ts` 的 `withBoardRequestTimeout()` → `store.ts` 的 `refreshPlans()`。
