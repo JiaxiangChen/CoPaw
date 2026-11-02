@@ -68,6 +68,7 @@
     "monitorCronOverview": "定时任务概览",
     "monitorCronBatchDispatch": "批调度监控",
     "monitorCronBatchDispatchNew": "批调度看板（新）",
+    "monitorCronTaskTracking": "定时任务追踪",
     "monitorTaskCenter": "异步任务中心",
     "monitor": "监控",
     "analyticsBusinessOverview": "运营看板",

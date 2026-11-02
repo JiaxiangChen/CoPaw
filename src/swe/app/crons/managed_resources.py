@@ -6,6 +6,7 @@ import logging
 from uuid import NAMESPACE_URL, uuid5
 
 from .models import CronJobSpec
+from .managed_models import load_managed_spec
 from .managed_model_preparation import resolve_broadcast_model
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class ResourcePreparer:
         self.broadcast_model = broadcast_model
 
     async def prepare(self, raw_spec, binding):
-        spec = CronJobSpec.model_validate(raw_spec)
+        spec = load_managed_spec(raw_spec)
         logger.info(
             "开始准备新任务执行资源 job_id=%s task_type=%s agent_id=%s",
             spec.id,
@@ -174,7 +175,7 @@ class ResourcePreparer:
         )
 
     async def cleanup(self, raw_spec, binding):
-        spec = CronJobSpec.model_validate(raw_spec)
+        spec = load_managed_spec(raw_spec)
         logger.info(
             "开始清理新任务执行资源 job_id=%s agent_id=%s",
             spec.id,

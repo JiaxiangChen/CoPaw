@@ -10,6 +10,8 @@ from .managed_cron import router as managed_cron_router
 from .managed_callbacks import router as managed_callbacks_router
 from .managed_batch_operations import router as managed_batch_operations_router
 from .daily_failure_retry import router as daily_failure_retry_router
+from .cron_task_tracking import router as cron_task_tracking_router
+from .managed_cron_date_ranges import router as managed_cron_date_ranges_router
 from .managed_cron_management import router as managed_cron_management_router
 from .managed_cron_controls import router as managed_cron_controls_router
 from .managed_cron_broadcast import router as managed_cron_broadcast_router
@@ -29,5 +31,7 @@ api_router.include_router(managed_cron_dispatch_state_router)
 api_router.include_router(managed_callbacks_router)
 api_router.include_router(managed_batch_operations_router)
 api_router.include_router(daily_failure_retry_router)
+api_router.include_router(cron_task_tracking_router)
+api_router.include_router(managed_cron_date_ranges_router)
 
 __all__ = ["api_router"]

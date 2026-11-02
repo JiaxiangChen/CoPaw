@@ -101,6 +101,7 @@ const expandedLabels = [
   "质量工程看板",
   "批调度监控",
   "批调度看板（新）",
+  "定时任务追踪",
   "Claw数据看板",
   "Claw技能运行看板",
   "Messages",
@@ -115,12 +116,18 @@ const conditionalLabels = new Set([
   "质量工程看板",
   "批调度监控",
   "批调度看板（新）",
+  "定时任务追踪",
   "Claw数据看板",
   "Claw技能运行看板",
   "异步任务中心",
 ]);
 const managementLabels = ["场景预设管理", "系统特性配置", "系统自检"];
-const governanceLabels = ["质量工程看板", "批调度监控", "批调度看板（新）"];
+const governanceLabels = [
+  "质量工程看板",
+  "批调度监控",
+  "批调度看板（新）",
+  "定时任务追踪",
+];
 const clawLabels = ["Claw数据看板", "Claw技能运行看板"];
 
 describe("Sidebar behavior preservation", () => {
@@ -229,7 +236,7 @@ describe("Sidebar behavior preservation", () => {
     );
   });
 
-  it("preserves different Claw skill navigation in each mode", () => {
+  it("navigates to the Claw skill dashboard in both modes", () => {
     iframeState.space = "RM_ASSISTANCE";
     const { container } = render(
       <MemoryRouter initialEntries={["/models"]}>
@@ -238,8 +245,11 @@ describe("Sidebar behavior preservation", () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByText("Claw技能运行看板"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/models");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/analytics/claw-skill-data-overview",
+    );
 
+    fireEvent.click(screen.getByText("Claw数据看板"));
     fireEvent.click(screen.getByRole("button"));
     const skillLink = container.querySelector(
       '[data-tooltip-title="Claw技能运行看板"]',
@@ -314,5 +324,35 @@ describe("Sidebar Claw report navigation", () => {
 
     expect(screen.queryByText("Claw数据看板")).not.toBeInTheDocument();
     expect(screen.queryByText("Claw技能运行看板")).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar merged cron tracking navigation", () => {
+  it.each([
+    { manager: true, space: null, bbk: null, visible: true },
+    { manager: true, space: "RM_ASSISTANCE", bbk: "100", visible: true },
+    { manager: true, space: "RM_ASSISTANCE", bbk: "001", visible: false },
+    { manager: false, space: null, bbk: null, visible: false },
+  ])("keeps tracking aligned with batch menu visibility: %o", (scope) => {
+    Object.assign(iframeState, scope);
+    render(
+      <MemoryRouter>
+        <Sidebar selectedKey="monitor-cron-task-tracking" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    const tracking = screen.queryByText("定时任务追踪");
+    const batch = screen.queryByText("批调度看板（新）");
+    if (!scope.visible) {
+      expect(tracking).not.toBeInTheDocument();
+      expect(batch).not.toBeInTheDocument();
+      return;
+    }
+    expect(tracking).toBeInTheDocument();
+    expect(batch).toBeInTheDocument();
+    fireEvent.click(tracking!);
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/monitor/cron-task-tracking",
+    );
   });
 });

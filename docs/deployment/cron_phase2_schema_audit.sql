@@ -7,6 +7,16 @@ SELECT required.table_name, required.column_name AS missing_column
 FROM (
   SELECT 'swe_cron_jobs_v2' AS table_name, 'tenant_id' AS column_name
   UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'run_start_date' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_jobs_v2' AS table_name, 'run_end_date' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_job_states' AS table_name, 'date_window_paused' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_job_states' AS table_name, 'date_window_sync_required' AS column_name
+  UNION ALL
+  SELECT 'swe_cron_execution_runs' AS table_name, 'dispatch_lane' AS column_name
+  UNION ALL
   SELECT 'swe_cron_jobs_v2' AS table_name, 'source_id' AS column_name
   UNION ALL
   SELECT 'swe_cron_jobs_v2' AS table_name, 'agent_id' AS column_name

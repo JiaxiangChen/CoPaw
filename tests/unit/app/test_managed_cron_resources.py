@@ -58,6 +58,24 @@ async def valid_model(_spec):
 
 
 @pytest.mark.asyncio
+async def test_managed_prepare_preserves_year_without_changing_legacy_parser():
+    from pydantic import ValidationError
+    from swe.app.crons.managed_resources import ResourcePreparer
+    from swe.app.crons.models import CronJobSpec
+
+    value = spec()
+    value["schedule"]["cron"] = "0 9 * * MON 2026-2029"
+    with pytest.raises(ValidationError):
+        CronJobSpec.model_validate(value)
+    prepared = await ResourcePreparer(
+        Chats(),
+        agent_id="default",
+        validate_model=valid_model,
+    ).prepare(value, {})
+    assert prepared["spec"]["schedule"]["cron"] == "0 9 * * MON 2026-2029"
+
+
+@pytest.mark.asyncio
 async def test_prepare_reuses_stable_chat_without_job_file_or_old_cache(
     tmp_path,
 ):

@@ -36,6 +36,21 @@ function column(key: string): ColumnType<ManagedJob> {
   }).find((item) => item.key === key)! as ColumnType<ManagedJob>;
 }
 
+it("列表展示可执行时间区间，未配置时显示不限日期段", () => {
+  const record = {
+    ...job("ordinary", false),
+    run_date_range: { start_date: "2026-11-01", end_date: "2026-11-30" },
+  };
+  const dateColumn = column("run_date_range");
+  expect(dateColumn).toBeDefined();
+  const view = render(<>{dateColumn.render?.(null, record, 0)}</>);
+  expect(screen.getByText(/2026-11-01.*2026-11-30/)).toBeVisible();
+  view.unmount();
+  render(<>{dateColumn.render?.(null, job("ordinary", true), 0)}</>);
+  expect(screen.getByText("不限日期段")).toBeVisible();
+  expect(screen.getByText("继承父任务")).toBeVisible();
+});
+
 it.each(["batch_enabled", "batch_paused"] as const)(
   "%s 的父任务和子任务都在自己的执行时间前显示批调度",
   (mode) => {

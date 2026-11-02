@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import floor
-from typing import Optional
+from typing import Optional, TypeGuard
+
+from .cron_syntax import business_parts
 
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 DAY_TO_INDEX = {name: index for index, name in enumerate(DAY_NAMES)}
@@ -64,6 +66,8 @@ def shift_cron_expression(
     """将 5 字段 cron 按 offset 向前平移。"""
     timezone_value = timezone_name or "UTC"
     parts = cron_expression.strip().split()
+    if len(parts) == 6:
+        return _shift_year(parts, timezone_value, offset_minutes)
     if len(parts) != 5:
         return _error(
             timezone_value,
@@ -75,11 +79,7 @@ def shift_cron_expression(
     parsed_minute = _parse_int(minute, 0, 59)
     parsed_hour = _parse_int(hour, 0, 23)
 
-    if (
-        parsed_minute is not None
-        and hour == "*"
-        and _is_every_day(dom, month, dow)
-    ):
+    if _hourly(parsed_minute, hour, dom, month, dow):
         shifted_minute = (parsed_minute - offset_minutes) % 60
         return ShiftedCron(
             cron=f"{shifted_minute} * * * *",
@@ -141,6 +141,32 @@ def shift_cron_expression(
     )
 
 
+def _shift_year(parts, zone, offset):
+    """只保留可精确表达的年份平移，跨年边界不能扩大执行日期。"""
+    business_parts(" ".join(parts))
+    if not offset:
+        return ShiftedCron(" ".join(parts), zone, offset)
+    result = shift_cron_expression(
+        " ".join(parts[:5]),
+        zone,
+        offset_minutes=offset,
+    )
+    if result.error:
+        return result
+    minute, hour = _parse_int(parts[0], 0, 59), _parse_int(parts[1], 0, 23)
+    if parts[5] != "*" and (
+        minute is None
+        or hour is None
+        or (parts[2] == "*" and (hour * 60 + minute - offset) // 1440)
+    ):
+        return _error(
+            zone,
+            offset,
+            "year-boundary cron scatter is not representable safely",
+        )
+    return ShiftedCron(result.cron + " " + parts[5], zone, offset)
+
+
 def _error(
     timezone_name: str,
     offset_minutes: int,
@@ -165,6 +191,19 @@ def _parse_int(value: str, minimum: int, maximum: int) -> Optional[int]:
 
 def _is_every_day(dom: str, month: str, dow: str) -> bool:
     return dom == "*" and month == "*" and dow == "*"
+
+
+def _hourly(
+    minute: Optional[int],
+    hour: str,
+    dom: str,
+    month: str,
+    dow: str,
+) -> TypeGuard[int]:
+    """整点小时集合只需平移分钟，避免把每日排程误作小时集合。"""
+    return (
+        minute is not None and hour == "*" and _is_every_day(dom, month, dow)
+    )
 
 
 def _shift_clock(

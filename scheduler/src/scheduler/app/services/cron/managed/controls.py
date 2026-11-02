@@ -21,6 +21,8 @@ from .priority import normalize_priority
 from .projection import write_projection
 from .repository import IDENTITY_FIELDS, ManagedCronRepository
 from .storage import insert, transaction, update
+from .date_policy import normalize_range, platform_window_open
+from .group_policy import ensure_parent_not_pausing
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,8 @@ def _validate_control(current, state, action, payload):
         raise ValueError("invalid_cron_enabled")
     if action == "set_priority" and current.get("parent_job_id"):
         raise ManagementConflict("cron_priority_requires_source")
+    if action == "date_range" and current.get("parent_job_id"):
+        raise ManagementConflict("cron_date_range_requires_source")
 
 
 class ControlService:
@@ -145,6 +149,22 @@ class ControlService:
         )
         return operation_summary(operation)
 
+    async def set_date_range(self, caller, job_id, payload):
+        """原子保存父子日期；平台同步由外部维护请求执行。"""
+        payload = {
+            **payload,
+            "run_date_range": normalize_range(payload.get("run_date_range")),
+        }
+        operation, _ = await self._begin(caller, job_id, "date_range", payload)
+        return {
+            **operation_summary(operation),
+            "affected_count": json.loads(operation["progress_json"]).get(
+                "affected_count",
+                0,
+            ),
+            "platform_sync_required": True,
+        }
+
     async def _begin(self, caller, job_id, action, payload):
         for attempt in range(3):
             try:
@@ -189,6 +209,11 @@ class ControlService:
             state = await _state(tx, key)
             _validate_control(current, state, action, payload)
             if action != "mark_read":
+                await ensure_parent_not_pausing(tx, current)
+                if action == "date_range":
+                    from .dispatch_state_store import DispatchStateStore
+
+                    await DispatchStateStore._exclusive(tx, key)
                 await self._control_slot(tx, key, action, payload)
             await insert(tx, JOURNAL, operation)
             await self._apply(tx, key, current, state, operation)
@@ -228,6 +253,11 @@ class ControlService:
 
     @staticmethod
     async def _apply(tx, key, current, state, operation):
+        if operation["action"] == "date_range":
+            from .date_ranges import apply_group_range
+
+            await apply_group_range(tx, current, operation)
+            return
         spec = json.loads(current["spec_json"])
         payload = json.loads(operation["payload_json"])
         action, now = operation["action"], operation["created_at"]
@@ -328,7 +358,7 @@ class ControlService:
         if state["dispatch_state"] != "ordinary":
             return
         current = await self.db.fetch_one(
-            f"SELECT enabled FROM swe_cron_jobs_v2 WHERE {WHERE_JOB}",
+            f"SELECT enabled,run_start_date,run_end_date FROM swe_cron_jobs_v2 WHERE {WHERE_JOB}",
             key,
         )
         external_id = state["ordinary_external_job_id"]
@@ -336,7 +366,11 @@ class ControlService:
             raise RuntimeError("cron_external_binding_missing")
         await self.platform.set_enabled(
             external_id,
-            bool(current["enabled"] and not state["pause_reason"]),
+            bool(
+                current["enabled"]
+                and not state["pause_reason"]
+                and platform_window_open(current),
+            ),
         )
 
     async def _finish(self, operation, *, failed, obsolete=False):

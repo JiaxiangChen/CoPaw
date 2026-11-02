@@ -268,6 +268,12 @@ export function createSidebarNavigation(
           visible: visibility.showGovernanceDashboards,
         },
         {
+          key: "monitor-cron-task-tracking",
+          label: t("nav.monitorCronTaskTracking", "定时任务追踪"),
+          icon: <SparkSearchLine size={size} />,
+          visible: visibility.showGovernanceDashboards,
+        },
+        {
           key: "analytics-claw-data-overview",
           label: t("nav.analyticsClawDataOverview", "Claw数据看板"),
           icon: <SparkBarChartLine size={size} />,
@@ -278,7 +284,6 @@ export function createSidebarNavigation(
           label: t("nav.analyticsClawSkillDataOverview", "Claw技能运行看板"),
           icon: <SparkBarChartLine size={size} />,
           visible: visibility.showClawDashboards,
-          // Only the collapsed sidebar currently has a route for this entry.
           collapsedPath: "/analytics/claw-skill-data-overview",
         },
         {

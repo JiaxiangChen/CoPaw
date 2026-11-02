@@ -142,8 +142,8 @@ export default function Sidebar({
         }`}
     >
       {/* <div className={styles.agentSelectorContainer}>
-        <AgentSelector collapsed={collapsed} />
-      </div> */}
+        <AgentSelector collapsed={collapsed} />
+      </div> */}
       {collapsed ? (
         <nav className={styles.collapsedNav}>
           {collapsedNavItems.map((item) => {

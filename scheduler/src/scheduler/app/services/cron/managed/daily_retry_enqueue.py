@@ -196,6 +196,9 @@ def retry_command(call, row, current, member, now):
             "dispatch_order",
             "batch_id",
             "batch_member_id",
+            "batch_created_at",
+            "batch_queue_order",
+            "dispatch_lane",
         )
         if name in original
     }
@@ -234,6 +237,13 @@ async def enqueue_retry(tx, call, row, current, member, prepared, now):
     key = tuple(row[name] for name in IDENTITY_FIELDS)
     caller = CallerIdentity(*key[:3], row["actor_id"] or row["tenant_id"])
     command = retry_command(call, row, current, member, now)
+    if member:
+        from .retry_priority import lane_for_batch
+
+        command.dispatch_meta["dispatch_lane"] = await lane_for_batch(
+            tx,
+            member["batch_id"],
+        )
     run, reused = await ExecutionStore(
         tx,
         grant=DailyRetryGrant(current),

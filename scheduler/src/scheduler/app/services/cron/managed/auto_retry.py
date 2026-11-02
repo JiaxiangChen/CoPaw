@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from .batch_failures import display_error_messages, member_rows
-from .batch_members import MEMBERS, RECEIPTS
+from .batch_members import MEMBERS, RECEIPTS, BatchRelationUnavailable
 from .batch_retry import BatchRetryGrant, BatchRetryService, _utc
 from .definition import request_hash
 from .dispatch_events import append_run_event, failure_type
@@ -49,8 +49,8 @@ class AutoBatchRetry:
         for row in rows:
             try:
                 count += await self._retry(row)
-            except ExecutionConflict:
-                # 停用、删除、管理变更或其他执行条件不满足，不复活任务。
+            except (ExecutionConflict, BatchRelationUnavailable):
+                # 执行条件或批关联不满足时静默跳过，后续巡检仍可重新检查。
                 continue
             except Exception as exc:
                 logger.warning(

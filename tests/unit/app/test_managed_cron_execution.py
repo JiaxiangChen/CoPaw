@@ -48,6 +48,31 @@ class Engine:
 
 
 @pytest.mark.asyncio
+async def test_date_expiring_after_enqueue_is_checked_at_atomic_start(
+    execution_setup,
+):
+    from swe.app.crons.managed_execution import ManagedExecutionService
+    from swe.app.crons.managed_results import ExecutionWriter
+
+    db = execution_setup[0]
+    row, _ = await enqueue(execution_setup)
+    db.conn.execute(
+        "UPDATE swe_cron_jobs_v2 SET run_start_date='2000-01-01',run_end_date='2000-01-02'",
+    )
+    engine = Engine()
+    await ManagedExecutionService(ExecutionWriter(db), engine).execute(
+        row["execution_id"],
+        key(row),
+    )
+    assert not engine.calls
+    result = db.conn.execute(
+        "SELECT * FROM swe_cron_execution_runs",
+    ).fetchone()
+    assert result["status"] == "skipped"
+    assert result["error_code"] == "cron_job_outside_date_range"
+
+
+@pytest.mark.asyncio
 async def test_repeated_acceptance_and_result_write_are_idempotent(
     execution_setup,
 ):

@@ -2,6 +2,7 @@
 """只维护 Scheduler 新任务的旧表投影，不调用或修改旧写入逻辑。"""
 
 import json
+from .date_policy import reason as date_reason
 
 from .definition import BROADCAST_RELATION_META_FIELDS, canonical
 from .storage import insert, update
@@ -84,6 +85,16 @@ def _owned(row, spec, agent_id):
     )
 
 
+def _pause_reason(spec, state):
+    """旧查询投影同样反映日期暂停，但不修改人工启用意图。"""
+    return (
+        state.get("pause_reason")
+        or ("manual" if not spec["enabled"] else "")
+        or date_reason(spec)
+        or ""
+    )
+
+
 def _values(spec, state, agent_id, now, deleted):
     meta = dict(spec.get("meta", {}))
     meta.update(
@@ -103,9 +114,9 @@ def _values(spec, state, agent_id, now, deleted):
     }.items():
         meta[key] = state.get(column)
     runtime = spec["runtime"]
-    paused = state.get("pause_reason") or (
-        "manual" if not spec["enabled"] else ""
-    )
+    paused = _pause_reason(spec, state)
+    if paused:
+        meta["pause_reason"] = paused
     return {
         "name": spec["name"],
         "tenant_id": spec["tenant_id"],

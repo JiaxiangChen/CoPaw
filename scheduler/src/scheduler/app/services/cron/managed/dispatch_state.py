@@ -4,6 +4,7 @@
 import copy
 import json
 import logging
+from .date_policy import platform_window_open
 
 from .definition import canonical, request_hash
 from .dispatch_state_store import CONTROLS, MODE_ITEMS, DispatchStateStore
@@ -174,7 +175,10 @@ class DispatchStateService:
                 )
         else:
             await self.platform.update(external_id, operation, spec, target)
-        await self.platform.set_enabled(external_id, target == "batch_enabled")
+        await self.platform.set_enabled(
+            external_id,
+            target == "batch_enabled" and platform_window_open(root),
+        )
 
     async def _register(self, operation, progress, spec, target, save):
         if progress.get("registration_started"):
@@ -319,7 +323,11 @@ class DispatchStateService:
                     await self._save_binding(parent, item, external_id)
                 await self.platform.set_enabled(
                     external_id,
-                    bool(current["enabled"] and not state["pause_reason"]),
+                    bool(
+                        current["enabled"]
+                        and not state["pause_reason"]
+                        and platform_window_open(current),
+                    ),
                 )
             elif state["ordinary_external_job_id"]:
                 await self.platform.set_enabled(

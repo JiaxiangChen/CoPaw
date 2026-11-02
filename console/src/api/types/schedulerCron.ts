@@ -14,6 +14,10 @@ export interface ManagedCronContext {
 }
 
 export type ManagedDispatchMode = "ordinary" | "batch_enabled" | "batch_paused";
+export interface ManagedRunDateRange {
+  start_date: string;
+  end_date: string;
+}
 export type ManagedCronSpec = Omit<CronJobSpecInput, "id"> & {
   id?: string;
   tenant_id?: string;
@@ -22,9 +26,11 @@ export type ManagedCronSpec = Omit<CronJobSpecInput, "id"> & {
   tenant_name?: string;
   bbk_id?: string;
   plan_id?: string;
+  run_date_range?: ManagedRunDateRange | null;
 };
 
 export interface ManagedJob extends CronJobSpecOutput {
+  run_date_range?: ManagedRunDateRange | null;
   tenant_id: string;
   source_id: string;
   agent_id: string;
@@ -66,6 +72,7 @@ export interface ManagedExecution {
   execution_id: string;
   job_id: string;
   status: string;
+  dispatch_lane?: "normal" | "urgent" | null;
   error_code?: string | null;
   output_preview?: string;
   /** Scheduler 观察主执行及异步结果后的整轮事实，不覆盖 SWE status。 */

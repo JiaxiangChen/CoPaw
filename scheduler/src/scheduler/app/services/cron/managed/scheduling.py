@@ -23,6 +23,7 @@ from .batch_order import ordered_members
 from .repository import ManagedCronRepository
 from .storage import insert, transaction
 from .batch_members import record_batch_members
+from .date_policy import reason as date_reason
 
 RECEIPTS = "swe_cron_managed_trigger_receipts"
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ class ManagedSchedulingService:
                 )
                 for row in children
             ]
-        selected = [row for row in targets if self._eligible(row, kind)]
+        selected = [row for row in targets if self._eligible(row, kind, now)]
         if not selected and not _allows_empty_batch(targets, kind):
             return {
                 "job_id": root["job_id"],
@@ -196,10 +197,13 @@ class ManagedSchedulingService:
             caller,
             root,
             selected,
-            logical,
-            receipt_id,
-            batch_id,
-            kind,
+            {
+                "logical": logical,
+                "receipt_id": receipt_id,
+                "batch_id": batch_id,
+                "kind": kind,
+                "received_at": now,
+            },
         )
         if kind == "ordinary":
             return {
@@ -229,6 +233,8 @@ class ManagedSchedulingService:
             return "binding_definition_changed"
         if root["state_management_status"] != "ready":
             return "job_not_ready"
+        if date_reason(root, now):
+            return "job_outside_date_range"
         grace = json.loads(root["spec_json"])["runtime"][
             "misfire_grace_seconds"
         ]
@@ -239,12 +245,13 @@ class ManagedSchedulingService:
         return None
 
     @staticmethod
-    def _eligible(row, kind):
+    def _eligible(row, kind, now=None):
         wanted = "ordinary" if kind == "ordinary" else "batch_enabled"
         return (
             not row["deleted_at"]
             and row["enabled"]
             and not row["state_pause_reason"]
+            and not date_reason(row, now)
             and row["state_management_status"] == "ready"
             and row["state_dispatch_state"] == wanted
         )
@@ -255,11 +262,12 @@ class ManagedSchedulingService:
         caller,
         root,
         selected,
-        logical,
-        receipt_id,
-        batch_id,
-        kind,
+        trigger,
     ):
+        logical, receipt_id, batch_id, kind = (
+            trigger[name]
+            for name in ("logical", "receipt_id", "batch_id", "kind")
+        )
         key = tuple(root[name] for name in IDENTITY_FIELDS)
         ranked = await ordered_members(
             tx,
@@ -271,6 +279,7 @@ class ManagedSchedulingService:
         )
         store = ExecutionStore(tx, grant=TriggerGrant(key, kind))
         result = []
+        first_order = None
         for entry in ranked:
             row = entry["definition"]
             rank = entry["payload"]["dispatch_priority"]
@@ -290,6 +299,15 @@ class ManagedSchedulingService:
                 "dispatch_order": entry["dispatch_order"],
                 "viewer_heat_score": entry["viewer_heat_score"],
             }
+            if kind == "batch":
+                metadata["batch_created_at"] = (
+                    trigger["received_at"]
+                    .astimezone(timezone.utc)
+                    .replace(tzinfo=None)
+                    .isoformat(" ")
+                )
+                if first_order is not None:
+                    metadata["batch_queue_order"] = first_order
             command = ExecutionRequest(
                 kind,
                 receipt_id,
@@ -303,6 +321,12 @@ class ManagedSchedulingService:
                 row["job_id"],
                 command,
             )
+            if first_order is None and kind == "batch":
+                initial = await tx.fetch_one(
+                    "SELECT queue_order FROM swe_cron_execution_runs WHERE execution_id=%s",
+                    (run["execution_id"],),
+                )
+                first_order = initial["queue_order"]
             result.append(
                 {
                     "execution_id": run["execution_id"],

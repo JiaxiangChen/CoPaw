@@ -259,6 +259,15 @@ async def retry_operation(
             raise ManagementConflict(
                 "cron_batch_delete_requires_original_request",
             )
+        if operation["action"] == "pause_group":
+            from ..services.cron.managed.pause_group import PauseGroupService
+
+            return _response(
+                await PauseGroupService(
+                    service.store.db,
+                    service.platform,
+                ).retry(caller, job_id, operation_id),
+            )
         if operation["action"] == "mode_sync":
             raise ManagementConflict("cron_mode_retry_requires_source")
         if operation["action"] == "dispatch_state":

@@ -222,6 +222,14 @@ async def _prepare(row, service):
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error(
+            "SWE 定时任务资源准备失败 operation_id=%s job_id=%s stage=prepare "
+            "error_code=cron_resource_preparation_failed error_type=%s\n%s",
+            row["operation_id"],
+            row["job_id"],
+            type(exc).__name__,
+            format_storage_error(exc),
+        )
         raise HTTPException(422, "cron_resource_preparation_failed") from exc
 
 

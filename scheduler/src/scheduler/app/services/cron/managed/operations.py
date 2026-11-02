@@ -18,6 +18,8 @@ from .projection import write_projection
 from .repository import IDENTITY_FIELDS, ManagedCronRepository
 from .storage import insert, transaction, update
 from .run_accounting import occupied_run_sql
+from .date_policy import columns as date_columns, reason as date_reason
+from .group_policy import ensure_parent_not_pausing
 
 JOURNAL = "swe_cron_registration_journal"
 WHERE_JOB = " AND ".join(f"`{key}` = %s" for key in IDENTITY_FIELDS)
@@ -218,7 +220,13 @@ class ManagementStore:
             )
             or active["status"] != "failed"
             or active["action"]
-            not in {"create", "update", "set_enabled", "auto_pause"}
+            not in {
+                "create",
+                "update",
+                "set_enabled",
+                "auto_pause",
+                "pause_group",
+            }
         ):
             raise ManagementConflict("cron_management_in_progress")
         await update(
@@ -292,6 +300,8 @@ class ManagementStore:
             raise ManagementConflict("cron_job_deleted")
         if row.get("deleted_at"):
             return row
+        if action != "delete":
+            await ensure_parent_not_pausing(tx, row)
         if row["definition_version"] != payload["expected_definition_version"]:
             raise ManagementConflict("cron_definition_version_conflict")
         # 源定义锁与分发受理共用，先检查活动分发再修改内容或写删除标记。
@@ -347,6 +357,8 @@ class ManagementStore:
                 "state_source": "scheduler",
                 "unread_execution_count": 0,
                 "has_scheduled_result": False,
+                "date_window_paused": bool(date_reason(spec)),
+                "date_window_sync_required": False,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -389,6 +401,7 @@ class ManagementStore:
     def definition_values(spec):
         return {
             **profile_columns(spec),
+            **date_columns(spec),
             "name": spec["name"],
             "scope_id": spec["scope_id"],
             "task_type": spec["task_type"],
@@ -604,6 +617,8 @@ class ManagementStore:
                         "task_chat_id": binding["chat_id"],
                         "task_session_id": binding["session_id"],
                         "management_status": "ready",
+                        "date_window_paused": bool(date_reason(spec)),
+                        "date_window_sync_required": False,
                     },
                     utc_now(),
                 )

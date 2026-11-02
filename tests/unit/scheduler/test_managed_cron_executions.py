@@ -27,6 +27,7 @@ class ExecutionDatabase(ManagementDatabase):
                 queue_order INTEGER PRIMARY KEY AUTOINCREMENT,
                 execution_id TEXT UNIQUE, execution_key TEXT UNIQUE,
                 dispatch_order INTEGER NOT NULL DEFAULT 0,
+                dispatch_lane TEXT NOT NULL DEFAULT 'normal',
                 tenant_id TEXT, source_id TEXT, agent_id TEXT, job_id TEXT,
                 scope_id TEXT, actor_id TEXT, definition_version INTEGER,
                 provider_id TEXT, model_id TEXT,

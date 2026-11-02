@@ -10,6 +10,28 @@ const context = {
   agent_id: "default",
 };
 
+it("日期修改和整组暂停使用独立新接口与对应版本", async () => {
+  vi.mocked(request).mockResolvedValue({ operation: { status: "completed" } });
+  const period = { start_date: "2026-11-01", end_date: "2026-11-30" };
+  await schedulerCronApi.setDateRange(context, "root", period, 8, "dates-1");
+  const [path, options] =
+    vi.mocked(request).mock.calls[vi.mocked(request).mock.calls.length - 1];
+  expect(path).toBe("/scheduler/cron/jobs/root/run-date-range");
+  expect(JSON.parse(String(options?.body))).toEqual({
+    request_id: "dates-1",
+    expected_management_version: 8,
+    run_date_range: period,
+  });
+  await schedulerCronApi.pause(context, "root", 3, "pause-1");
+  const [pausePath, pauseOptions] =
+    vi.mocked(request).mock.calls[vi.mocked(request).mock.calls.length - 1];
+  expect(pausePath).toBe("/scheduler/cron/jobs/root/pause");
+  expect(JSON.parse(String(pauseOptions?.body))).toEqual({
+    request_id: "pause-1",
+    expected_definition_version: 3,
+  });
+});
+
 describe("新版任务请求边界", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -105,6 +127,10 @@ describe("新版任务请求边界", () => {
         dispatch: { type: "channel", target: { user_id: "", session_id: "" } },
         request: { input: { token: "business-value" } },
         meta: { business: "keep" },
+        run_date_range: {
+          start_date: "2026-11-01",
+          end_date: "2026-11-30",
+        },
         state: { last_status: "success" },
         management_version: 9,
       } as Parameters<typeof schedulerCronApi.create>[1],
@@ -116,5 +142,9 @@ describe("新版任务请求边界", () => {
     expect(body.spec).not.toHaveProperty("management_version");
     expect(body.spec.request.input.token).toBe("business-value");
     expect(body.spec.meta.business).toBe("keep");
+    expect(body.spec.run_date_range).toEqual({
+      start_date: "2026-11-01",
+      end_date: "2026-11-30",
+    });
   });
 });

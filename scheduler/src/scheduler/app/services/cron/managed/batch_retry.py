@@ -166,6 +166,9 @@ class BatchRetryService:
             )
 
     async def _apply(self, tx, caller, batch_id, command, rows, digest):
+        from .retry_priority import lane_for_batch
+
+        retry_lane = await lane_for_batch(tx, batch_id)
         results = []
         audit = {
             "batch_id": batch_id,
@@ -195,7 +198,7 @@ class BatchRetryService:
                 new_run = await self._enqueue(
                     tx,
                     caller,
-                    row,
+                    {**row, "retry_dispatch_lane": retry_lane},
                     batch_id,
                     digest,
                 )
@@ -276,6 +279,7 @@ class BatchRetryService:
         current = await store.grant.authorize(tx, target, row["job_id"])
         from .executions import _ready
 
+        original_meta = json.loads(row.get("dispatch_meta_json") or "{}")
         command = ExecutionRequest(
             "batch",
             request_hash([digest, row["member_id"]]),
@@ -283,6 +287,14 @@ class BatchRetryService:
             expected_definition_version=row["current_definition_version"],
             not_before_at=retry_at or datetime.now(timezone.utc),
             dispatch_meta={
+                **{
+                    name: original_meta[name]
+                    for name in ("batch_created_at", "batch_queue_order")
+                    if name in original_meta
+                },
+                "dispatch_lane": row.get("retry_dispatch_lane")
+                or row.get("dispatch_lane")
+                or "normal",
                 "batch_id": batch_id,
                 "batch_member_id": row["member_id"],
                 "business_attempt": row["business_attempt"] + 1,

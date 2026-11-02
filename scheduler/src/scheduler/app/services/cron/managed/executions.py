@@ -16,6 +16,7 @@ from .storage import insert, transaction
 from .views import public_value
 from .dispatch_events import append_run_event
 from .model_resolution import resolve_agent_model
+from .date_policy import reason as date_reason
 from ..workflow_binding import resolve_workflow_batch_jobs
 
 RUN_TABLE = "swe_cron_execution_runs"
@@ -50,6 +51,7 @@ def execution_summary(row):
             "started_at",
             "finished_at",
             "error_code",
+            "dispatch_lane",
             "trace_id",
             "output_preview",
             "history_execution_id",
@@ -80,6 +82,8 @@ def _ready(row, command):
         raise ExecutionConflict("cron_job_not_ready")
     if not row["enabled"] or row.get("state_pause_reason"):
         raise ExecutionConflict("cron_job_disabled")
+    if date_reason(row):
+        raise ExecutionConflict("cron_job_outside_date_range")
     expected = command.expected_definition_version
     if expected is not None and expected != row["definition_version"]:
         raise ExecutionConflict("cron_definition_version_conflict")
@@ -217,6 +221,11 @@ class ExecutionStore:
                 "provider_id": meta["provider_id"],
                 "model_id": meta["model_id"],
                 "dispatch_order": int(meta.get("dispatch_order") or 0),
+                "dispatch_lane": (
+                    "urgent"
+                    if meta.get("dispatch_lane") == "urgent"
+                    else "normal"
+                ),
             },
         )
         await insert(tx, RUN_TABLE, row)
