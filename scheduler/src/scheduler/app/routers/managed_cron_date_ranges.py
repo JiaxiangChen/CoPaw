@@ -36,10 +36,10 @@ def date_service(controls=Depends(control_service)):
 
 @router.post(
     "/apply",
-    summary="按当前北京时间同步指定来源的日期限制及平台开关",
+    summary="按北京时间保留当日有效入口并预开次日入口",
 )
 async def apply_dates(body: ApplyDatesRequest, service=Depends(date_service)):
-    """同步返回当次结果；不要求用户 Header，不持久化调用或后台续办。"""
+    """同步维护今天/明天的入口；实际执行仍按当天校验，不需用户 Header。"""
     try:
         return await service.apply(body.source_id)
     except Exception as error:

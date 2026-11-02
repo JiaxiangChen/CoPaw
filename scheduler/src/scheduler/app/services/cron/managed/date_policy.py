@@ -64,6 +64,15 @@ def reason(row, now=None):
     return "date_expired" if instant.date() > end else None
 
 
+def platform_window_open(row, now=None):
+    """入口可提前一天打开，但实际执行许可仍仅由 reason 判断当天。"""
+    now = now or datetime.now(BEIJING)
+    return (
+        reason(row, now) is None
+        or reason(row, now + timedelta(days=1)) is None
+    )
+
+
 def columns(spec):
     """返回日期的展开副本，写入者必须与定义在同一事务保存。"""
     period = spec.get("run_date_range") or {}

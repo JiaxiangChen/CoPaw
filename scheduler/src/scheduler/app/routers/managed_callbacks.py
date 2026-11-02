@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""新平台普通/批回调入口，校验已注册绑定后只登记工作，不执行 Agent。"""
+"""新平台普通/批回调入口，校验绑定和执行日期后只登记工作。"""
 
 import base64
 import json
@@ -103,6 +103,8 @@ async def ordinary_callback(
     """校验完整身份、普通定时器绑定、操作引用和新协议标记后冻结一次独立执行。
 
     支持无 Header 的平铺 Body 和 jobParam 封装；fromId、tenant_id、source_id、agent_id 提供身份，scopeId 存在时校验。缺平台 ID 时读取当前数据库绑定；不接受完整任务定义。每次请求独立受理，不按流水号或计划期去重；缺时间时以接收时间记录触发，明确时间仍按原排程语义校验。任务停用、删除、归属和管理状态检查仍有效。
+
+    运行日期未开始或已过期都只记录跳过回执，不调用 Agent，不修改平台入口；平台日期开关统一由维护接口同步。
     """
     return await accept_callback(request, body, "ordinary", service)
 
@@ -120,5 +122,7 @@ async def batch_callback(
     """按已注册批绑定受理本次批次，在一个事务内冻结成员、优先级及执行快照。
 
     同样支持无 Header 的平铺 Body 和 jobParam 封装，身份及当前平台注册绑定须通过数据库核验。每次请求建立新批次、不去重，缺时间使用接收时间及已保存的批提前量，保留散列等待。只接入当前实际批模式对象，批暂停不受理新批；已有队列继续。只写收到的工作，不扫描补生漏掉的触发，不等待 SWE 最终执行结果。
+
+    日期按父任务的实际北京时间判断；未开始或已过期都只跳过，不修改共享批入口。平台日期开关统一由维护接口同步；已运行工作不被终止。
     """
     return await accept_callback(request, body, "batch", service)

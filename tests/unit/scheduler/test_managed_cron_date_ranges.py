@@ -145,17 +145,23 @@ async def test_callback_checks_current_date_columns_not_registration_snapshot(
         body,
     )
 
-    db, caller, _ = callback_setup
+    db, caller, management = callback_setup
     created = await create_source(callback_setup)
-    db.conn.execute(
-        "UPDATE swe_cron_jobs_v2 SET run_start_date='2000-01-01',run_end_date='2000-01-02'",
+    await configure(
+        db,
+        caller,
+        management.platform,
+        created["job_id"],
+        {"start_date": "2000-01-01", "end_date": "2000-01-02"},
     )
+    management.platform.trace.clear()
     result = await ManagedSchedulingService(
         db,
         clock=lambda: datetime(2026, 10, 16, 1, tzinfo=timezone.utc),
     ).accept(caller, body(db, created), "ordinary")
     assert result["accepted"] is False
     assert result["status"] == "skipped"
+    assert management.platform.trace == []
     assert not db.conn.execute(
         "SELECT * FROM swe_cron_execution_runs",
     ).fetchall()

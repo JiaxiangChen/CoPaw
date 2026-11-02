@@ -3,9 +3,9 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from .date_policy import BEIJING, columns, reason
+from .date_policy import BEIJING, columns, platform_window_open, reason
 from .definition import canonical, request_hash
 from .diagnostics import format_management_error
 from .distribution import _children
@@ -114,6 +114,7 @@ class DateMaintenanceService:
         result = {
             "source_id": source_id,
             "evaluated_date": now.date().isoformat(),
+            "preopen_date": (now + timedelta(days=1)).date().isoformat(),
             "scanned_count": 0,
             "date_paused_count": 0,
             "date_released_count": 0,
@@ -214,7 +215,13 @@ class DateMaintenanceService:
                 or state["management_status"] != "ready"
             ):
                 raise ManagementConflict("cron_job_not_ready")
-            values = _state_values(state, bool(reason(row, now)))
+            current_reason = reason(row, now)
+            # 预开标记可能跨过有效日而未刷新，过期仍必须推进旧队列水位。
+            values = _state_values(
+                state,
+                bool(current_reason),
+                configuration=current_reason == "date_expired",
+            )
             await update(tx, "swe_cron_job_states", values, WHERE_JOB, key)
             await write_projection(
                 tx,
@@ -231,7 +238,7 @@ class DateMaintenanceService:
             enabled = bool(
                 row["enabled"]
                 and not row.get("state_pause_reason")
-                and not reason(row, now),
+                and platform_window_open(row, now),
             )
         else:
             root = await self._root(row)
@@ -244,7 +251,10 @@ class DateMaintenanceService:
                 control["state"] if control else root["state_dispatch_state"]
             )
             external = root["state_batch_external_job_id"]
-            enabled = target == "batch_enabled" and not reason(root, now)
+            enabled = target == "batch_enabled" and platform_window_open(
+                root,
+                now,
+            )
         if not external:
             raise ManagementConflict("cron_external_binding_missing")
         return external, enabled

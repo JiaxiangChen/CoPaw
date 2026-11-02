@@ -5,7 +5,7 @@ import copy
 import asyncio
 import json
 import logging
-from .date_policy import reason as date_reason
+from .date_policy import platform_window_open
 from uuid import uuid4
 
 from .child_management import ChildGrant, child_payload
@@ -280,7 +280,7 @@ class BroadcastProcessor:
             await self.platform.update(external_id, operation, spec, mode)
             await self.platform.set_enabled(
                 external_id,
-                mode == "batch_enabled" and not date_reason(current),
+                mode == "batch_enabled" and platform_window_open(current),
             )
         except Exception as exc:
             logger.warning(

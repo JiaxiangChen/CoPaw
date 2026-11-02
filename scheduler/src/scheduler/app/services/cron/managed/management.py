@@ -3,7 +3,7 @@
 
 import json
 import logging
-from .date_policy import reason as date_reason
+from .date_policy import platform_window_open
 
 from .diagnostics import format_management_error
 from .operations import (
@@ -212,7 +212,7 @@ class ManagementService:
         enabled = mode == "batch_enabled" or (
             mode == "ordinary" and spec["enabled"]
         )
-        enabled = enabled and not date_reason(spec)
+        enabled = enabled and platform_window_open(spec)
         await self.platform.set_enabled(external_id, enabled)
         progress["platform_synced"] = True
         await self.store.checkpoint(operation, "publish", progress)

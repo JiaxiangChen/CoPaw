@@ -21,7 +21,7 @@ from .priority import normalize_priority
 from .projection import write_projection
 from .repository import IDENTITY_FIELDS, ManagedCronRepository
 from .storage import insert, transaction, update
-from .date_policy import normalize_range, reason as date_reason
+from .date_policy import normalize_range, platform_window_open
 from .group_policy import ensure_parent_not_pausing
 
 logger = logging.getLogger(__name__)
@@ -369,7 +369,7 @@ class ControlService:
             bool(
                 current["enabled"]
                 and not state["pause_reason"]
-                and not date_reason(current),
+                and platform_window_open(current),
             ),
         )
 
