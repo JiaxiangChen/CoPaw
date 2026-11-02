@@ -88,7 +88,7 @@ describe("Markdown Link", () => {
 
   it("保留电访和客户洞察的业务 ID 以及客户洞察 href 编码", () => {
     const params = btoa("custUid=customer&bbkOrgId=branch");
-    const href = `https://cusinsightuixc.paasoa.cmbchina.cn/#/homepage/${params}`;
+    const href = `https://xxxx.yyyy.zz.cn/#/homepage/${params}`;
     render(
       <>
         <Link href="https://example.com/?custUid=customer&bbkOrgId=branch#/wpcontactpanelv2/">
