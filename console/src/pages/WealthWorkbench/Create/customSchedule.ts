@@ -21,7 +21,7 @@ export const DEFAULT_CUSTOM_SCHEDULE: CustomScheduleConfig = {
   interval: 30,
   month: 1,
   dayOfMonth: 1,
-  hour: 9,
+  hour: 8,
   minute: 0,
   daysOfWeek: ["mon"],
 };

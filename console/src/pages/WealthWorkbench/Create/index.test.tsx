@@ -57,6 +57,26 @@ describe("StepIndicator", () => {
 });
 
 describe("ScheduleEditor", () => {
+  it.each(["daily", "weekly"] as const)(
+    "%s 名单推送未设置时间时显示08:00",
+    (type) => {
+      const item: PlanItem = {
+        id: "default-time",
+        sceneName: "默认时间场景",
+        categoryLabel: "理财",
+        categoryCode: "finance",
+        mcpRelations: [],
+        direction: "方向",
+        cycle: "本月",
+        schedule: { type },
+      };
+      render(<ScheduleEditor item={item} sceneName={item.sceneName} />);
+      expect(
+        screen.getByRole("button", { name: "默认时间场景名单推送时间" }),
+      ).toHaveTextContent("08:00");
+    },
+  );
+
   it.each([
     ["daily", "0 9 * * *"],
     ["weekly", "0 9 * * mon"],
@@ -307,7 +327,7 @@ describe("Create", () => {
       target: { value: "weekly" },
     });
     expect(useWealthStore.getState().draft.items[0].schedule.rawCron).toBe(
-      "0 9 * * mon",
+      "0 8 * * mon",
     );
     fireEvent.change(input, { target: { value: "500" } });
     expect(useWealthStore.getState().draft.items[0].custNum).toBe(500);
