@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
 
 import pytest
@@ -111,6 +112,38 @@ async def test_auto_retry_stops_after_three_business_attempts(callback_setup):
     assert (
         await db.fetch_one("SELECT COUNT(*) AS n FROM swe_cron_execution_runs")
     )["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_incomplete_batch_relation_is_quiet_and_can_retry_after_repair(
+    callback_setup,
+    caplog,
+):
+    db, _, batch, _, _, worker = await failed_setup(callback_setup)
+    receipt = await db.fetch_one(
+        "SELECT members_json FROM swe_cron_managed_trigger_receipts WHERE batch_id=%s",
+        (batch,),
+    )
+    await db.execute(
+        "UPDATE swe_cron_managed_trigger_receipts SET members_json=%s WHERE batch_id=%s",
+        ("{}", batch),
+    )
+    caplog.set_level(logging.WARNING)
+    assert await worker.tick() == 0
+    assert await worker.tick() == 0
+    assert not any(
+        item.name == "scheduler.app.services.cron.managed.auto_retry"
+        and item.levelno >= logging.WARNING
+        for item in caplog.records
+    )
+    assert (
+        await db.fetch_one("SELECT COUNT(*) AS n FROM swe_cron_execution_runs")
+    )["n"] == 1
+    await db.execute(
+        "UPDATE swe_cron_managed_trigger_receipts SET members_json=%s WHERE batch_id=%s",
+        (receipt["members_json"], batch),
+    )
+    assert await worker.tick() == 1
 
 
 @pytest.mark.asyncio
@@ -236,10 +269,11 @@ async def test_error_metadata_and_history_both_prevent_terminal_retry(
 async def test_enqueue_failure_rolls_back_member_pointer_and_new_execution(
     callback_setup,
     monkeypatch,
+    caplog,
 ):
     from scheduler.app.services.cron.managed import auto_retry
 
-    db, _, _, _, _, worker = await failed_setup(callback_setup)
+    db, _, batch, _, _, worker = await failed_setup(callback_setup)
 
     async def fail_event(*args, **kwargs):
         raise RuntimeError("event storage unavailable")
@@ -247,6 +281,13 @@ async def test_enqueue_failure_rolls_back_member_pointer_and_new_execution(
     with monkeypatch.context() as patch:
         patch.setattr(auto_retry, "append_run_event", fail_event)
         assert await worker.tick() == 0
+    assert any(
+        item.name == "scheduler.app.services.cron.managed.auto_retry"
+        and item.levelno == logging.WARNING
+        and "error_type=RuntimeError" in item.getMessage()
+        and batch in item.getMessage()
+        for item in caplog.records
+    )
     assert (
         await db.fetch_one("SELECT COUNT(*) AS n FROM swe_cron_execution_runs")
     )["n"] == 1
