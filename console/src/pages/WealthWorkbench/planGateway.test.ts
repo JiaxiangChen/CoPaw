@@ -205,7 +205,7 @@ describe("Java 规划网关契约", () => {
             endDate: "2026-10-31",
             cronExpr: "0 9 * * *",
             schedule: 1,
-            monitorTimeCron: "0 9 * * *",
+            monitorTimeCron: "0 11 * * *",
             finishRate: 60,
             cronExample: "生成名单",
             mcpRelations: ["mcp-a"],

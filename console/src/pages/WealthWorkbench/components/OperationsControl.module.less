@@ -1,0 +1,60 @@
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--console-management-text-secondary, #4b5563);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.branch {
+  width: 200px;
+}
+
+.role {
+  white-space: nowrap;
+  color: var(--console-management-warning, #a56a24);
+}
+
+.empty {
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--console-management-text-secondary, #4b5563);
+  font-size: 14px;
+  line-height: 1.8;
+
+  strong {
+    display: block;
+    color: var(--console-management-text, #111827);
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 950px) {
+  .role {
+    display: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .compactTitle {
+    display: none;
+  }
+
+  .controls {
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .branch {
+    width: 145px;
+  }
+}
