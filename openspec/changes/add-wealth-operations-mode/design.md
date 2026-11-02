@@ -16,7 +16,7 @@
 - 切换前有草稿、编辑对象或分发选择时确认丢弃，写请求期间禁止切换；切换后重挂载业务页面并重置列表、人员、场景和任务数据。请求使用上下文代次拦截迟到响应。普通草稿缓存保持原样，运维草稿不写入普通角色缓存。
 - 复用现有 GET/POST/PUT/DELETE 规划和分发接口。运维 GET/POST/PUT 的 role=middle、bbkId=目标分行，sapId 保持真实操作人，POST/PUT 的 bbkOrgId 使用所选分行根；DELETE 在原 sapId 基础上补 role/bbkId。不引入新接口或伪造 Cookie。
 - 规划可见范围沿用中台以保留原冲突校验数据；写操作必须有服务端明确的 editable=true。不以本地临时创建记录推断归属，刷新后继续以 Java 授权为准。
-- 机构树根沿用当前中台查询的 orgLvl/sysId 契约，编码替换为目标分行；下级机构继续使用服务返回的 mOrgCode/mOrgLvl。Java/机构服务对接方需确认测试分行 orgLvl 适用于分行根。
+- 运维模式业务上下文 orgLvl 固定为 "30"，根机构和根人员查询 mmOrgLvl 传数字 30，编码替换为目标分行，sysId 沿用真实上下文；下级机构继续使用服务返回的 mOrgCode/mOrgLvl。普通模式层级取值保持不变。
 
 ## Risks / Trade-offs
 

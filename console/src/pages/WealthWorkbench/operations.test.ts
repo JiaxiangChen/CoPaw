@@ -121,7 +121,7 @@ describe("运维身份与分行边界", () => {
       userId: "80008888",
       userName: "测试用户",
       sysId: "retail",
-      orgLvl: "70",
+      orgLvl: "30",
     });
     expect(useIframeStore.getState()).toBe(original);
     await useWealthStore.getState().setOperationsMode(false);

@@ -146,7 +146,7 @@ describe("运维模式现有接口适配", () => {
     });
     expect(JSON.parse(String(calls[1][1]?.body))).toEqual({
       mmOrgCode: "110",
-      mmOrgLvl: 70,
+      mmOrgLvl: 30,
       sysId: "retail",
     });
     expect(JSON.parse(String(calls[2][1]?.body))).toEqual({
@@ -154,6 +154,26 @@ describe("运维模式现有接口适配", () => {
       mmOrgCode: "110001",
       mmOrgLvl: 80,
     });
+  });
+
+  it("运维根机构和人员固定使用 30，关闭后恢复真实机构层级", async () => {
+    vi.mocked(request).mockResolvedValue({ code: "200", data: [] });
+    activate();
+    await fetchDistributeBranches();
+    await fetchDistributeTargets();
+    useWealthOperations.setState({ enabled: false, branchId: null });
+    await fetchDistributeBranches();
+    await fetchDistributeTargets();
+    const bodies = vi
+      .mocked(request)
+      .mock.calls.map(([, options]) => JSON.parse(String(options?.body)));
+    expect(bodies).toEqual([
+      { mmOrgCode: "110", mmOrgLvl: 30, sysId: "retail" },
+      { bbkOrgId: "110", mmOrgCode: "110", mmOrgLvl: 30 },
+      { mmOrgCode: "V00001", mmOrgLvl: 70, sysId: "retail" },
+      { bbkOrgId: "V00001", mmOrgCode: "test-org", mmOrgLvl: 70 },
+    ]);
+    expect(useIframeStore.getState().orgLvl).toBe("70");
   });
 
   it("运维草稿不能覆盖普通中台草稿，运维初始化不恢复普通草稿", async () => {

@@ -63,6 +63,7 @@ export function getWorkbenchContext() {
     ...context,
     bbk: branchId,
     orgCode: branchId,
+    orgLvl: "30",
     subBranchId: null,
     positionId: "RB0301",
   };
