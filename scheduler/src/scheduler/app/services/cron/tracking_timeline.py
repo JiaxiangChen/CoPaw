@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """多来源有界 keyset 归并；不写业务表、不调用执行或标读接口。"""
 
+from builtins import anext
 from datetime import datetime, timezone
 
 from .tracking_common import (
