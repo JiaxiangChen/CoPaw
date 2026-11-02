@@ -504,18 +504,23 @@ export function initIframeMessageListener(): void {
 }
 
 /**
- * 清理独立访问时残留的 iframe 上下文
+ * 在注册消息监听器前清理新入口残留的 iframe 上下文
  *
  * 同一个浏览器标签页可能先以 iframe 方式打开，再以普通页面方式访问。
- * 这时 sessionStorage 中的 iframe 身份会污染后续请求头，因此独立访问时主动清理。
+ * 独立访问及 origin=Y 入口不能继承旧菜单的身份、权限和来源。
+ * 必须在接收本次 USER_DATA 前执行，避免清除当前菜单的新消息。
  */
-export function resetIframeContextForStandalone(): void {
+export function resetIframeContextForEntry(): void {
   const urlParams = new URLSearchParams(window.location.search);
-  if (isInIframe() || urlParams.get("origin") === "Y") {
+  const store = useIframeStore.getState();
+  if (urlParams.get("origin") === "Y") {
+    store.clearContext();
+    return;
+  }
+  if (isInIframe()) {
     return;
   }
 
-  const store = useIframeStore.getState();
   if (
     store.userId ||
     store.userName ||

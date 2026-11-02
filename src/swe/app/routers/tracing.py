@@ -13,15 +13,8 @@ from ...config.utils import (
     load_config,
 )
 from ..identity_resolver import resolve_user_identity
-from ..runner.api import (
-    TASK_RUNS_STATE_KEY,
-    _annotate_approval_action_statuses,
-    _annotate_task_run_messages,
-    _message_sort_key,
-    _messages_from_memory_state,
-    _task_session_messages_from_state,
-)
-from ..runner.models import ChatHistory, ChatMessage, ChatSpec
+from ..runner.api import _archive_page, _build_chat_history
+from ..runner.models import ChatArchivePage, ChatHistory, ChatSpec
 
 logger = logging.getLogger(__name__)
 
@@ -124,57 +117,54 @@ async def get_user_chats(
     )
 
 
+async def _target_chat(request: Request, user_id: str, chat_id: str):
+    """Resolve a target chat; operator access follows the existing gateway policy."""
+    workspace = await _get_target_workspace(request, user_id)
+    chat = await workspace.chat_manager.get_chat(chat_id)
+    if not chat or chat.user_id != user_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Chat not found: {chat_id}",
+        )
+    expected = {
+        "source_id": _request_source_id(request),
+        "agent_id": request.headers.get("X-Agent-Id")
+        or getattr(workspace, "agent_id", None),
+    }
+    for key, value in expected.items():
+        stored = (chat.meta or {}).get(key)
+        if value and isinstance(stored, str) and stored and stored != value:
+            raise HTTPException(status_code=404, detail="Chat not found")
+    return workspace, chat
+
+
 @router.get("/tracing/chats/{chat_id}", response_model=ChatHistory)
 async def get_user_chat(
     request: Request,
     chat_id: str,
     user_id: str = Query(..., description="目标用户 ID"),
 ) -> ChatHistory:
-    """获取目标用户指定聊天的完整记录。
-
-    活跃用户弹窗需要按目标用户工作区读取详情，避免复用 `/chats/{id}`
-    时落到当前登录用户工作区导致映射存在但详情不存在。
-    """
-    workspace = await _get_target_workspace(request, user_id)
-    chat_spec = await workspace.chat_manager.get_chat(chat_id)
-    if not chat_spec or chat_spec.user_id != user_id:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Chat not found: {chat_id}",
-        )
-
-    state = await workspace.runner.session.get_session_state_dict(
-        chat_spec.session_id,
-        chat_spec.user_id,
+    """Read target-user history using the same durable assembly as Chat."""
+    workspace, chat = await _target_chat(request, user_id, chat_id)
+    return await _build_chat_history(
+        chat,
+        session=workspace.runner.session,
+        workspace=workspace,
+        non_blocking=True,
     )
-    coordinator = getattr(workspace, "answer_turn_coordinator", None)
-    turn_status = (
-        await coordinator.status(chat_id) if coordinator is not None else None
-    )
-    status = turn_status.value if turn_status is not None else "idle"
-    task_messages = _task_session_messages_from_state(state)
-    if not state:
-        return ChatHistory(messages=task_messages, status=status)
 
-    memory_state = state.get("agent", {}).get("memory", {})
-    messages: list[ChatMessage] = []
-    if memory_state:
-        if (
-            (chat_spec.meta or {}).get("session_kind") == "task"
-            and isinstance(state.get(TASK_RUNS_STATE_KEY), list)
-            and state.get(TASK_RUNS_STATE_KEY)
-        ):
-            messages = await _annotate_task_run_messages(
-                memory_state,
-                state[TASK_RUNS_STATE_KEY],
-                session_id=chat_spec.session_id,
-            )
-        else:
-            messages = await _messages_from_memory_state(
-                memory_state,
-                session_id=chat_spec.session_id,
-            )
-    messages.extend(task_messages)
-    messages.sort(key=_message_sort_key)
-    messages = await _annotate_approval_action_statuses(messages)
-    return ChatHistory(messages=messages, status=status)
+
+@router.get("/tracing/chats/{chat_id}/history", response_model=ChatArchivePage)
+async def get_user_chat_history(
+    request: Request,
+    chat_id: str,
+    user_id: str = Query(..., description="目标用户 ID"),
+    before: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=50),
+) -> ChatArchivePage:
+    """Page through the target user's compacted history without impersonation."""
+    workspace, chat = await _target_chat(request, user_id, chat_id)
+    try:
+        return await _archive_page(workspace, chat.id, before, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

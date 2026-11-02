@@ -784,7 +784,7 @@ function archiveSourceMessageId(
   return typeof message.id === "string" ? message.id : undefined;
 }
 
-function withArchiveBoundaries(
+export function withArchiveBoundaries(
   messages: IAgentScopeRuntimeWebUIMessage[],
   boundaries: ChatCompactionBoundary[] | undefined,
 ): IAgentScopeRuntimeWebUIMessage[] {
@@ -910,7 +910,7 @@ function buildStandaloneTaskRunCard(
   ];
 }
 
-function convertMessagesForSession(
+export function convertMessagesForSession(
   messages: Message[],
   sessionMeta?: Record<string, unknown>,
   sessionName?: string,

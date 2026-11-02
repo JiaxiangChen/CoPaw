@@ -6,7 +6,7 @@ import "./i18n";
 // 确保不遗漏父窗口发送的任何初始化消息 (USER_DATA)
 import {
   initIframeMessageListener,
-  resetIframeContextForStandalone,
+  resetIframeContextForEntry,
   handleUrlOriginParam,
   fetchAndSetUserName,
   isWealthMessageEntry,
@@ -42,10 +42,11 @@ async function initializeAllowedApp(
     window.location.search,
   );
 
+  // 先清理旧入口，再接收本次页面的消息，避免等待 token 后误清新上下文。
+  resetIframeContextForEntry();
   // 初始化 iframe 消息监听器（在 React 渲染之前）
   // 确保不遗漏父窗口发送的任何消息
   initIframeMessageListener();
-  resetIframeContextForStandalone();
 
   // 在需要鉴权的初始化逻辑之前获取 token，同步等待完成
   if (isExternalTokenEnabled()) {

@@ -409,6 +409,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ### 财富工作台多渠道 iframe 消息入口
 
+- 同一父页面标签页内，同源 CoPaw iframe 会共用 `sessionStorage["swe-iframe-context"]`。排查菜单 A 的 USER_DATA 参数残留到菜单 B 时，先检查 B 是否走 `origin=Y`：`main.tsx` 必须在注册消息监听器前调用 `resetIframeContextForEntry()`，通过 `clearContext()` 重置内存及持久化字段，再应用当前 URL/Cookie 身份与来源；即使用户相同或身份 Cookie 缺失，也不能沿用旧消息中的权限、自定义请求头、显示开关及来源。不能在等待外部 token 后的 `handleUrlOriginParam()` 中再次清理，否则会误删本次页面已收到的新消息；来源继续遵守 URL > 本次消息 > origin 默认值的优先级。清理只发生在入口初始化，内部路由导航保留当前上下文。回归入口：`console/src/utils/iframeMessage.test.ts`。
 - 父应用 iframe 地址为 `/wealth/board` 或 `/wealth/create`（部署在 `/console` 下时加此前缀），不带 `origin=Y`。父应用在每次 iframe `load` 后发送 `USER_DATA`，使用子页面的明确 origin 作为 `targetOrigin`；不新增 READY 握手。
 - 消息 `data.source` 必须为非空渠道字符串（本次为 `RCZT`，后续渠道直接传自身标识，无需修改子页面），`sapId`（兼容 `userId`）传非空字符串以保留前导零；传入 `userName`、`bbkId`（兼容 `bbkOrgId`）、`positionId` 以及业务需要的 `orgCode`、`subBranchId`、`orgLvl`、`sysId`。岗位缺失或未识别仍按原权限矩阵显示暂无访问权限。
 - `hideLogo: true`（兼容字符串 `"true"`）隐藏头部、播报与侧栏，内部导航持续生效，不补 URL 参数。身份和布局由消息提供；接口鉴权仍使用现有登录 Cookie，消息传参并不替代登录态。
@@ -439,3 +440,14 @@ frame.addEventListener("load", () => {
 frame.src = `${childOrigin}/wealth/board`;
 document.body.appendChild(frame);
 ```
+
+## 运营看板用户详情聊天历史
+
+- 列表与统计来自 Monitor `/api/monitor/tracing/sessions`，不以会话存档作为统计来源；日期/分行/资源筛选决定入选会话，不截断已选会话的聊天正文。
+- 目标用户映射、详情、压缩归档入口在 `src/swe/app/routers/tracing.py`：`GET /api/tracing/chats?user_id=…`、`GET /api/tracing/chats/{chat_id}?user_id=…`、`GET /api/tracing/chats/{chat_id}/history?user_id=…&before=…&limit=20`。详情共用 Chat 的 `_build_chat_history(non_blocking=True)`，归档共用 `_archive_page`；不要改用当前用户的 `/api/chats` 接口。
+- 权限沿用外部平台/网关现有运营看板访问控制，SWE 不新增角色或分行授权。部署须让新增归档路径经过与看板详情相同的规则；`user_id` 用于目标工作区定位，详情/归档还校验聊天归属及已有 source/Agent 元信息。
+- 前端入口为 `console/src/pages/Analytics/BusinessOverview/components/UserDetailModal/ReadOnlySessionChat.tsx`。顶部“加载更早历史”按页读取，保留阅读位置；空当前快照但有归档时仍可加载。请求/分页状态按 source、目标 user、Agent、session/chat 隔离，只读，不订阅运行中流。
+- 初始快照经 Chat 转换后必须由看板调用方补 `history: true`（含归档边界卡片），再交给 `mergeHistoryResponses` 合并。公共转换函数不自动加标记；遗漏时，跨压缩边界的一次回答会拆成两张卡。回归见 `ReadOnlySessionChat.archive.test.tsx`，使用真实共享转换/合并函数覆盖归档工具调用与当前工具结果的拼接。
+- 计划历史只读展示：看板回答 renderer 保留原始 planReviewCard 供 PlanReviewSnapshot 展示，但传给 RuntimeResponseCard 的副本移除该字段以禁用交互。独立 PlanInteraction 保持为空避免双份计划；不得修改共享组件或把计划摘要/步骤一并隐藏。当前消息、归档页、任务分组均走该局部配置。
+- “有会话卡片但无正文”先核对 Monitor 的 session_id 是否存在对应 ChatSpec，再核对目标 source/user/Agent 工作区和共享存储。映射缺失、详情失败和正常空内容使用不同反馈；归档失败保留当前消息和游标，可重试。Kubernetes 各实例必须访问同一持久化会话与 dialog 存档；已清理的文件不能通过本接口恢复。
+- 回归：`tests/unit/routers/test_tracing_chat_history_parity.py` 固定存档对比两个入口的普通/任务/失败/v3 分轮消息和连续归档页；前端 `ReadOnlySessionChat.test.tsx` 覆盖归档、重试、去重和切换隔离。

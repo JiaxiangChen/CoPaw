@@ -65,3 +65,9 @@ describe("tracingApi", () => {
     expect(tracingApi).not.toHaveProperty("getGrowthStats");
   });
 });
+
+it("loads target-user archives through the analytics route with encoded parameters", async () => {
+  mocks.request.mockResolvedValue({ messages: [] });
+  await tracingApi.getUserChatHistory("target user", "chat/id", "cursor+1", 20);
+  expect(mocks.request).toHaveBeenLastCalledWith("/tracing/chats/chat%2Fid/history?user_id=target+user&limit=20&before=cursor%2B1");
+});

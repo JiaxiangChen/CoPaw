@@ -4,7 +4,7 @@ import {
   fetchAndSetUserName,
   initIframeMessageListener,
   handleUrlOriginParam,
-  resetIframeContextForStandalone,
+  resetIframeContextForEntry,
   isWealthMessageEntry,
   waitForWealthUserData,
 } from "./iframeMessage";
@@ -363,7 +363,7 @@ describe("fetchAndSetUserName", () => {
       authHeaders: [{ headerName: "token", headerValue: "old" }],
     });
 
-    resetIframeContextForStandalone();
+    resetIframeContextForEntry();
 
     expect(useIframeStore.getState().userId).toBeNull();
     expect(useIframeStore.getState().userName).toBeNull();
@@ -397,6 +397,115 @@ describe("fetchAndSetUserName", () => {
     await dispatchUserDataMessage({});
 
     expect(useIframeStore.getState().skipPreviewTracking).toBe(false);
+  });
+
+  it.each([
+    ["/chat?origin=Y", "CLAW", "WP"],
+    ["/chat?origin=Y&hideLogo=true", "CLAW", "WP"],
+    [
+      "/wealth/board?origin=Y&hideLogo=true&pageSource=MENU_B&platformSource=WEB",
+      "MENU_B",
+      "WEB",
+    ],
+  ])("%s 不继承消息菜单的持久化上下文", async (path, pageSource, platformSource) => {
+    await dispatchUserDataMessage({
+      clawName: "菜单 A",
+      space: "space-a",
+      source: "CHANNEL_A",
+      manager: true,
+      isSuperManager: true,
+      hideChat: true,
+      skipPreviewTracking: true,
+      pageSource: "MENU_A",
+      platformSource: "PLATFORM_A",
+      auth: [{ headerName: "token", headerValue: "menu-a-token" }],
+    });
+    cleanupIframeMessageListener();
+    await useIframeStore.persist.rehydrate();
+    expect(useIframeStore.getState().authHeaders).not.toEqual([]);
+
+    window.history.pushState({}, "", path);
+    // 同一用户切换菜单也必须重建上下文，不能只按 userId 判断。
+    document.cookie = "userid=80000001; path=/";
+    document.cookie = "vbbk=200; path=/";
+    resetIframeContextForEntry();
+    initIframeMessageListener();
+    await handleUrlOriginParam();
+
+    const expected = {
+      userId: "80000001",
+      userName: null,
+      bbk: "200",
+      source: "RMASSIST",
+      clawName: null,
+      space: null,
+      authHeaders: [],
+      parentOrigin: null,
+      manager: false,
+      isSuperManager: false,
+      hideChat: false,
+      skipPreviewTracking: false,
+      pageSource,
+      platformSource,
+    };
+    expect(useIframeStore.getState()).toMatchObject({
+      ...expected,
+      initialized: true,
+      isOriginY: true,
+      hideMenu: true,
+    });
+    expect(
+      JSON.parse(sessionStorage.getItem("swe-iframe-context") || "null").state,
+    ).toMatchObject(expected);
+  });
+
+  it("origin=Y 缺少身份 Cookie 时不回退到消息菜单的旧身份", async () => {
+    await dispatchUserDataMessage({ source: "CHANNEL_A", manager: true });
+    cleanupIframeMessageListener();
+    window.history.pushState({}, "", "/chat?origin=Y&hideLogo=true");
+
+    resetIframeContextForEntry();
+    initIframeMessageListener();
+    await handleUrlOriginParam();
+
+    expect(useIframeStore.getState()).toMatchObject({
+      userId: null,
+      userName: null,
+      source: null,
+      authHeaders: [],
+      manager: false,
+      initialized: false,
+      isOriginY: true,
+    });
+  });
+
+  it.each([
+    ["", "MENU_B", "WEB"],
+    ["&pageSource=URL_B&platformSource=URL_WEB", "URL_B", "URL_WEB"],
+  ])("origin=Y 保留本次加载期间收到的新消息并遵守来源优先级：%s", async (query, pageSource, platformSource) => {
+    window.history.pushState({}, "", `/chat?origin=Y&hideLogo=true${query}`);
+    document.cookie = "userid=80000001; path=/";
+    resetIframeContextForEntry();
+    initIframeMessageListener();
+
+    // 模拟注册监听器后、等待外部 token 期间收到当前菜单的 USER_DATA。
+    await dispatchUserDataMessage({
+      source: "RMASSIST",
+      pageSource: "MENU_B",
+      platformSource: "WEB",
+      auth: [{ headerName: "token", headerValue: "menu-b-token" }],
+    });
+    await handleUrlOriginParam();
+
+    expect(useIframeStore.getState()).toMatchObject({
+      userId: "80000001",
+      isOriginY: true,
+      pageSource,
+      platformSource,
+      authHeaders: expect.arrayContaining([
+        { headerName: "token", headerValue: "menu-b-token" },
+      ]),
+    });
   });
 
   it("origin=Y 切换 userId 时清空旧 userName", async () => {
