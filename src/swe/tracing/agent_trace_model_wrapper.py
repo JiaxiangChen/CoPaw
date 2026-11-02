@@ -40,7 +40,7 @@ class AgentTraceModelWrapper:
             write_payload(
                 capture.span,
                 "cmb.input.arguments",
-                project_chat_input(messages, tools, choice),
+                project_chat_input(messages[-1:], tools, choice),
             )
         except Exception:
             logger.warning("Agent chat input projection failed", exc_info=True)

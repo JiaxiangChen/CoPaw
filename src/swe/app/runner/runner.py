@@ -151,7 +151,7 @@ from ...tracing.agent_trace_sdk import (
     global_tracer,
     use_b3_trace_context,
 )
-from ...tracing.agent_trace_capture import TurnCapture
+from ...tracing.agent_trace_capture import TurnCapture, turn_capture_scope
 from ...tracing.models import TraceStatus
 from ...config.context import (
     get_current_passthrough_headers,
@@ -6626,25 +6626,26 @@ class AgentRunner(Runner):
                         context.query or "",
                     )
                 capture = TurnCapture(span, msgs)
-                status = "completed"
-                try:
-                    async for msg, last in self._stream_query_frames(
-                        msgs,
-                        request=request,
-                        query=context.query,
-                        session_id=context.session_id,
-                        user_id=context.user_id,
-                    ):
-                        capture.observe(msg, last)
-                        yield msg, last
-                except (asyncio.CancelledError, GeneratorExit):
-                    status = "cancelled"
-                    raise
-                except Exception:
-                    status = "failed"
-                    raise
-                finally:
-                    capture.finish(status)
+                with turn_capture_scope(capture):
+                    status = "completed"
+                    try:
+                        async for msg, last in self._stream_query_frames(
+                            msgs,
+                            request=request,
+                            query=context.query,
+                            session_id=context.session_id,
+                            user_id=context.user_id,
+                        ):
+                            capture.observe(msg, last)
+                            yield msg, last
+                    except (asyncio.CancelledError, GeneratorExit):
+                        status = "cancelled"
+                        raise
+                    except Exception:
+                        status = "failed"
+                        raise
+                    finally:
+                        capture.finish(status)
 
     async def _settle_query_handler_outcome(
         self,
