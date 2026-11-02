@@ -34,6 +34,28 @@ Java 实现及实际网关部署不在本仓库，当前验证为前端契约测
 
 Java 必须将这些身份字段与可信登录态校验一致；前端传入 role、sapId、sourceLabel 不构成后端授权。方案中 sourceId 虽为可选，涉及隔离和后台任务时仍应保留。
 
+### 运维模式的前端请求差异（2026-10-30）
+
+本次仅前端实施，Java 支持与授权由服务端同事确认。普通模式仍沿用上面的取值及请求体。真实分行 `V00001`、用户 `80008888` 在头部可见时可开启运维模式，选项读取 `BBK_ID_MAP` 并排除总行 `100`；不新增服务接口。
+
+入口名单从 `env-grey-control.js` 的 `operationsUsersByBranch` 读取，初始值为 `{ V00001: ["80008888"] }`。可追加字符串编号，修改部署文件并重新加载页面生效；缺失或非法配置不开放入口，无代码默认名单，不支持通配符。该配置仅影响前端入口，服务端白名单与授权仍需独立维护。
+
+| 项目 | 运维模式选定分行后的取值 |
+|---|---|
+| 鉴权、Cookie 及通用上下文请求头 | 保留真实登录态，包括真实 X-Bbk-Id/X-Position-Id；不伪造目标分行登录 |
+| GET `/zt/wealth/plans` Query | sapId=真实用户、role=middle、bbkId=目标分行 |
+| POST/PUT 规划 JSON | sapId/creatorName=真实操作人；role=middle；bbkId/bbkOrgId=目标分行根；sourceLabel=分行关注；sourceId/agentId 保留原值 |
+| DELETE 规划 JSON | `{sapId: "80008888", role: "middle", bbkId: "所选分行编码"}`；普通模式仍仅传 sapId |
+| 场景池 JSON | bbkId=目标分行，category 沿用原值 |
+| 机构树 JSON | 根 mmOrgCode=目标分行、mmOrgLvl=登录上下文 orgLvl、sysId 沿用真实上下文；选择下级后使用返回条目的编码与级别 |
+| 人员 JSON | bbkOrgId=目标分行、mmOrgCode/mmOrgLvl=所选机构编码与级别 |
+| 分发目标 | targets[].sapId/name/bbkId/bbkOrgId 沿用所选客户经理返回值 |
+| 统计 | 沿用所选分行规划的 planIds，不增加身份覆盖字段 |
+
+Java 必须通过可信登录态联合校验白名单、目标分行与 role，保留真实创建人并按目标分行存储、分发。返回的 `editable=true` 必须仅表示当前真实操作人可管理的本人代建规划，PUT/DELETE 再次校验归属和业务范围；他人规划即使可见也不能被修改或删除。前端对运维规划缺失的 editable 按只读处理。
+
+机构接口对接方还需确认测试分行用户的 orgLvl 可用于目标分行根查询，以及 bbkOrgId 使用目标分行编码符合其机构模型。前端沿用现有中台参数约定，没有编造机构级别。未经外部服务确认及联调，不能将前端验证通过当作跨分行生产授权已完成。
+
 ## 字段及错误处理
 
 Java 入参/返回使用驼峰：

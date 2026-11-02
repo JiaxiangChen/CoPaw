@@ -20,6 +20,12 @@ import Create from "./Create";
 import Tasks from "./Tasks";
 import { useVisibilityRefresh } from "./useVisibilityRefresh";
 import { useIframeStore } from "@/stores/iframeStore";
+import {
+  canUseOperations,
+  operationsIdentity,
+  useWealthOperations,
+} from "./operations";
+import operationStyles from "./components/OperationsControl.module.less";
 
 export default function WealthWorkbench() {
   useVisibilityRefresh();
@@ -46,6 +52,11 @@ export default function WealthWorkbench() {
   }, [entryHideLogo, hideHeader, searchParams, setSearchParams]);
   const initialized = useWealthStore((s) => s.initialized);
   const accountId = useWealthStore((s) => s.accountId);
+  const contextVersion = useWealthStore((s) => s.contextVersion);
+  const operationsEnabled = useWealthOperations((s) => s.enabled);
+  const operationsBranch = useWealthOperations((s) => s.branchId);
+  const identity = useIframeStore(operationsIdentity);
+  const setOperationsMode = useWealthStore((s) => s.setOperationsMode);
   const init = useWealthStore((s) => s.init);
   // 任务三页仅客户经理可访问（权限矩阵见 permissions.ts），直接输 URL 也重定向回看板
   const allowTasks = useCanAccess("tasks");
@@ -54,6 +65,25 @@ export default function WealthWorkbench() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    const operations = useWealthOperations.getState();
+    if (
+      operations.enabled &&
+      (hideHeader || !canUseOperations() || operations.identity !== identity)
+    ) {
+      void setOperationsMode(false, null, true).then(() => init());
+    }
+  }, [hideHeader, identity, init, operationsEnabled, setOperationsMode]);
+
+  useEffect(
+    () => () => {
+      if (useWealthOperations.getState().enabled) {
+        void useWealthStore.getState().setOperationsMode(false, null, true);
+      }
+    },
+    [],
+  );
 
   if (!initialized) {
     return <div className={styles.root} />;
@@ -64,6 +94,7 @@ export default function WealthWorkbench() {
     return (
       <div className={styles.root}>
         <IconDefs />
+        {!hideHeader && canUseOperations() && <Topbar />}
         <div className={styles.denied}>
           <Icon name="shield" className={styles.deniedIcon} />
           <div className={styles.deniedTitle}>暂无访问权限</div>
@@ -100,16 +131,26 @@ export default function WealthWorkbench() {
         />
       )}
       <main className={styles.main} id="main">
-        <div className={styles.page} key={accountId}>
-          <Routes>
-            <Route index element={<Navigate to="board" replace />} />
-            <Route path="board" element={<Board />} />
-            <Route path="create" element={<Create />} />
-            <Route path="today" element={taskRoute("today")} />
-            <Route path="pending" element={taskRoute("pending")} />
-            <Route path="done" element={taskRoute("done")} />
-            <Route path="*" element={<Navigate to="board" replace />} />
-          </Routes>
+        <div
+          className={styles.page}
+          key={`${accountId}-${contextVersion ?? 0}`}
+        >
+          {operationsEnabled && !operationsBranch ? (
+            <div className={operationStyles.empty} role="status">
+              <strong>运维模式已开启</strong>
+              请在右上角选择分行，随后可按分行中台流程创建和分发规划。
+            </div>
+          ) : (
+            <Routes>
+              <Route index element={<Navigate to="board" replace />} />
+              <Route path="board" element={<Board />} />
+              <Route path="create" element={<Create />} />
+              <Route path="today" element={taskRoute("today")} />
+              <Route path="pending" element={taskRoute("pending")} />
+              <Route path="done" element={taskRoute("done")} />
+              <Route path="*" element={<Navigate to="board" replace />} />
+            </Routes>
+          )}
         </div>
       </main>
       <DialogHost />

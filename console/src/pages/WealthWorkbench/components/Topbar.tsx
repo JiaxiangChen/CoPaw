@@ -8,6 +8,9 @@ import styles from "../index.module.less";
 import { getBbkDisplayName } from "@/constants/bbk";
 import { useIframeStore } from "@/stores/iframeStore";
 import { selectCurrentAccount, useWealthStore } from "../store";
+import { canUseOperations } from "../operations";
+import { OperationsControl } from "./OperationsControl";
+import operationStyles from "./OperationsControl.module.less";
 // import { useCanAccess } from "../store"; // 随通知入口一并注释
 // import { Icon } from "./Icon"; // 随通知入口一并注释
 
@@ -93,8 +96,15 @@ export function Topbar() {
           <strong>智拓</strong>
         </div>
       </div>
-      <div className={styles.brandtitle}>智能财富管理工作台</div>
+      <div
+        className={`${styles.brandtitle} ${
+          canUseOperations() ? operationStyles.compactTitle : ""
+        }`}
+      >
+        智能财富管理工作台
+      </div>
       <div className={styles.account}>
+        <OperationsControl />
         {/* 消息通知入口：原型示例、无真实接口，暂时隐藏；待接口确定后恢复
         <button
           className={`${styles.iconbtn} ${styles.bell}`}

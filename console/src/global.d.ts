@@ -16,6 +16,7 @@ declare global {
       responseFeedbackUserWhitelist?: string[];
       voiceRecorderUserWhitelist?: string[];
       directAccessUserWhitelist?: string[];
+      operationsUsersByBranch?: Record<string, readonly string[]>;
       chatSessionPageSize?: number | string;
     };
     __postMsgSwe__?: string;
