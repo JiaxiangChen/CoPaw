@@ -562,3 +562,110 @@ async def test_turn_snapshot_redacts_whole_patterns_before_truncation(
     assert "sensitive-material" not in output
     assert "opaqueValue" not in output
     assert "REDACTED" in output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "latest",
+    [
+        {"role": "user", "content": "latest question"},
+        {"role": "tool", "tool_call_id": "call-1", "content": "latest result"},
+        {"role": "system", "content": "latest hint"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "password=private-value"},
+                {"type": "image", "source": {"data": "PRIVATE_MEDIA"}},
+            ],
+        },
+        None,
+    ],
+)
+async def test_model_input_capture_keeps_only_latest_message(latest):
+    reset()
+    messages = (
+        [
+            {"role": "system", "content": "old system"},
+            {"role": "user", "content": "old question"},
+            latest,
+        ]
+        if latest is not None
+        else []
+    )
+    original = json.loads(json.dumps(messages))
+    calls = []
+
+    async def model(actual_messages, **kwargs):
+        calls.append(actual_messages)
+        return Msg("assistant", "done", "assistant")
+
+    async with global_tracer.start_as_current_span(
+        "chat",
+        operation_name="chat",
+    ):
+        with chat_capture_scope():
+            await AgentTraceModelWrapper(model)(
+                messages,
+                tools=[{"name": "lookup"}],
+                tool_choice="auto",
+            )
+    captured = json.loads(spans[0]["attributes"]["cmb.input.arguments"])
+    assert (
+        captured["messages"]
+        == project_chat_input(messages[-1:], [], None)["messages"]
+    )
+    assert captured["tools"] == [{"name": "lookup"}]
+    assert captured["tool_choice"] == "auto"
+    assert "old system" not in json.dumps(captured)
+    assert "old question" not in json.dumps(captured)
+    assert "private-value" not in json.dumps(captured)
+    assert "PRIVATE_MEDIA" not in json.dumps(captured)
+    assert messages == original
+    assert calls[0] is messages
+
+
+@pytest.mark.asyncio
+async def test_react_reasoning_captures_actual_formatted_latest_message():
+    from agentscope.agent import ReActAgent
+    from agentscope.formatter import OpenAIChatFormatter
+    from agentscope.model import ChatResponse
+
+    class Model:
+        stream = True
+
+        async def __call__(self, messages, **kwargs):
+            self.received = messages
+
+            async def stream():
+                yield ChatResponse(content=[{"type": "text", "text": "done"}])
+
+            return stream()
+
+    reset()
+    model = Model()
+    agent = ReActAgent(
+        name="agent",
+        sys_prompt="system instruction",
+        model=AgentTraceModelWrapper(model),
+        formatter=OpenAIChatFormatter(),
+    )
+    await agent.memory.add(Msg("user", "latest question", "user"))
+    async with global_tracer.start_as_current_span(
+        "chat",
+        operation_name="chat",
+    ):
+        with chat_capture_scope():
+            await agent._reasoning()
+    recorded = json.loads(spans[0]["attributes"]["cmb.input.arguments"])
+    assert len(model.received) >= 2
+    assert model.received[-1]["role"] == "user"
+    assert "latest question" in json.dumps(model.received[-1])
+    assert (
+        recorded["messages"]
+        == project_chat_input(
+            model.received[-1:],
+            [],
+            None,
+        )["messages"]
+    )
+    assert "latest question" in json.dumps(recorded["messages"])

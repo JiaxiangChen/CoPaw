@@ -32,3 +32,7 @@
 - retry 内捕获取消时先标记当前任务的整轮采集状态；即使异常被处理或转换，根输出仍为 cancelled / complete=false。ContextVar 作用域退出复位，子任务不能覆盖父任务状态。
 - 回归入口：tests/unit/tracing/test_agent_trace_capture.py 与 tests/unit/app/test_agent_trace_sdk.py，覆盖嵌套媒体、密钥截断边界、延迟投影、容量、可变消息快照和真实 retry 处理链路。
 - 本地 100 帧累计至 500KB 的观察阶段约 1ms，结束投影约 99ms（仅作本机对比，不作为稳定性能阈值）。真实 SDK 验收要求不变。
+
+## 模型输入最新消息
+
+chat CLIENT Span 的 cmb.input.arguments.messages 仅包含实际模型调用 messages 序列的最后一条；空序列记录空数组。最新消息可能是工具结果或系统提示，不按角色过滤。tools 和 tool_choice 继续记录，消息仍经过脱敏、媒体过滤和总预算限制；业务模型仍接收完整输入。agent.run 的输入按整轮消息记录。
