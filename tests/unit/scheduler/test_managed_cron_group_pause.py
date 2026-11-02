@@ -49,6 +49,62 @@ async def test_group_pause_is_durable_before_platform_calls(mode_setup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("child_already_paused", [False, True])
+async def test_group_pause_has_unique_sync_ids_and_reuses_original_items(
+    mode_setup,
+    child_already_paused,
+):
+    from scheduler.app.services.cron.managed.pause_group import (
+        PauseGroupService,
+    )
+
+    db, caller, management = mode_setup
+    root = await group(mode_setup)
+    service = PauseGroupService(db, management.platform)
+    if child_already_paused:
+        child = db.conn.execute(
+            "SELECT * FROM swe_cron_jobs_v2 WHERE parent_job_id=? LIMIT 1",
+            (root,),
+        ).fetchone()
+        manager = replace(
+            caller,
+            tenant_id=child["tenant_id"],
+            is_manager=True,
+        )
+        operation = await service.submit(
+            manager,
+            child["job_id"],
+            {
+                "request_id": "prior-child-pause",
+                "expected_definition_version": 1,
+            },
+        )
+        await service.process(operation["operation_id"])
+    command = {"request_id": "pause-tree", "expected_definition_version": 1}
+    operation = await service.submit(caller, root, command)
+    query = (
+        "SELECT tenant_id,source_id,agent_id,job_id,sync_operation_id "
+        "FROM swe_cron_managed_mode_items WHERE operation_id=? ORDER BY index_no"
+    )
+    items = [
+        tuple(row)
+        for row in db.conn.execute(query, (operation["operation_id"],))
+    ]
+    assert len(items) > 1
+    assert len({row[-1] for row in items}) == len(items)
+    replay = await service.submit(caller, root, command)
+    assert replay["operation_id"] == operation["operation_id"]
+    assert items == [
+        tuple(row)
+        for row in db.conn.execute(query, (operation["operation_id"],))
+    ]
+    assert all(
+        not row[0]
+        for row in db.conn.execute("SELECT enabled FROM swe_cron_jobs_v2")
+    )
+
+
+@pytest.mark.asyncio
 async def test_pause_batch_closes_shared_entry_and_failure_resumes_only_unfinished(
     mode_setup,
 ):
@@ -89,6 +145,14 @@ async def test_pause_batch_closes_shared_entry_and_failure_resumes_only_unfinish
             "SELECT dispatch_state FROM swe_cron_job_states",
         )
     } == {"batch_paused"}
+    query = (
+        "SELECT index_no,sync_operation_id FROM swe_cron_managed_mode_items "
+        "WHERE operation_id=? ORDER BY index_no"
+    )
+    sync_ids = [
+        tuple(row)
+        for row in db.conn.execute(query, (operation["operation_id"],))
+    ]
     management.platform.fail_target = external
     await service.process(operation["operation_id"])
     assert (await service.get(caller, root, operation["operation_id"]))[
@@ -101,6 +165,10 @@ async def test_pause_batch_closes_shared_entry_and_failure_resumes_only_unfinish
     assert (await service.get(caller, root, operation["operation_id"]))[
         "status"
     ] == "completed"
+    assert sync_ids == [
+        tuple(row)
+        for row in db.conn.execute(query, (operation["operation_id"],))
+    ]
 
 
 @pytest.mark.asyncio

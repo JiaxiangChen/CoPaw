@@ -3,6 +3,7 @@
 
 import json
 import logging
+from uuid import NAMESPACE_URL, uuid5
 
 from .controls import _journal
 from .date_ranges import _lock_definition
@@ -148,7 +149,12 @@ class PauseGroupService:
                 "index_no": index,
                 **dict(zip(IDENTITY_FIELDS, key)),
                 "expected_definition_version": row["definition_version"],
-                "sync_operation_id": operation["operation_id"],
+                "sync_operation_id": str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        canonical([operation["operation_id"], key]),
+                    ),
+                ),
                 "status": "pending",
                 "error_code": None,
             },

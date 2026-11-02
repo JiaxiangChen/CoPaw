@@ -31,7 +31,8 @@ class ModeDatabase(DistributionDatabase):
                 tenant_id TEXT, source_id TEXT, agent_id TEXT, job_id TEXT,
                 expected_definition_version INTEGER, sync_operation_id TEXT,
                 status TEXT, error_code TEXT,
-                PRIMARY KEY (operation_id, index_no)
+                PRIMARY KEY (operation_id, index_no),
+                UNIQUE (sync_operation_id)
             );
         """)
 
