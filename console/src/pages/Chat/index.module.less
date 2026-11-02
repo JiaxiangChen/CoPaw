@@ -55,9 +55,14 @@
       display: none;
     }
   }
+}
 
-  /* Custom scrollbar — thin, rounded, always visible */
+.chatMessagesArea,
+.chatMessagesArea
+  :global(.swe-chat-anywhere-message-list .swe-bubble-list-scroll) {
+  /* Override the runtime's hidden WebKit scrollbar on Chromium 108 too. */
   &::-webkit-scrollbar {
+    display: block;
     width: 4px;
   }
 
@@ -99,7 +104,8 @@
 }
 
 /* Sharing is a read-only selection state; the composer is restored on exit. */
-:global(.swe-chat-share-active) :global([class*="-chat-anywhere-input-wrapper"]) {
+:global(.swe-chat-share-active)
+  :global([class*="-chat-anywhere-input-wrapper"]) {
   display: none !important;
 }
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from .agent_trace_sdk import get_current_span
 from .chat_projection import chat_limit, project_chat_output, project_message
+from .sanitizer import _redact_trace_text
 
 logger = logging.getLogger(__name__)
 _current: ContextVar[ChatCapture | None] = ContextVar(
@@ -51,26 +52,60 @@ def _snapshot_value(value, budget, depth=0):
         budget[1] = True
         return None
     if isinstance(value, str):
-        encoded = value.encode("utf-8")
-        if len(encoded) > budget[0]:
-            budget[1] = True
-            encoded = encoded[: budget[0]]
-        budget[0] -= len(encoded)
-        return encoded.decode("utf-8", errors="ignore")
+        # Immutable strings need no copy. Redact the complete value before
+        # cutting it, or exact secrets/patterns could become unrecognizable.
+        if len(value) > budget[0] // 4:
+            encoded = value.encode("utf-8")
+            if len(encoded) > budget[0]:
+                encoded = _redact_trace_text(value).encode("utf-8")
+                if len(encoded) > budget[0]:
+                    budget[1] = True
+                    encoded = encoded[: budget[0]]
+                value = encoded.decode("utf-8", errors="ignore")
+            budget[0] -= len(encoded)
+        else:
+            budget[0] -= len(value.encode("utf-8"))
+        return value
     budget[0] -= 16
     if isinstance(value, dict):
-        return {
-            str(key): _snapshot_value(item, budget, depth + 1)
-            for key, item in value.items()
-            if budget[0] > 0
-        }
+        result = {}
+        for key, item in value.items():
+            if budget[0] <= 0:
+                budget[1] = True
+                break
+            key = _snapshot_value(str(key), budget, depth + 1)
+            result[key] = _snapshot_value(item, budget, depth + 1)
+        return result
     if isinstance(value, (list, tuple)):
-        return [
-            _snapshot_value(item, budget, depth + 1)
-            for item in value
-            if budget[0] > 0
-        ]
+        result = []
+        for item in value:
+            if budget[0] <= 0:
+                budget[1] = True
+                break
+            result.append(_snapshot_value(item, budget, depth + 1))
+        return result
     return value if isinstance(value, (int, float, bool, type(None))) else None
+
+
+_turn_capture: ContextVar[tuple[Any, Any] | None] = ContextVar(
+    "agent_turn_capture",
+    default=None,
+)
+
+
+@contextmanager
+def turn_capture_scope(capture):
+    token = _turn_capture.set((asyncio.current_task(), capture))
+    try:
+        yield
+    finally:
+        _turn_capture.reset(token)
+
+
+def mark_turn_cancelled():
+    state = _turn_capture.get()
+    if state is not None and state[0] is asyncio.current_task():
+        state[1].cancelled = True
 
 
 @dataclass
@@ -139,6 +174,9 @@ class TurnCapture:
         self.span = span
         self.messages = {}
         self.truncated = False
+        self.cancelled = False
+        self.snapshot_sizes = {}
+        self.retained_bytes = 0
         self.enabled = span is not None and getattr(
             span,
             "is_recording",
@@ -170,15 +208,21 @@ class TurnCapture:
         ):
             return
         key = getattr(message, "id", None) or "current"
-        self.messages[key] = project_chat_output(message)
-        # A full serialized turn budget also bounds retained snapshots.
-        from .chat_projection import bounded_payload
-
-        bounded = bounded_payload({"messages": list(self.messages.values())})
-        self.truncated = self.truncated or bounded["capture"]["truncated"]
-        retained = bounded.get("messages", [])
-        keys = list(self.messages)[-len(retained) :] if retained else []
-        self.messages = dict(zip(keys, retained))
+        limit = chat_limit()
+        budget = [limit, False]
+        snapshot = _snapshot_value(project_message(message), budget)
+        size = limit - budget[0]
+        self.retained_bytes -= self.snapshot_sizes.pop(key, 0)
+        self.messages[key] = snapshot
+        self.snapshot_sizes[key] = size
+        self.retained_bytes += size
+        self.truncated |= budget[1]
+        # Account only for the replaced snapshot; never re-project the turn.
+        while self.retained_bytes > limit and len(self.messages) > 1:
+            oldest = next(k for k in self.messages if k != key)
+            del self.messages[oldest]
+            self.retained_bytes -= self.snapshot_sizes.pop(oldest)
+            self.truncated = True
 
     @capture_safely
     def finish(self, status):
@@ -186,10 +230,15 @@ class TurnCapture:
             return
         from .chat_projection import bounded_payload
 
+        if self.cancelled:
+            status = "cancelled"
         payload = bounded_payload(
             {
                 "schema_version": 2,
-                "messages": list(self.messages.values()),
+                "messages": [
+                    project_chat_output(message, status)
+                    for message in self.messages.values()
+                ],
                 "status": status,
                 "complete": status == "completed",
             },

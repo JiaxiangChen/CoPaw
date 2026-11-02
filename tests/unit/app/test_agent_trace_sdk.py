@@ -390,3 +390,81 @@ async def test_root_records_standard_input_and_output(tmp_path):
     output = json.loads(attrs["cmb.output.arguments"])
     assert output["messages"][0]["content"][0]["text"] == "done"
     assert output["status"] == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler_raises", [False, True])
+async def test_root_capture_records_settled_retry_cancellation(
+    tmp_path,
+    handler_raises,
+):
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+    from swe.app.runner.query_attempt import _stream_retry_attempt
+
+    class CancelledOwner(_AttemptOwner):
+        async def _stream_single_query_attempt(self, **kwargs):
+            yield Msg("assistant", "partial answer", "assistant"), False
+            raise asyncio.CancelledError()
+
+    owner = CancelledOwner()
+    owner._settle_stopped_turn = AsyncMock()
+    owner._handle_query_cancelled = AsyncMock(
+        side_effect=(
+            RuntimeError("cancelled by handler") if handler_raises else None
+        ),
+    )
+
+    class CancelledAdapter:
+        async def stream(self, invocation):
+            async for message, last in _stream_retry_attempt(
+                owner,
+                retry_attempt=0,
+                max_retry_attempts=1,
+                max_retries=0,
+                retry_state=owner._new_retry_state(),
+                attempt_state=owner._new_query_attempt_state(),
+                attempt_input=SimpleNamespace(),
+                outcome=SimpleNamespace(),
+                trace_id=None,
+                request=request,
+                session_execution=None,
+                session_id="session-1",
+                backoff_base=0,
+                backoff_cap=0,
+            ):
+                yield QueryFrame(message=message, last=last)
+
+    reset()
+    runner = AgentRunner(agent_id="agent-1", workspace_dir=tmp_path)
+    runner._query_execution = QueryExecution(CancelledAdapter())
+    request = SimpleNamespace(
+        session_id="session-1",
+        user_id="user-1",
+        channel="console",
+        channel_meta={
+            "answer_turn_identity": TurnIdentity.create(
+                chat_id="chat-1",
+                msgid="msg-1",
+            ),
+        },
+    )
+    context = runner._prepare_query_handler_context([], request)
+    frames = []
+    try:
+        async for frame in runner._stream_query_handler_frames(
+            [],
+            request,
+            context,
+        ):
+            frames.append(frame)
+    except RuntimeError:
+        assert handler_raises
+    assert len(frames) == 1
+    owner._settle_stopped_turn.assert_awaited_once()
+    root = next(span for span in spans if span["name"] == "agent.run")
+    output = json.loads(root["attributes"]["cmb.output.arguments"])
+    assert output["status"] == "cancelled"
+    assert output["complete"] is False
+    assert output["messages"][0]["text"] == "partial answer"

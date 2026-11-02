@@ -18,7 +18,10 @@ export default createGlobalStyle`
   flex-direction: column;
   padding: ${DESIGN_TOKENS.panelPadding}px;
   animation: panelSlideIn 0.15s ease-out;
+}
 
+.expandable-panel,
+.expandable-panel-content {
   &::-webkit-scrollbar {
     width: 4px;
   }
