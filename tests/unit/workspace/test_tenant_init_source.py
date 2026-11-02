@@ -573,6 +573,36 @@ class TestTenantInitSourceStore:
         assert result == []
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("bbk_id", [None, "bbk-a", "", "bbk'quoted"])
+    @pytest.mark.parametrize("include_templates", [False, True])
+    async def test_get_by_source_filters_bbk_in_sql(
+        self,
+        bbk_id,
+        include_templates,
+    ):
+        mock_db = MagicMock()
+        mock_db.is_connected = True
+        rows = [{"tenant_id": "tenant-a", "bbk_id": bbk_id}]
+        mock_db.fetch_all = AsyncMock(return_value=rows)
+        store = TenantInitSourceStore(db=mock_db)
+
+        result = await store.get_by_source(
+            "ruice",
+            include_templates=include_templates,
+            bbk_id=bbk_id,
+        )
+
+        query, params = mock_db.fetch_all.call_args.args
+        assert "WHERE source_id = %s " in query
+        assert ("AND bbk_id = %s " in query) == (bbk_id is not None)
+        assert params == (("ruice",) if bbk_id is None else ("ruice", bbk_id))
+        assert ("tenant_type != 'template'" in query) == (
+            not include_templates
+        )
+        assert query.endswith("ORDER BY created_at")
+        assert result == rows
+
+    @pytest.mark.asyncio
     async def test_get_all_returns_empty_without_db(self):
         """get_all returns empty when no database."""
         store = TenantInitSourceStore(db=None)

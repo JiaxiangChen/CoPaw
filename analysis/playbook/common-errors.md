@@ -12,6 +12,12 @@
 
 本文档只收录仓库中已经出现过、且有明确入口可追的高频报错。
 
+## 移除财富规划时提示 plan not found
+
+- 规划已被删除但看板仍保留旧数据时，删除请求可能返回 HTTP 404 与 `detail: "plan not found"`，或业务响应 `code: 404, message: "plan not found"`。
+- 前端 `console/src/pages/WealthWorkbench/api.ts` 的 `removePlan()` 仅按错误文案精确匹配 `plan not found`，不限制 HTTP 状态码或业务码，并翻译为「该规划已被删除，请刷新页面后重试」，看板显示「移除失败：该规划已被删除，请刷新页面后重试」。其他错误保留原文，不自动刷新或移除本地规划。
+- 回归入口：`console/src/pages/WealthWorkbench/api.http-errors.test.ts`；后端接口无需调整。
+
 ## SSE 客户端断连后订阅未释放
 
 - 症状：协商式 SSE 响应返回后，`TaskTracker._runs[chat_id].queues`
@@ -839,3 +845,25 @@
 - **周期自定义后遮挡频率列**：App 的 ConfigProvider 使用 `prefixCls="swe"`，只匹配 `.ant-picker` 的日期框尺寸规则在正式页面不会生效，日期框会越过周期列边界。通过 `.taskDatePicker` 自有类名控制宽度、高度和输入字体，避免依赖组件前缀；验证同时覆盖 `swe` 与 `ant`，并使用正式 ConfigProvider、主题和全局样式。只挂裸页面的模拟验证不能代表正式尺寸。
 - **其他检查**：顶栏和 Toast 的 inset 改用常规定位；焦点提示改用 :focus；min-inline-size 和 border-block-color 改用常规宽度及上下边框。`clamp()`、普通 Grid 已兼容 Chromium 80，保留；Flex gap 在 80–83 不支持，按用户确认暂不整改。Popover 和请求取消 API 已有能力检测或兼容处理。
 - **验证**：普通/自定义周期、多条不同排程、长场景名、客户数、排序、删除、空状态，及 1280、1440、1920 宽度与头部隐藏场景。真实内核版本和极速/兼容模式仍需在目标环境确认；仅修改 User-Agent 不能模拟 CSS 支持能力。完整边界见 [财富工作台兼容性记录](../../console/src/pages/WealthWorkbench/COMPATIBILITY.md)。
+
+## 客户名单调整列顺序后，右侧固定列互相遮挡
+
+- **现象**：表头和数据顺序已调整，但横向滚动时“最近接触时间”遮住“经营方案”，或经营方案按钮与执行按钮重叠。
+- **原因**：Tasks 表格的右侧列使用 `position: sticky`，DOM 顺序变化后仍保留旧的 `right` 偏移。
+- **处理**：当前非已完成名单右侧依次为最近接触时间、经营方案、执行。执行列 `right: 0`；经营方案列 `right: var(--execution-width)`，固定宽度为 `--scheme-width: 120px`；最近接触时间列的偏移为两个操作列宽度之和。表头与单元格同步移动，已完成名单的触达方式列不随经营方案移动。
+- **验证**：检查今日任务经营/客户视角和待触达名单的表头、数据、按钮对应关系；在1920、1440、1280px下将表格横向滚动到两端，确认固定列边界不重叠，方案弹窗仍能打开。
+
+## 客户指标取消百分比列宽后，指标挤成单列
+
+- **原因**：`customerMetrics` 曾使用 `contain: inline-size`，阻止指标内容参与表格的自动列宽计算；单独把26%改为auto会让多指标和单指标使用相同的最小尺寸提示。
+- **处理**：客户指标列使用auto列宽，保留84px的最低可读宽度；取消区域的inline-size隔离，内部改为可换行Flex，指标块保持125px，区域上限395px。内容数量参与表格的固有尺寸计算，长文字仍在指标块内省略并通过Tooltip显示。
+- **验证**：检查空指标、1项、6项、超过6项、超长标签与数值；覆盖今日、待触达、已完成及1920/1440/1280宽度，确认展开收起可用、指标不超出单元格、经营方案与执行操作不重叠。
+
+
+## 财富工作台洞察 / 电访没有文件地址时，点击上报返回 422
+
+- **来源**：点击接口最初为 HTML 文件预览设计，历史版本要求 `file_url` 非空；工作台按钮没有关联文件。
+- **当前契约**：`HtmlPreviewClickEventCreate.file_url` 可省略，默认 `""`；数据库仍保存非 NULL 的空字符串，不需要表结构迁移。不接受 JSON null，不应使用空格或虚构页面地址绕过校验。名单快照仍要求真实的非空文件地址。
+- **统计边界**：无 `file_url` 且无 `list_key` 的点击保留在事件明细、按钮汇总和客户点击统计中；名单点击汇总和名单客户并集排除该类事件。已有 URL 或显式 `list_key` 的事件沿用原分组规则。
+- **前端**：工作台只上报洞察 `insight`、电访 `phone`，不传 `file_url`；客户 ID 使用 `custUid`，来源为 `WP_AGENT_WORKSPACE_TASK_LIST` / `WP`，运行时 API 补齐操作者与机构信息。
+- **回归入口**：`tests/unit/app/test_html_preview_clicks.py`、`console/src/pages/WealthWorkbench/Tasks/groupTables.test.tsx`、`console/src/api/modules/htmlPreviewEvents.test.ts`。先部署允许省略字段的后端，再部署工作台前端。

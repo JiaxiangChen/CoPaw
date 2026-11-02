@@ -4,6 +4,7 @@
 Provides methods for creating and querying subtask records.
 """
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -32,6 +33,14 @@ RESULT_INDEX_REQUIRED_FIELDS = (
     "result_id",
 )
 
+STANDALONE_RESULT_SOURCE_ID = "RMASSIST"
+STANDALONE_INFO_REQUIRED_FIELDS = (
+    "tenant_id",
+    "skill_id",
+    "job_id",
+    "first_bbk_id",
+)
+
 
 class QueryService:
     """Service for subtask database operations."""
@@ -56,6 +65,7 @@ class QueryService:
         notification_content_wplus: Optional[str] = None,
         notification_content_zhaohu: Optional[str] = None,
         need_notification: int = 1,
+        has_main_task: int = 1,
         template_id: Optional[int] = None,
         result_id: Optional[str] = None,
         status: Optional[str] = None,
@@ -74,6 +84,7 @@ class QueryService:
             notification_content_wplus: W+ channel notification content
             notification_content_zhaohu: Zhaohu channel notification content
             need_notification: Whether notification is needed (0 or 1)
+            has_main_task: Whether the subtask has a main task (0 or 1)
             template_id: Template ID for html content rendering
             result_id: ES document ID for reference
             status: Subtask status (SUC/FAIL/TIMEOUT)
@@ -116,6 +127,7 @@ class QueryService:
                 notification_content_wplus,
                 notification_content_zhaohu,
                 need_notification,
+                has_main_task,
                 status,
                 info,
                 created_at,
@@ -123,7 +135,10 @@ class QueryService:
                 template_id,
                 result_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s,%s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, NULL, %s, %s
+            )
         """
         now = datetime.now()
         await self.db.execute(
@@ -139,6 +154,7 @@ class QueryService:
                 notification_content_wplus,
                 notification_content_zhaohu,
                 need_notification,
+                has_main_task,
                 status,
                 info,
                 now,
@@ -186,7 +202,8 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, status, info, created_at, updated_at
+                   need_notification, has_main_task, status, info,
+                   bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE trace_id = %s AND task_id = %s
         """
@@ -205,8 +222,12 @@ class QueryService:
             notification_content_wplus=row.get("notification_content_wplus"),
             notification_content_zhaohu=row.get("notification_content_zhaohu"),
             need_notification=row.get("need_notification", 1),
+            has_main_task=row.get("has_main_task", 1),
             status=row.get("status"),
             info=row.get("info") or "",
+            bbk_org_id=row.get("bbk_org_id"),
+            template_id=row.get("template_id"),
+            result_id=row.get("result_id"),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
         )
@@ -229,7 +250,8 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, status, info, created_at, updated_at
+                   need_notification, has_main_task, status, info,
+                   bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE status IS NULL OR status = ''
             ORDER BY created_at ASC
@@ -252,8 +274,12 @@ class QueryService:
                     "notification_content_zhaohu",
                 ),
                 need_notification=row.get("need_notification", 1),
+                has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
                 info=row.get("info") or "",
+                bbk_org_id=row.get("bbk_org_id"),
+                template_id=row.get("template_id"),
+                result_id=row.get("result_id"),
                 created_at=row.get("created_at"),
                 updated_at=row.get("updated_at"),
             )
@@ -281,7 +307,8 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, status, info, created_at, updated_at
+                   need_notification, has_main_task, status, info,
+                   bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE status IS NULL OR status = ''
             ORDER BY created_at ASC
@@ -304,8 +331,12 @@ class QueryService:
                     "notification_content_zhaohu",
                 ),
                 need_notification=row.get("need_notification", 1),
+                has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
                 info=row.get("info") or "",
+                bbk_org_id=row.get("bbk_org_id"),
+                template_id=row.get("template_id"),
+                result_id=row.get("result_id"),
                 created_at=row.get("created_at"),
                 updated_at=row.get("updated_at"),
             )
@@ -330,7 +361,8 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, status, info, created_at, updated_at
+                   need_notification, has_main_task, status, info,
+                   bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE trace_id = %s
         """
@@ -351,8 +383,12 @@ class QueryService:
                     "notification_content_zhaohu",
                 ),
                 need_notification=row.get("need_notification", 1),
+                has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
                 info=row.get("info") or "",
+                bbk_org_id=row.get("bbk_org_id"),
+                template_id=row.get("template_id"),
+                result_id=row.get("result_id"),
                 created_at=row.get("created_at"),
                 updated_at=row.get("updated_at"),
             )
@@ -399,6 +435,193 @@ class QueryService:
             error_msg,
         )
         return True
+
+    @staticmethod
+    def _parse_standalone_result_info(subtask: SubtaskModel) -> Optional[dict]:
+        """Parse index metadata without imposing a format on stored info."""
+        try:
+            metadata = json.loads(subtask.info)
+        except (TypeError, ValueError):
+            metadata = None
+
+        if not isinstance(metadata, dict):
+            logger.warning(
+                "Skipped standalone subtask result index: "
+                "subtask_id=%s task_id=%s reason=invalid_info_json",
+                subtask.id,
+                subtask.task_id,
+            )
+            return None
+
+        missing_fields = [
+            field
+            for field in STANDALONE_INFO_REQUIRED_FIELDS
+            if not isinstance(metadata.get(field), str)
+            or not metadata[field].strip()
+        ]
+        if missing_fields:
+            logger.warning(
+                "Skipped standalone subtask result index: "
+                "subtask_id=%s task_id=%s reason=missing_info_fields "
+                "fields=%s",
+                subtask.id,
+                subtask.task_id,
+                ",".join(missing_fields),
+            )
+            return None
+        return metadata
+
+    async def _update_subtask_status_preserving_info(
+        self,
+        subtask: SubtaskModel,
+        status: str,
+    ) -> None:
+        """Update a standalone subtask status without overwriting metadata."""
+        await self.db.execute(
+            """
+                UPDATE swe_cron_subtasks
+                SET status = %s, updated_at = %s
+                WHERE id = %s
+            """,
+            (status, datetime.now(), subtask.id),
+        )
+
+    async def complete_standalone_success_subtask(
+        self,
+        subtask: SubtaskModel,
+    ) -> bool:
+        """Complete a standalone subtask and index a valid plan result."""
+        metadata = self._parse_standalone_result_info(subtask)
+        if (
+            metadata is None
+            or subtask.task_type != "plan"
+            or subtask.id is None
+            or not subtask.template_id
+            or subtask.template_id <= 0
+        ):
+            await self._update_subtask_status_preserving_info(subtask, "SUC")
+            return False
+
+        customer_names = {}
+        if not (subtask.cust_nm or "").strip() and subtask.custuid:
+            customer_names = await self._query_customer_names(
+                {subtask.custuid},
+            )
+
+        completed_at = datetime.now()
+        execution = {
+            "source_id": STANDALONE_RESULT_SOURCE_ID,
+            "tenant_id": metadata["tenant_id"].strip(),
+            "bbk_id": metadata["first_bbk_id"].strip(),
+            "job_id": metadata["job_id"].strip(),
+            "execution_id": subtask.id,
+            "trace_id": subtask.trace_id,
+        }
+        subtask_row = {
+            "subtask_id": subtask.id,
+            "task_id": subtask.task_id,
+            "task_type": subtask.task_type,
+            "custuid": subtask.custuid,
+            "cust_nm": subtask.cust_nm,
+            "bbk_org_id": subtask.bbk_org_id,
+            "template_id": subtask.template_id,
+            "result_id": subtask.result_id,
+            "filename": subtask.filename,
+            "status": "SUC",
+        }
+        result_row = self._build_result_index_row(
+            execution,
+            subtask_row,
+            metadata["skill_id"].strip(),
+            completed_at,
+            completed_at + timedelta(days=30),
+            customer_names,
+        )
+        result_row["first_bbk_id"] = metadata["first_bbk_id"].strip()
+        if not self._is_valid_result_index_row(result_row):
+            await self._update_subtask_status_preserving_info(subtask, "SUC")
+            return False
+
+        await self._write_standalone_result_transaction(subtask, result_row)
+        return True
+
+    async def _write_standalone_result_transaction(
+        self,
+        subtask: SubtaskModel,
+        row: dict,
+    ) -> None:
+        """Atomically supersede the old plan result and complete the subtask."""
+        stale_query = """
+            UPDATE swe_cron_result_index
+            SET is_latest_success = 0, updated_at = %s
+            WHERE source_id = %s
+              AND tenant_id = %s
+              AND first_bbk_id = %s
+              AND bbk_org_id = %s
+              AND skill_id = %s
+              AND result_type = %s
+              AND custuid = %s
+              AND is_latest_success = 1
+              AND execution_id <> %s
+        """
+        upsert_query = """
+            INSERT INTO swe_cron_result_index (
+                source_id, tenant_id, first_bbk_id, bbk_org_id, custuid,
+                cust_nm, skill_id, job_id, execution_id, trace_id,
+                subtask_id, task_id, result_type, template_id, result_id,
+                filename, status, is_latest_success, execution_at,
+                updated_at, expire_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, 1, %s, %s, %s
+            )
+            ON DUPLICATE KEY UPDATE
+                source_id = VALUES(source_id),
+                tenant_id = VALUES(tenant_id),
+                first_bbk_id = VALUES(first_bbk_id),
+                bbk_org_id = VALUES(bbk_org_id),
+                custuid = VALUES(custuid),
+                cust_nm = VALUES(cust_nm),
+                job_id = VALUES(job_id),
+                execution_id = VALUES(execution_id),
+                trace_id = VALUES(trace_id),
+                task_id = VALUES(task_id),
+                result_type = VALUES(result_type),
+                template_id = VALUES(template_id),
+                result_id = VALUES(result_id),
+                filename = VALUES(filename),
+                status = VALUES(status),
+                is_latest_success = 1,
+                execution_at = VALUES(execution_at),
+                updated_at = VALUES(updated_at),
+                expire_at = VALUES(expire_at)
+        """
+        status_query = """
+            UPDATE swe_cron_subtasks
+            SET status = 'SUC', updated_at = %s
+            WHERE id = %s
+        """
+
+        async with self.db.acquire() as conn:
+            await conn.begin()
+            try:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(
+                        stale_query,
+                        self._build_result_index_stale_params(row),
+                    )
+                    await cursor.execute(
+                        upsert_query,
+                        self._build_result_index_upsert_params(row),
+                    )
+                    await cursor.execute(
+                        status_query,
+                        (datetime.now(), subtask.id),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
     async def get_pending_executions(
         self,

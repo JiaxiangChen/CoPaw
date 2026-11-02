@@ -93,6 +93,38 @@ async def test_http_ack_without_db_acceptance_does_not_report_accepted(
 
 
 @pytest.mark.asyncio
+async def test_unconfirmed_dispatch_waits_for_each_retry_deadline(
+    execution_setup,
+):
+    from scheduler.app.services.cron.managed.dispatcher import (
+        ExecutionDispatcher,
+    )
+
+    db, _, _ = execution_setup
+    row, _ = await enqueue(execution_setup)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    client = SweClient(db, accept=False, lose_response=True)
+    dispatcher = ExecutionDispatcher(db, client, clock=lambda: now)
+    for attempt, delay in enumerate((5, 10, 20, 30, 60, 60, 60), start=1):
+        result = await dispatcher.dispatch_registered(row["execution_id"])
+        assert result["dispatch_attempt"] == attempt
+        assert result["dispatch_lease_until"] == now + timedelta(seconds=delay)
+        assert result["status"] == (
+            "queued" if attempt < 3 else "dispatch_failed"
+        )
+        now += timedelta(seconds=delay - 1)
+        await dispatcher.dispatch_registered(row["execution_id"])
+        assert client.calls == [row["execution_id"]] * attempt
+        now += timedelta(seconds=1)
+    assert (
+        db.conn.execute(
+            "SELECT COUNT(*) FROM swe_cron_execution_runs",
+        ).fetchone()[0]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_two_dispatch_workers_cannot_claim_same_run_simultaneously(
     execution_setup,
 ):

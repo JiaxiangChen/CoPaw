@@ -12,7 +12,8 @@
 | [chat-history-preload-stall.md](chat-history-preload-stall.md) | 聊天历史触顶不继续加载：240px 区域锁、本地与归档分页衔接、复现证据与验收标准 |
 | [cron-auth-database-mirror.md](cron-auth-database-mirror.md) | 凭据镜像、四种运维任务、安全诊断和中断重跑 |
 | [common-errors.md](common-errors.md) | 常见报错模式、典型触发点和第一落点 |
-| [wealth-scene-monitoring.md](wealth-scene-monitoring.md) | 财富规划场景监控配置的本地存储、规划关联和回显验证 |
+| [wealth-scene-monitoring.md](wealth-scene-monitoring.md) | 财富规划场景督办策略的接口字段、角色控制和回显验证 |
+| [财富工作台运维模式](location-paths.md#财富工作台运维模式) | 运维白名单、跨分行代建上下文、状态隔离和 Java 联调边界 |
 | [control-path-complexity.md](control-path-complexity.md) | 策略、审批、专家准入及 Stop append 的复杂度拆分边界、计数口径和回归入口 |
 | [expert-binding-new-chat-identity.md](expert-binding-new-chat-identity.md) | 新草稿专家绑定的固定逻辑 ID、重复 ID 定位漂移、独立接口职责与复现边界 |
 | [subagent-monitor-refresh.md](subagent-monitor-refresh.md) | SubAgent 会话展示、事件刷新、轮询中断与跨会话竞态的复现和验收条件 |

@@ -106,7 +106,8 @@ class TestTracingDailyTrend:
         assert trace_params == ("tenant-a", start, end, "201")
         assert "j.source_id = %s" in read_sql
         assert "DATE(e.read_at) as date" in read_sql
-        assert "WHERE e.read_at >= %s AND e.read_at <= %s" in read_sql
+        assert "e.is_final = 1" in read_sql
+        assert "AND e.read_at >= %s AND e.read_at <= %s" in read_sql
         assert "GROUP BY DATE(e.read_at)" in read_sql
         assert read_params == (start, end, "tenant-a", "201")
         assert len(db.fetch_all.call_args_list) == 2
@@ -178,7 +179,8 @@ class TestTracingDailyTrend:
         assert trace_params == ("tenant-a", start, end, "201")
         assert "j.source_id = %s" in read_sql
         assert "HOUR(e.read_at) as hour_bucket" in read_sql
-        assert "WHERE e.read_at >= %s AND e.read_at <= %s" in read_sql
+        assert "e.is_final = 1" in read_sql
+        assert "AND e.read_at >= %s AND e.read_at <= %s" in read_sql
         assert "GROUP BY HOUR(e.read_at)" in read_sql
         assert read_params == (start, end, "tenant-a", "201")
         assert len(db.fetch_all.call_args_list) == 2

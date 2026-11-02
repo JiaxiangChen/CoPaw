@@ -5,6 +5,19 @@
 - src/swe/app/crons/auth_migration*.py：POST /api/internal/cron/auth-migration/tasks，GET 按 task_id 与 after_page 查询。
 - 在线镜像 auth_mirror.py、严格仓库 auth_repository.py；[排查说明](cron-auth-database-mirror.md)、[运维操作](../../docs/deploy/cron-auth-database-mirror.md)。
 
+## Console 全局侧栏菜单
+
+- 菜单定义、可见性规则和展开／折叠数据转换集中在 `console/src/layouts/sidebarNavigation.tsx`；`Sidebar.tsx` 保留状态订阅、渲染和交互。新增显示条件时先检查 `getSidebarVisibility`，避免在两种渲染分支各写一遍。
+- 当前行为有意在本次纯重构中保留：`hideChat=true` 时，展开模式隐藏聊天、运营看板和用户消息；折叠模式仅隐藏用户消息。专家社区和 Hook 管理仅在展开模式出现。`source === "RMASSIST"` 与 `space === "RM_ASSISTANCE"` 是两个独立条件。
+- 展开模式通过 `layouts/constants.ts` 的 `KEY_TO_PATH` 跳转，折叠模式也复用该映射，但技能运行看板保留原有 `collapsedPath`：该项尚无展开模式路由映射。修复该差异应作为独立行为变更处理。
+- 回归入口为 `console/src/layouts/Sidebar.test.tsx`，覆盖身份、来源、空间、bbk、hideChat 组合下两种模式的菜单顺序及既有跳转差异。先确认预期业务规则，再更新测试，避免通过结构整理改变菜单范围。
+
+## 按来源查询租户及机构过滤
+
+- `GET /user-info/tenants/by-source` 位于 `src/swe/app/routers/user_info.py::list_tenants_by_source`；`source_id` 未传时沿用请求头来源，查询包含模板条目。
+- 可选 Query 参数 `bbk_id` 通过 `TenantInitSourceStore.get_by_source` 下推 SQL 精确匹配；不传时返回该来源全部条目，无匹配时返回空列表。回归入口：`tests/unit/routers/test_user_info_tenant_source.py`、`tests/unit/workspace/test_tenant_init_source.py`。
+- 在 `migrate_tenant_init_source_bbk.sql` 之后执行 `scripts/sql/migrate_tenant_init_source_source_bbk_index.sql`，为新旧数据库补充 `idx_source_bbk (source_id, bbk_id)` 联合索引；脚本检查当前数据库索引是否存在，可重复执行。
+
 ## 定时任务第一阶段全量快照迁移
 
 - 一次提交：`POST /api/internal/cron/migration/tasks`，operation 为 preview/import/verify；后台自动翻页，不必人工传递游标。只写新定义/状态业务表，旧 CRUD、文件、内存及执行入口不切换，独立系统任务不迁移。
@@ -262,7 +275,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 ## 创建计划的经营场景可见范围
 
-- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用原生 fetch 直接请求同源 `POST /api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理或统一 request。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；仅显式设置 JSON Content-Type，沿用默认同源 Cookie。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 60 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
+- Console 创建页场景列表及看板可用能力计数由 `console/src/pages/WealthWorkbench/api.ts` 的 `fetchSceneSkills()` 使用统一 `request("/agent/workspace/skill-config/list")` 请求 `POST {API base}/api/agent/workspace/skill-config/list`，由前端 Nginx 转发，不经过 Python 场景代理。JSON 只传 iframe 上下文的 `bbkId`（缺失时为空）和 `category`（空表示全部）；通过统一 request 附加鉴权和上下文请求头。读取外部 `code/data`，HTTP/业务失败、解析异常、网络异常或 60 秒超时，列表返回空数组、计数返回 null。后端代理保留兼容及规划校验用途。
 - 外部服务负责返回当前分行及 `bbkId=100` 的共享场景，本项目直接展示返回结果，不额外查询 `100` 或合并场景列表。
 - 创建和修改计划均通过 `_validate_plan_scenes_for_branch()` 校验，允许当前分行及 `100` 的场景，其他分行、无归属或已失效的场景仍拒绝；请求分行缺失时仍拒绝发布。使用共享场景不会改变规划本身的 `bbk_id`，规划保留创建人的分行归属。
 - 排查入口：场景查询为父系统 `iframeContext.bbk` → POST body 的 `bbkId`；规划提交/校验仍为 `X-Bbk-Id` → `request.state.bbk_id`。场景卡片来源文案 `skillBbkLabel` 只用于展示。
@@ -314,7 +327,7 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 - 经营视角“经营机会”必须显式保留 260px，不能在 fixed 表格中依赖 `width:auto` 或 `min-width` 分配剩余空间；姓名 110px、方案 135px，表格最小宽度按其余固定列合计 1029px（含边框）加指标区宽度计算。指标区按断点为 520 / 356 / 190px，空间不足时表格内部滚动，执行列继续固定在右侧。只调整经营视角，不覆盖客户视角、待触达和已完成的列宽。
 
-- 今日任务（经营/客户视角）、待触达及已完成清单在执行/完成时间列之前展示“最近接触时间”，直接使用 `name-list.strongContactTime` 映射的 `Customer.time`，空值显示“—”，悬停可读原值。新列固定 168px，标准日期时间以 12px 数字展示；各视角表格最小宽度同步增加 168px，保留指标区宽度及执行列固定能力，窄屏仅表格内部横向滚动。空态 `colSpan` 必须包含新列。已完成页原“完成时间”也沿用 `Customer.time`，暂保留原行为；将来若接口提供独立完成时间，应分别映射。回归入口：`Tasks/groupTables.test.tsx`。
+- 今日任务（经营/客户视角）、待触达及已完成清单在执行/完成时间列之前展示“最近接触时间”，直接使用 `name-list.strongContactTime` 映射的 `Customer.time`，空值显示“—”，悬停可读原值。最近接触时间列宽 128px，标题保持单行；内容使用 12px 数字，日期正常展示，完整日期时间超宽时省略，单元格 title 保留原值。`.recentContactValue` 限制内容宽度，避免自动表格布局被完整时间撑宽。窄屏仅表格内部横向滚动。空态 `colSpan` 必须包含新列。已完成页原“完成时间”也沿用 `Customer.time`，暂保留原行为；将来若接口提供独立完成时间，应分别映射。回归入口：`Tasks/groupTables.test.tsx`。
 
 - 今日任务客户视角、待触达和已完成的“经营场景”列提供单选筛选，选项从当前模块原始名单的 `skillNames` 去重生成，按展示名称精确匹配任一场景；不使用客户的首个 `skillId` 代表全部场景。同名场景合并为一个筛选项。选中标签单行显示，超长省略；悬停或键盘聚焦通过 Tooltip 查看完整名称，清除按钮不收缩。支持“全部场景”和清除，与搜索、重点标签、接触状态筛选叠加；仅过滤表格，不重算顶部后端汇总。经营视角不应用该列筛选。入口为 `Tasks/SceneFilter.tsx` 和 `Tasks/index.tsx`，回归入口为 `Tasks/groupTables.test.tsx`。
 
@@ -325,26 +338,26 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 - 今日任务在 `Tasks/index.tsx` 分组后对每个分类的名单稳定排序：`touched === 1` 的已接触客户排后，其余待处理（未接触及未知状态）排前。同类状态保持接口顺序，分类顺序和 store 原始名单不变；客户视角同样适用，待触达/已完成不参与此排序。回归入口为 `Tasks/groupTables.test.tsx`。
 - 今日任务、待触达和已完成页均展示“目标客户 / 今日已触达 / 七日内已触达 / 待处理”，使用各自名单响应的后端统计，搜索和筛选不重算汇总；已完成页不展示“累计已完成 / 今日已完成”，也不读取今日任务缓存统计。触达日期与人数由外部接口计算。
 - Console 直接请求 `POST /api/agent/workspace/name-list`，由前端 Nginx 转发；前端把外部 `data.list`、统计及字段配置转换为 `items`、四项计数、`skillFieldList`、`allFields`。
-- 今日任务、待触达和已完成分别查询客户名单，均传 `sapId` 与 `skillIds` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端使用原生 `fetch` 直接 POST 同源 `/api/agent/workspace/name-list`，由部署方前端 Nginx 转发外部服务，不再经过 Python 名单代理或统一 `request()`。JSON 直接传 `skillIds: ["a", "b"]`、`sapId`、`touched`，并从 iframe 上下文补充 `bbkId`、可选 `subBbkId/posId` 及固定 `platformSource/pageSource`；不显式设置 `credentials`，沿用 fetch 默认的同源 Cookie 行为；仅显式附加 JSON Content-Type，不手动设置 Cookie 或鉴权头。前端读取外部 `code` 与 `data.list`，转换为页面 `items`；HTTP/业务失败、网络异常或六十秒超时返回空名单。原后端代理保留兼容，但工作台不再调用。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
+- 今日任务、待触达和已完成分别查询客户名单，均传 `sapId` 与 `skillIds` 数组：经营视角只传当前选中场景，客户视角、待触达、已完成及今日人数角标均传当天工作任务树全部去重场景 ID。前端使用统一 `request("/agent/workspace/name-list")` POST `{API base}/api/agent/workspace/name-list`，由部署方前端 Nginx 转发外部服务，不再经过 Python 名单代理。JSON 直接传 `skillIds: ["a", "b"]`、`sapId`、`touched`，并从 iframe 上下文补充 `bbkId`、可选 `subBbkId/posId` 及固定 `platformSource/pageSource`；不显式设置 `credentials`，沿用 fetch 默认的同源 Cookie 行为；鉴权和上下文请求头由统一 request 构建。前端读取外部 `code` 与 `data.list`，转换为页面 `items`；HTTP/业务失败、网络异常或六十秒超时返回空名单。原后端代理保留兼容，但工作台不再调用。当天无场景时前端直接清空名单，不请求接口。触达状态保持今日任务 `2`、待触达 `0`、已完成 `1`，直接使用接口返回的名单。场景切换只重查选中技能，手动刷新与标签切回保持该选择，旧场景响应不覆盖新选择。回归入口为 `api.test.ts`、`store.test.ts`、`Tasks/loading.test.tsx` 和 `tests/unit/app/wealth_plans/test_router.py`。
 - 客户动态值数组的正式字段名是 `fieldList`；属性仍为 `filedName / filedNameCn / filedValue`。数组名拼错会导致模型丢弃明细，前端即使收到 `allFields` 也显示“暂无指标”。
 - 指标丢失先检查 `src/swe/app/wealth_plans/models.py` 和 `router.py` 是否保留客户明细及顶层字段配置，再检查 `console/src/pages/WealthWorkbench/api.ts` 的映射。
 - `allFields` 提供中文名称；经营视角按技能的 `fields` 顺序与客户实际字段取交集，客户视角按全局字段顺序展示客户实际字段。不为其他客户的字段生成占位。
 - 只有今日任务经营视角使用 `groupField`。组合值完全一致才合并，空数组不分组；把客户姓名配置为分组字段可能导致每人一组。每个分类对应独立表格，分类标题、人数和折叠按钮放在表格上方；多个字段以 ` / ` 分隔。
 - `touched=1` 标记客户已触达；客户字段缺失不展示、返回空值显示“未提供”、数值 `0` 正常展示。
-- 今日任务的经营/客户双视角在经营方案与执行之间展示“接触状态”：保留接口原始 `Customer.touched`，`0` 显示灰色“未接触”，`1` 显示绿色“已接触”，其余或缺失显示灰色 `--`。顶部汇总使用后端独立计数字段，不按明细 `touched` 或 `done` 计算；不要由 `done` 布尔值反推接触状态 `0`。今日任务表格使用固定 135px 状态列，最小宽度同步增加，指标空间和执行列保持可用；回归入口为 `api.test.ts`、`Tasks/groupTables.test.tsx`。
-- 接触状态表头通过 `Tasks/ContactStatusFilter.tsx` 单选筛选“全部 / 未接触 / 已接触 / --”，复用重点标签浮层和已选条件的样式，支持一键清除、方向键、Escape、外部点击及滚动/缩放关闭。选项人数基于其他筛选条件下的名单（排除接触状态自身），筛选与经营任务/重点标签叠加，表格和分类人数同步更新，顶部四项后端汇总保持不变。状态列为 135px 以容纳筛选图标，表格最小宽度同步增加。回归入口增加 `Tasks/ContactStatusFilter.test.tsx`。
+- 今日任务的经营/客户双视角在客户指标之后展示“接触状态”：保留接口原始 `Customer.touched`，`0` 显示灰色“未接触”，`1` 显示绿色“已接触”，其余或缺失显示灰色 `--`。顶部汇总使用后端独立计数字段，不按明细 `touched` 或 `done` 计算；不要由 `done` 布尔值反推接触状态 `0`。今日任务表格的状态列宽 110px，标题及筛选图标保持单行，指标空间和执行列保持可用；回归入口为 `api.test.ts`、`Tasks/groupTables.test.tsx`。
+- 接触状态表头通过 `Tasks/ContactStatusFilter.tsx` 单选筛选“全部 / 未接触 / 已接触 / --”，复用重点标签浮层和已选条件的样式，支持一键清除、方向键、Escape、外部点击及滚动/缩放关闭。选项人数基于其他筛选条件下的名单（排除接触状态自身），筛选与经营任务/重点标签叠加，表格和分类人数同步更新，顶部四项后端汇总保持不变。状态列需容纳筛选图标，长筛选值不得反向撑宽表格。回归入口增加 `Tasks/ContactStatusFilter.test.tsx`。
 - 指标交互入口为 `components/CustomerMetrics.tsx`；分组入口为 `Tasks/customerGroups.ts`。大量指标先查展开状态；长字段先查悬停或聚焦提示，不应依靠增加全部动态表头排查。
 - 工作任务树的技能名称单行省略；统一 Tooltip 在悬停或键盘聚焦时展示完整技能名称与来源规划，移除按钮原生 `title`，避免重复提示。
 - 视角切换时统计数量先增后减，先查 `Tasks/index.tsx` 是否把旧经营名单直接用于客户视角：经营名单按技能与客户组合去重，客户名单由接口聚合，计数口径不同。名单查询在绘制前进入加载状态；加载时保留缓存，但不渲染旧名单，四个汇总及总记录数显示 `--`。使用延迟接口响应验证首个客户视角绘制帧，不能只检查请求完成后的数量。
-- 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。指标越界覆盖触达方式或完成时间时，检查 `.sceneTable.completedTable` 的固定列宽与最小表宽：客户姓名 150px、重点标签 135px、经营场景 180px、触达方式 150px、完成时间 190px、经营结果 160px，固定列合计 965px，表格最小宽度 1485px（视口不超过 1600px 时为 1321px），为指标区保留至少 520px（窄屏两列指标为 356px）。用六项以上指标并展开验证，不能只用单项指标验证列宽。
-- 客户视角、待触达和已完成表格的重点标签溢出时，检查 `index.module.less` 的 `.customerTable.metricsTable.sceneTable`：标签列固定 135px，多标签内容限定在单元格内换行。经营场景列 160px，由 `components/CustomerScenes.tsx` 每行展示一个背景项，超宽省略并支持悬停或键盘聚焦查看全名；默认两项，更多通过“展开剩余 X 项”查看。经营机会列 240px，预览最多三行并通过悬停或键盘聚焦查看完整内容。今日任务客户视角的经营方案列固定 135px。新增或加宽列时同步调整表格最小宽度，保留其他列空间并使用表格内部滚动。
+- 已完成列表不重复展示“经营任务”，技能名称统一在“经营场景”展示。客户清单使用自动表格布局，常规最小宽度 1000px、今日客户视角 1100px、今日经营视角 800px；不再通过固定指标列及大量屏宽断点抬高最小表宽。长姓名允许换行，最近接触时间保留单行与完整值 title。今日任务和待触达的最近接触时间、经营方案、执行依次吸附右侧，滚动时不得互相遮挡。经营方案列宽120px，位于执行列左侧；最近接触时间的right偏移为经营方案与执行列宽度之和。
+- 客户指标通过 `components/CustomerMetrics.tsx` 展示，每项固定125px、横向间距10px；整列使用auto宽度，最小286px以预留两项指标及单元格内边距。内容区最小260px、最大395px，采用Flex自动换行，指标足够时每行2–3项；取消inline-size隔离，让指标数量参与表格固有列宽计算。经营场景通过 `components/CustomerScenes.tsx` 每行展示一个固定140px宽的背景项，短名称也保持相同宽度，默认两项；列宽由自动表格布局随内容尺寸收紧。两者超宽均省略，支持悬停或键盘聚焦查看全文、展开更多。经营机会内容不设固定最小、最大宽度，使用单元格可用空间，最多三行并支持Tooltip。样式入口为 `index.module.less` 的 `.customerMetrics`、`.metricGrid`、`.metricItem`、`.customerScenes`、`.opportunityPreview`。验证至少包含空指标、单项、六项以上指标及展开、长场景名称、1280/1440/1920px嵌入和普通视图；较窄容器允许表内滚动，不得产生页面横向溢出。
 - 今日任务进入页面、切回经营视角或点击经营视角的刷新图标时，经 `store.ts` 的 `refreshTodayCustomers` 先查询最新规划，再用新规划查询当前视角名单。页内切到客户视角只调用 `loadTodayCustomers` 查询聚合名单，不重复查询规划。刷新期间禁用重复刷新和视角切换；已失效的选中任务回退到首个任务。不自动轮询，发布尚未完成时需完成后手动刷新。
 - 浏览器标签页从隐藏切回可见时，工作台入口的 `useVisibilityRefresh` 调用 `refreshTaskLists`，每次直接后台更新今日任务（保持最近查询视角）、待触达和已完成名单及侧栏数量，不再先查询或比较客户数量；人数相同但客户或明细变化时也会同步。刷新期间保留当前名单和统计，不展示列表加载占位。仅客户经理且初始化/规划加载完成后生效，刷新期间忽略重复切回请求，已有名单请求进行中时不重复发起。iframe 内同样适用；宿主内部业务页签仅通过 CSS 隐藏 iframe 时不会触发该事件。回归入口：`useVisibilityRefresh.test.tsx`、`store.test.ts` 和 `Tasks/loading.test.tsx`。
 
 ### 财富规划分发目标
 
-- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，使用原生 fetch 直接 POST 同源网关路径 `/zt/wealth/wmadm/getUserPostionByBrn`（人员，`USER_POSITION_PATH`）与 `/zt/wealth/wmadm/branchTreeInfo`（支行，`BRANCH_TREE_PATH`），不再调用 `/api/user-info/*/by-branch` 或统一 request。仅显式设置 JSON Content-Type，沿用默认同源 Cookie；60 秒超时取消请求，人员失败返回空列表，支行失败返回 null 以保留重试。
-- 部署前端 Nginx 需将上述两个同源路径转发到对应环境的网关，并按原后端 `SWE_USER_POSITION_HEADER_KEY/VALUE` 配置附加网关凭证，保留请求 Cookie；凭证不能放进前端包。原 Python 代理保留兼容。
+- 前端入口：`console/src/pages/WealthWorkbench/distributeTargets.ts`，使用统一 request POST `/zt/wealth/wmadm/getUserPostionByBrn`（人员，`USER_POSITION_PATH`）与 `/zt/wealth/wmadm/branchTreeInfo`（支行，`BRANCH_TREE_PATH`），最终路径为 `{API base}/api/zt/wealth/wmadm/*`，不再调用 `/api/user-info/*/by-branch`。复用统一鉴权、上下文请求头和 401 刷新逻辑；60 秒超时取消请求，人员失败返回空列表，支行失败返回 null 以保留重试。
+- 部署侧需将上述两个 `{API base}/api/zt/wealth/wmadm/*` 路径转发到对应环境的网关，并按原后端 `SWE_USER_POSITION_HEADER_KEY/VALUE` 配置附加网关凭证，保留请求 Cookie；凭证不能放进前端包。原 Python 代理保留兼容。
 - 地址配置：`src/swe/config/envs/dev.json` 和 `prd.json` 中的 `SWE_USER_POSITION_API_URL`，分别使用 `wmcomsrvgatewayxc.paasst.cmbchina.cn` 和 `platform-gateway.paasoa.cmbchina.cn`；由 `SWE_ENV` 选择，环境变量可覆盖默认值；这些配置仍用于 Python 兼容代理，前端直连需在部署 Nginx 中同步对应环境的目标地址。
 - 入参来自 `iframeStore`：`bbkOrgId ← bbk (vbbk)`、`mmOrgCode ← orgCode (vorgcode)`、`mmOrgLvl ← Number(orgLvl) (vorglvl)`。缺少机构参数时不会查询。
 - 两个新接口统一返回 `{code,message,data,success}`，仅校验 `code="200"`，不依赖 `success`；`data` 是非空数组时读取机构或人员列表，空数组或非数组按无数据处理。业务码非 `200` 按查询失败处理，支行保留重试。旧 Python 代理的 `code=success` 及裸机构数组不适用于新接口；目标 ID 使用 `sapID`（保留前导零），姓名为 `userName`，机构名称优先 `subBranchName`，其次 `branchName`。按上游返回名单展示，不再查询本地租户或按分行号二次过滤，也不额外过滤岗位。
@@ -395,12 +408,13 @@ kubectl wait --for=condition=complete job/swe-session-nas-lock-verification --ti
 
 - 2026-10-20 浏览器规划路径统一增加 `/zt` 前缀；需同步网关 location 和测试夹具。Java 上游仍是 `/wealth/plans` 时由网关剥离 `/zt`；Java 同时有此前缀时原样转发。不修改工作台页面路由或其他接口前缀。
 
-- 规划请求在 `console/src/pages/WealthWorkbench/api.ts` 使用同源原生 fetch `/zt/wealth/plans`，不走全局 request/baseUrl，也不拼接 `/api`。网关负责转 Java；创建后的任务编排、资源处理与状态回写由 Java 负责。
+- 规划请求在 `console/src/pages/WealthWorkbench/api.ts` 使用统一 `request("/zt/wealth/plans")`，由全局配置拼接为 `{API base}/api/zt/wealth/plans`；规划业务码仍在适配层解包。网关负责转 Java；创建后的任务编排、资源处理与状态回写由 Java 负责。
 - 列表通过 Query 传 sapId/role/bbkId；创建/更新通过 camelCase JSON 传身份和业务数据；删除通过 DELETE Body 传 sapId。响应解包 code/message/data，HTTP 200 的非 200 业务码也上抛。
-- 场景、名单、统计、机构人员、签名保持各自已有同源路径；不回退 Python 工作台 handler。网关必须优先匹配规划接口并透传 DELETE Body，避免 SPA 返回 HTML。具体评估与配置见 [Java 网关接入](../../docs/api/wealth-plans-java-gateway.md)，回归入口为 `planGateway.test.ts`、`store.test.ts`。
+- 场景、名单、统计、机构人员和支行树同样通过统一 request 拼接 API base 和 /api 前缀；仅 `/expert/get-sign` 按接入约定保留原生 fetch 与原路径；不回退 Python 工作台 handler。网关必须优先匹配规划接口并透传 DELETE Body，避免 SPA 返回 HTML。具体评估与配置见 [Java 网关接入](../../docs/api/wealth-plans-java-gateway.md)，回归入口为 `planGateway.test.ts`、`store.test.ts`。
 
 ### 财富工作台多渠道 iframe 消息入口
 
+- 同一父页面标签页内，同源 CoPaw iframe 会共用 `sessionStorage["swe-iframe-context"]`。排查菜单 A 的 USER_DATA 参数残留到菜单 B 时，先检查 B 是否走 `origin=Y`：`main.tsx` 必须在注册消息监听器前调用 `resetIframeContextForEntry()`，通过 `clearContext()` 重置内存及持久化字段，再应用当前 URL/Cookie 身份与来源；即使用户相同或身份 Cookie 缺失，也不能沿用旧消息中的权限、自定义请求头、显示开关及来源。不能在等待外部 token 后的 `handleUrlOriginParam()` 中再次清理，否则会误删本次页面已收到的新消息；来源继续遵守 URL > 本次消息 > origin 默认值的优先级。清理只发生在入口初始化，内部路由导航保留当前上下文。回归入口：`console/src/utils/iframeMessage.test.ts`。
 - 父应用 iframe 地址为 `/wealth/board` 或 `/wealth/create`（部署在 `/console` 下时加此前缀），不带 `origin=Y`。父应用在每次 iframe `load` 后发送 `USER_DATA`，使用子页面的明确 origin 作为 `targetOrigin`；不新增 READY 握手。
 - 消息 `data.source` 必须为非空渠道字符串（本次为 `RCZT`，后续渠道直接传自身标识，无需修改子页面），`sapId`（兼容 `userId`）传非空字符串以保留前导零；传入 `userName`、`bbkId`（兼容 `bbkOrgId`）、`positionId` 以及业务需要的 `orgCode`、`subBranchId`、`orgLvl`、`sysId`。岗位缺失或未识别仍按原权限矩阵显示暂无访问权限。
 - `hideLogo: true`（兼容字符串 `"true"`）隐藏头部、播报与侧栏，内部导航持续生效，不补 URL 参数。身份和布局由消息提供；接口鉴权仍使用现有登录 Cookie，消息传参并不替代登录态。
@@ -431,3 +445,56 @@ frame.addEventListener("load", () => {
 frame.src = `${childOrigin}/wealth/board`;
 document.body.appendChild(frame);
 ```
+
+## 运营看板用户详情聊天历史
+
+- 列表与统计来自 Monitor `/api/monitor/tracing/sessions`，不以会话存档作为统计来源；日期/分行/资源筛选决定入选会话，不截断已选会话的聊天正文。
+- 目标用户映射、详情、压缩归档入口在 `src/swe/app/routers/tracing.py`：`GET /api/tracing/chats?user_id=…`、`GET /api/tracing/chats/{chat_id}?user_id=…`、`GET /api/tracing/chats/{chat_id}/history?user_id=…&before=…&limit=20`。详情共用 Chat 的 `_build_chat_history(non_blocking=True)`，归档共用 `_archive_page`；不要改用当前用户的 `/api/chats` 接口。
+- 权限沿用外部平台/网关现有运营看板访问控制，SWE 不新增角色或分行授权。部署须让新增归档路径经过与看板详情相同的规则；`user_id` 用于目标工作区定位，详情/归档还校验聊天归属及已有 source/Agent 元信息。
+- 前端入口为 `console/src/pages/Analytics/BusinessOverview/components/UserDetailModal/ReadOnlySessionChat.tsx`。顶部“加载更早历史”按页读取，保留阅读位置；空当前快照但有归档时仍可加载。请求/分页状态按 source、目标 user、Agent、session/chat 隔离，只读，不订阅运行中流。
+- 初始快照经 Chat 转换后必须由看板调用方补 `history: true`（含归档边界卡片），再交给 `mergeHistoryResponses` 合并。公共转换函数不自动加标记；遗漏时，跨压缩边界的一次回答会拆成两张卡。回归见 `ReadOnlySessionChat.archive.test.tsx`，使用真实共享转换/合并函数覆盖归档工具调用与当前工具结果的拼接。
+- 计划历史只读展示：看板回答 renderer 保留原始 planReviewCard 供 PlanReviewSnapshot 展示，但传给 RuntimeResponseCard 的副本移除该字段以禁用交互。独立 PlanInteraction 保持为空避免双份计划；不得修改共享组件或把计划摘要/步骤一并隐藏。当前消息、归档页、任务分组均走该局部配置。
+- “有会话卡片但无正文”先核对 Monitor 的 session_id 是否存在对应 ChatSpec，再核对目标 source/user/Agent 工作区和共享存储。映射缺失、详情失败和正常空内容使用不同反馈；归档失败保留当前消息和游标，可重试。Kubernetes 各实例必须访问同一持久化会话与 dialog 存档；已清理的文件不能通过本接口恢复。
+- 回归：`tests/unit/routers/test_tracing_chat_history_parity.py` 固定存档对比两个入口的普通/任务/失败/v3 分轮消息和连续归档页；前端 `ReadOnlySessionChat.test.tsx` 覆盖归档、重试、去重和切换隔离。
+
+
+## 财富工作台运维模式
+
+### 入口与配置
+
+- 前端入口白名单：`console/public/env-grey-control.js` 的 `window.__env__.operationsUsersByBranch`，当前为 `{ V00001: ["80008888"] }`。追加用户保持字符串编号，不转换为数字；修改部署后的配置文件并重新加载页面即可，无需重新构建。缺失、格式错误、空对象或分行的空数组均不开放入口，不支持 `"*"`；代码中没有隐藏的默认名单。
+- 同时匹配真实登录分行与用户编号，默认关闭。分行候选来自 `console/src/constants/bbk.ts` 的 `BBK_ID_MAP`，排除总行 `100`；仓库中的列表有意省略了其他分行，不在运维代码中重复维护。
+- `hideLogo=true` 不提供运维入口；进入后若头部被隐藏则退出模式。离开工作台、真实身份发生变化或刷新页面也退出模式。
+- 白名单用户原岗位未识别时，普通模式仍显示无权限，仅额外提供主动开启运维的入口；其他未知岗位用户保持整页拦截。
+
+### 状态和请求边界
+
+运维状态仅存在工作台内存，不写 Cookie 或 sessionStorage，不覆盖 `iframeStore`。统一 `request()` 及 `buildAuthHeaders()` 保留真实登录身份，包括真实分行、岗位、用户及租户等请求头；只有财富业务参数使用目标分行和中台身份。
+
+- 开启后先选择分行；未选时不挂载业务页面，不请求规划、场景或机构人员。
+- 选定后规划列表、场景池和分发机构人员跟随目标分行，按中台角色选择支行与客户经理，来源为“分行关注”。
+- `setOperationsMode()` 统一清理工作台状态，递增 `contextVersion` 并重挂载页面，清空统计缓存。列表、初始化、场景及任务请求检查代次，人员选择继续由请求序号隔离。
+- 运维草稿不写入普通角色草稿缓存；切换前有草稿、编辑对象或已选人员时提示清空。发布/删除在途时禁止手动切换，身份变化或退出时仍必须清理旧状态，迟到写结果不能回写新环境。
+- 切换后的导航立即执行，初始化只补充数据，不在请求结束后跳转，也不覆盖新输入的运维草稿。
+- 编辑/删除依赖服务端明确返回 `editable=true`；运维模式中缺失值按只读处理，store 写入口再次检查。不扩大中台规划查询范围，不丢弃冲突校验所需的可见规划。
+
+### Java 联调确认项
+
+本次只改前端，不代表 Java 已支持跨分行授权。完整请求差异见 `docs/api/wealth-plans-java-gateway.md` 的运维模式章节。需要服务端同事确认：
+
+1. 基于可信登录态校验真实分行 V00001、用户 80008888 及允许的目标分行；前端白名单不构成授权。
+2. 允许授权用户的业务 role=middle、bbkId=目标分行与真实身份头不同。真实用户编号/姓名仍作为创建人，不能把规划归属写回测试分行，也不能把分发用户当创建人。
+3. 列表返回正确的 editable；更新和删除独立校验本人代建归属、目标分行和来源，不能只相信 editable 或请求体。
+4. 运维模式分行根的 `bbkOrgId/orgCode` 使用目标分行编码，业务上下文 `orgLvl` 固定为 "30"，根机构和根人员查询的 `mmOrgLvl` 传数字 30；`sysId` 沿用真实上下文。下级机构继续使用服务返回的 mOrgCode/mOrgLvl，普通模式层级取值保持不变。
+5. 场景池、机构树、人员与统计服务接受授权的业务范围；鉴权失败沿用现有错误处理，不自动回退真实分行继续发布。
+
+### 验证入口
+
+```bash
+cd console
+npm run test:run -- src/pages/WealthWorkbench src/App.wealth.test.ts --maxWorkers=2
+npm run typecheck
+NODE_OPTIONS=--max-old-space-size=8192 npm run build
+```
+
+专项用例：`operations.test.ts`、`operations.api.test.ts`、`operations.ui.test.tsx`。真实浏览器使用模拟接口验证，不将其视为 Java 联调；Chromium 108 / Windows 360 仍需目标环境复测。

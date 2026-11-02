@@ -66,6 +66,7 @@ export const KEY_TO_PATH: Record<string, string> = {
   "analytics-traces": "/analytics/traces",
   "analytics-business-overview": "/analytics/business-overview",
   "analytics-claw-data-overview": "/analytics/claw-data-overview",
+  "analytics-claw-skill-data-overview": "/analytics/claw-skill-data-overview",
   "analytics-cron-job-overview": "/analytics/cron-job-overview",
   "analytics-continuous-governance": "/analytics/continuous-governance",
   "monitor-cron-overview": "/monitor/cron-overview",
@@ -112,6 +113,7 @@ export const KEY_TO_LABEL: Record<string, string> = {
   "analytics-traces": "nav.analyticsTraces",
   "analytics-business-overview": "nav.analyticsBusinessOverview",
   "analytics-claw-data-overview": "nav.analyticsClawDataOverview",
+  "analytics-claw-skill-data-overview": "nav.analyticsClawSkillDataOverview",
   "analytics-cron-job-overview": "nav.analyticsCronJobOverview", //定时任务概览
   "analytics-continuous-governance": "nav.analyticsContinuousGovernance",
   "monitor-task-center": "nav.monitorTaskCenter",

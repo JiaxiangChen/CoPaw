@@ -11,7 +11,7 @@ export interface HtmlTrackerPayloadType {
   bbk_id?: string | null;
   cron_task_id?: string | null;
   cron_task_name?: string | null;
-  file_url: string;
+  file_url?: string;
   file_name?: string | null;
   list_key?: string | null;
   list_name?: string | null;

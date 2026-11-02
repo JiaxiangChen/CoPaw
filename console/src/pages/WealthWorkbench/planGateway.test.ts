@@ -5,7 +5,23 @@ import { useIframeStore } from "../../stores/iframeStore";
 import { useAgentStore } from "../../stores/agentStore";
 import type { Account, Draft } from "./types";
 
-vi.mock("../../api/request", () => ({ request: vi.fn() }));
+vi.mock("../../api/request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/request")>();
+  return { ...actual, request: vi.fn(actual.request) };
+});
+vi.mock("../../api/config", () => ({
+  getApiUrl: (path: string) => `/api${path}`,
+  getApiToken: () => "",
+  clearAuthToken: vi.fn(),
+}));
+vi.mock("../../api/externalToken", () => ({
+  isExternalTokenEnabled: () => false,
+  clearExternalToken: vi.fn(),
+}));
+
+vi.mock("../../api/authHeaders", () => ({
+  buildAuthHeaders: () => ({ "X-Source-Id": "RCZT", "X-User-Id": "000123" }),
+}));
 
 const account: Account = {
   id: "president",
@@ -56,10 +72,17 @@ const view = {
       endDate: "2026-10-31",
     },
   ],
-  targets: [{ sapId: "0001", name: "客户经理" }],
+  targets: [
+    {
+      sapId: "0001",
+      name: "客户经理",
+      bbkId: "recipient-bank",
+      bbkOrgId: "recipient-org",
+    },
+  ],
 };
 const ok = (data: unknown) =>
-  new Response(JSON.stringify({ code: "200", message: "ok", data }));
+  jsonResponse(JSON.stringify({ code: "200", message: "ok", data }));
 
 beforeEach(() => {
   vi.mocked(request).mockClear();
@@ -69,6 +92,7 @@ beforeEach(() => {
     userId: "000123",
     positionId: "RB1101",
     bbk: "branch-a",
+    orgCode: "org-a",
     userName: "真实姓名",
     source: "RMASSIST",
   });
@@ -107,23 +131,30 @@ describe("Java 规划网关契约", () => {
     const plans = await api.fetchPlanList(true);
     const [path, options] = vi.mocked(fetch).mock.calls[0];
     const url = new URL(String(path), "https://gateway.example");
-    expect(url.pathname).toBe("/zt/wealth/plans");
+    expect(url.pathname).toBe("/api/zt/wealth/plans");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       sapId: "000123",
       role: "president",
       bbkId: "branch-a",
     });
-    expect(options?.headers).toEqual({
-      "Content-Type": "application/json",
-      Authorization: "gateway-token",
-    });
+    expect(new Headers(options?.headers).get("X-Source-Id")).toBe("RCZT");
+    expect(new Headers(options?.headers).get("X-User-Id")).toBe("000123");
     expect(options).not.toHaveProperty("body");
-    expect(request).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalled();
     expect(plans[0]).toMatchObject({
       source: "行长关注",
       publishStatus: "published",
       status: "分发中",
       targetSapIds: ["0001"],
+      targets: [
+        {
+          sapId: "0001",
+          name: "客户经理",
+          orgName: "",
+          bbkId: "recipient-bank",
+          bbkOrgId: "recipient-org",
+        },
+      ],
       items: [
         { id: "skill-a", cronExample: "生成名单", mcpRelations: ["mcp-a"] },
       ],
@@ -139,17 +170,24 @@ describe("Java 规划网关契约", () => {
         )
         .mockResolvedValueOnce(ok({ items: [view] }));
       await api.publishPlan(account, draft, editingId, [
-        { sapId: "0001", name: "客户经理", orgName: "支行" },
+        {
+          sapId: "0001",
+          name: "客户经理",
+          orgName: "支行",
+          bbkId: "recipient-bank",
+          bbkOrgId: "recipient-org",
+        },
       ]);
       const [path, options] = vi.mocked(fetch).mock.calls[0];
       expect(path).toBe(
-        editingId ? "/zt/wealth/plans/plan%2Fa" : "/zt/wealth/plans",
+        editingId ? "/api/zt/wealth/plans/plan%2Fa" : "/api/zt/wealth/plans",
       );
       expect(options?.method).toBe(editingId ? "PUT" : "POST");
       expect(JSON.parse(String(options?.body))).toEqual({
         sapId: "000123",
         role: "president",
         bbkId: "branch-a",
+        bbkOrgId: "org-a",
         creatorName: "真实姓名",
         sourceId: "RMASSIST",
         agentId: "agent-a",
@@ -166,13 +204,23 @@ describe("Java 规划网关契约", () => {
             startDate: "2026-10-19",
             endDate: "2026-10-31",
             cronExpr: "0 9 * * *",
+            schedule: 1,
+            monitorTimeCron: "0 11 * * *",
+            finishRate: 60,
             cronExample: "生成名单",
             mcpRelations: ["mcp-a"],
           },
         ],
-        targets: [{ sapId: "0001", name: "客户经理" }],
+        targets: [
+          {
+            sapId: "0001",
+            name: "客户经理",
+            bbkId: "recipient-bank",
+            bbkOrgId: "recipient-org",
+          },
+        ],
       });
-      expect(request).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalled();
     },
   );
 
@@ -183,7 +231,7 @@ describe("Java 规划网关契约", () => {
     await api.removePlan("plan/a");
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "/zt/wealth/plans/plan%2Fa",
+      "/api/zt/wealth/plans/plan%2Fa",
       expect.objectContaining({
         method: "DELETE",
         body: JSON.stringify({ sapId: "000123" }),
@@ -196,7 +244,7 @@ describe("Java 规划网关契约", () => {
     "HTTP 200 业务码 %s 写操作抛错且不刷新",
     async (code) => {
       vi.mocked(fetch).mockResolvedValue(
-        new Response(JSON.stringify({ code, message: "业务失败", data: null })),
+        jsonResponse(JSON.stringify({ code, message: "业务失败", data: null })),
       );
       await expect(
         api.publishPlan(account, draft, null, []),
@@ -206,11 +254,10 @@ describe("Java 规划网关契约", () => {
   );
 
   it("读取业务失败时严格刷新上抛，普通读取降级", async () => {
-    vi.mocked(fetch).mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({ code: 403, message: "不可见", data: null }),
-        ),
+    vi.mocked(fetch).mockImplementation(async () =>
+      jsonResponse(
+        JSON.stringify({ code: 403, message: "不可见", data: null }),
+      ),
     );
     await expect(api.fetchPlanList(true)).rejects.toMatchObject({
       status: 403,
@@ -221,7 +268,7 @@ describe("Java 规划网关契约", () => {
   it("HTTP 失败保留后端文案，成功空数据不能当作完成", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ message: "网关不可用" }), {
+        jsonResponse(JSON.stringify({ message: "网关不可用" }), {
           status: 502,
         }),
       )
@@ -249,7 +296,7 @@ describe("Java 规划网关契约", () => {
   it("网关非 JSON 错误保留 HTTP 状态，删除 false 不作成功处理", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
-        new Response("<html>Bad Gateway</html>", { status: 502 }),
+        jsonResponse("<html>Bad Gateway</html>", { status: 502 }),
       )
       .mockResolvedValueOnce(ok(false));
     await expect(api.removePlan("a")).rejects.toMatchObject({ status: 502 });
@@ -275,3 +322,125 @@ describe("Java 规划网关契约", () => {
     });
   });
 });
+
+describe("行长督办策略接口字段", () => {
+  it.each([null, "plan-a"])(
+    "创建/编辑 %s 提交场景督办字段并从后台返回值回显",
+    async (editingId) => {
+      const monitoring = {
+        cycle: "within7days" as const,
+        expectedCompletionRate: 80,
+        schedule: {
+          type: "weekly" as const,
+          hour: 12,
+          minute: 30,
+          daysOfWeek: ["mon", "wed"],
+        },
+      };
+      const saved = {
+        ...view,
+        scenes: [
+          {
+            ...view.scenes[0],
+            schedule: 2,
+            monitorTimeCron: "30 12 * * mon,wed",
+            finishRate: 80,
+          },
+        ],
+      };
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          ok({ id: "plan-a", publishStatus: "publishing" }),
+        )
+        .mockResolvedValueOnce(ok({ items: [saved] }));
+      const result = await api.publishPlan(
+        account,
+        { ...draft, items: [{ ...draft.items[0], monitoring }] },
+        editingId,
+        [],
+      );
+      const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+      expect(body.scenes[0]).toMatchObject({
+        schedule: 2,
+        monitorTimeCron: "30 12 * * mon,wed",
+        finishRate: 80,
+      });
+      expect(body.scenes[0]).not.toHaveProperty("monitoring");
+      expect(result.plans[0].items![0].monitoring).toEqual(monitoring);
+    },
+  );
+  it.each(["RB0101", "RB0301"])(
+    "非行长 %s 即使条目带旧督办值也不发送三个字段",
+    async (positionId) => {
+      useIframeStore.setState({ positionId });
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          ok({ id: "plan-a", publishStatus: "publishing" }),
+        )
+        .mockResolvedValueOnce(ok({ items: [] }));
+      await api.publishPlan(
+        account,
+        {
+          ...draft,
+          items: [
+            {
+              ...draft.items[0],
+              monitoring: {
+                cycle: "today",
+                expectedCompletionRate: 80,
+                schedule: {
+                  type: "daily",
+                  hour: 9,
+                  minute: 0,
+                  daysOfWeek: ["mon"],
+                },
+              },
+            },
+          ],
+        },
+        null,
+        [],
+      );
+      const scene = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
+        .scenes[0];
+      for (const key of [
+        "schedule",
+        "monitorTimeCron",
+        "finishRate",
+        "monitoring",
+      ])
+        expect(scene).not.toHaveProperty(key);
+    },
+  );
+  it("回显保留0%，旧规划没有督办字段时不伪造已保存策略", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      ok({
+        items: [
+          view,
+          {
+            ...view,
+            id: "zero",
+            scenes: [
+              {
+                ...view.scenes[0],
+                schedule: 1,
+                monitorTimeCron: "0 9 * * *",
+                finishRate: 0,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const plans = await api.fetchPlanList(true);
+    expect(plans[0].items![0].monitoring).toBeUndefined();
+    expect(plans[1].items![0].monitoring?.expectedCompletionRate).toBe(0);
+  });
+});
+
+function jsonResponse(body: BodyInit | null, init: ResponseInit = {}) {
+  return new Response(body, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
+  });
+}

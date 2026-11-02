@@ -92,7 +92,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",
@@ -176,7 +175,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/branchTreeInfo",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           mmOrgCode: "102",
@@ -190,7 +188,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/branchTreeInfo",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           mmOrgCode: "1021",
@@ -204,7 +201,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",
@@ -258,7 +254,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",
@@ -389,7 +384,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/branchTreeInfo",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           mmOrgCode: "755",
@@ -406,7 +400,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",
@@ -463,7 +456,6 @@ describe("中台按支行累计分发", () => {
       "/zt/wealth/wmadm/getUserPostionByBrn",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         signal: expect.any(AbortSignal),
         body: JSON.stringify({
           bbkOrgId: "755",

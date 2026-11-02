@@ -73,14 +73,14 @@
   textarea {
     outline: none;
   }
-  button:focus,
-  input:focus,
-  select:focus,
-  textarea:focus,
-  a:focus {
-    outline: 3px solid #8bbaff;
-    outline-offset: 2px;
-  }
+  // button:focus,
+  // input:focus,
+  // select:focus,
+  // textarea:focus,
+  // a:focus {
+  //   outline: 3px solid #8bbaff;
+  //   outline-offset: 2px;
+  // }
   button {
     transition:
       background 0.15s,
@@ -2761,6 +2761,9 @@
     border: 0;
     display: block;
   }
+  .selectedList.withoutMonitoring {
+    --selected-columns: minmax(240px, 1.5fr) minmax(0, 2.2fr) 150px 28px;
+  }
 
   .schemePreviewEmpty {
     height: 100%;
@@ -2892,8 +2895,14 @@
   }
   .selectedList {
     --selected-columns: minmax(170px, 0.8fr) minmax(0, 1.7fr) minmax(0, 1.2fr)
-      120px 28px;
+      150px 28px;
     display: block;
+  }
+  @media (min-width: 1600px) {
+    .selectedList {
+      --selected-columns: minmax(170px, 0.8fr) minmax(0, 1.6fr) minmax(0, 1.4fr)
+        150px 28px;
+    }
   }
   .selectedListHeader,
   .selectedRow {
@@ -3103,6 +3112,9 @@
     .monitoringBlock .customerLimitControl {
       width: 84px;
     }
+    > .monitoringBlock::before {
+      flex-basis: 60px;
+    }
     > .scheduleBlock,
     > .scheduleBlock.customConfiguration {
       display: grid;
@@ -3129,6 +3141,24 @@
       }
       > .scheduleField {
         grid-column: 2;
+      }
+    }
+  }
+  .withoutMonitoring .selectedRow .configurationColumn > .scheduleBlock {
+    display: flex;
+    flex-direction: row;
+    min-height: 0;
+    height: 40px;
+    padding: 0;
+  }
+  .calendarDetailTable .detailMonitoring {
+    min-width: 210px;
+    > div {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      + div {
+        margin-top: 12px;
       }
     }
   }
@@ -3192,6 +3222,10 @@
     flex-direction: column;
     gap: 5px;
     min-width: 0;
+    .customerLimitControl {
+      width: 96px;
+      max-width: 100%;
+    }
     small {
       font-size: 11px;
       color: var(--muted);
@@ -3849,117 +3883,97 @@
     padding: 7px 10px;
     vertical-align: middle;
   }
-  .tasksLayout.business .customerTable {
-    min-width: 920px;
-  }
   .customerTable.metricsTable {
-    table-layout: fixed;
-    min-width: 1308px;
-  }
-  .customerTable.metricsTable .metricsCol {
-    width: 520px;
-    white-space: normal;
-  }
-  .customerTable.metricsTable.todayTaskTable {
-    min-width: 1443px;
-    .contactStatusCol {
-      width: 135px;
+    --execution-width: 210px;
+    --scheme-width: 120px;
+    table-layout: auto;
+    min-width: 1000px;
+    th,
+    td {
+      width: auto;
     }
-  }
-  .customerTable.metricsTable.sceneTable {
-    min-width: 1678px;
-    th:nth-child(1),
-    td:nth-child(1),
-    th:nth-child(6),
-    td:nth-child(6) {
-      width: 100px;
+    .name {
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
-    th:nth-child(2),
-    td:nth-child(2) {
-      width: 135px;
+    .metricsCol {
+      width: auto;
+      min-width: 286px;
       white-space: normal;
     }
+    .contactStatusCol {
+      width: 110px;
+      white-space: nowrap;
+    }
+    .schemeCol {
+      width: 1%;
+      white-space: nowrap;
+    }
+    .sceneCol {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
     td:nth-child(2) .tag {
-      box-sizing: border-box;
       max-width: 100%;
       white-space: normal;
       overflow-wrap: anywhere;
     }
-    .sceneCol {
-      width: 160px;
+    .opportunityCol,
+    .reason {
+      width: auto;
+      min-width: 0;
       white-space: normal;
-      overflow-wrap: anywhere;
+    }
+    .tagFilterTrigger {
+      gap: 4px;
+      padding-left: 0;
+      padding-right: 0;
     }
     .opportunityPreview {
       -webkit-line-clamp: 3;
       line-clamp: 3;
       max-height: 4.95em;
     }
-    .metricsCol {
-      width: auto;
+    &.completedTable .channelCol {
+      white-space: normal;
     }
-    &.opportunityTable .opportunityCol,
-    &.opportunityTable .reason {
-      width: 240px;
-      min-width: 0;
-    }
-    &.todayCustomerTable th:nth-child(6),
-    &.todayCustomerTable td:nth-child(6) {
-      width: 135px;
-    }
-    &.todayCustomerTable th:nth-child(2),
-    &.todayCustomerTable td:nth-child(2) {
-      width: 125px;
-    }
-    &.opportunityTable:not(.todayCustomerTable) {
-      min-width: 1733px;
-      .opportunityCol,
-      .reason {
-        width: 260px;
-      }
-      th:nth-child(6),
-      td:nth-child(6) {
-        width: 135px;
-      }
-    }
-    &.completedTable {
-      // 含最近接触时间的固定列合计 1133px，指标区至少保留 520px（窄屏 356px）。
-      min-width: 1653px;
-      th:first-child,
-      td:first-child {
-        width: 150px;
-      }
-      .sceneCol {
-        width: 180px;
-      }
-      .channelCol {
-        width: 150px;
-        white-space: normal;
-      }
-      .executionCol {
-        width: 190px;
-        white-space: normal;
-        overflow-wrap: anywhere;
-      }
-      th:last-child,
-      td:last-child {
-        width: 160px;
-      }
-    }
+  }
+  .customerTable.metricsTable.todayCustomerTable,
+  .customerTable.metricsTable.todayTaskTable {
+    min-width: 1100px;
   }
   .customerTable.metricsTable.opportunityTable .executionCol {
     position: sticky;
     right: 0;
-    width: 220px;
+    width: var(--execution-width);
+    min-width: var(--execution-width);
     background: var(--console-management-surface, #fff);
     border-left: 1px solid var(--console-management-border, #e5e7eb);
     z-index: 1;
   }
-  .customerTable.metricsTable.sceneTable.todayTaskTable {
-    min-width: 1803px;
+  .customerTable.metricsTable.opportunityTable .recentContactCol {
+    position: sticky;
+    right: calc(var(--execution-width) + var(--scheme-width));
+    background: var(--console-management-surface, #fff);
+    z-index: 1;
   }
-  .customerTable.metricsTable.opportunityTable th.executionCol {
+  .customerTable.metricsTable.opportunityTable .schemeCol {
+    position: sticky;
+    right: var(--execution-width);
+    width: var(--scheme-width);
+    min-width: var(--scheme-width);
+    background: var(--console-management-surface, #fff);
+    z-index: 1;
+  }
+  .customerTable.metricsTable.opportunityTable th.executionCol,
+  .customerTable.metricsTable.opportunityTable th.schemeCol,
+  .customerTable.metricsTable.opportunityTable th.recentContactCol {
     background: linear-gradient(100deg, #f0f8ff, #edf6ff);
+  }
+  @media (min-width: 1600px) {
+    .customerTable.metricsTable {
+      --execution-width: 240px;
+    }
   }
   .customerTable.metricsTable .reason {
     min-width: 0;
@@ -3969,7 +3983,7 @@
   .customerTable.metricsTable td.recentContactCol,
   .customerTable.metricsTable.sceneTable th.recentContactCol,
   .customerTable.metricsTable.sceneTable td.recentContactCol {
-    width: 168px;
+    width: 128px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3978,8 +3992,17 @@
   .customerTable td.recentContactCol {
     font-size: 12px;
   }
+  .recentContactValue {
+    display: block;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .customerMetrics {
-    width: 100%;
+    // 指标块参与列宽计算，长文本仍在块内省略。
+    min-width: 260px;
+    max-width: 395px;
   }
   .customerLabels {
     display: flex;
@@ -3990,12 +4013,18 @@
   .customerScenes {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: 8px;
+    width: 140px;
     margin: 0;
     padding: 0;
     list-style: none;
     li {
       min-width: 0;
+      max-width: 100%;
+    }
+    .metricItem {
+      width: 140px;
     }
     .metricItem:focus {
       outline: 2px solid var(--blue);
@@ -4003,13 +4032,19 @@
     }
   }
   .metricGrid {
-    display: grid;
-    grid-template-columns: repeat(3, 156px);
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px 10px;
     margin: 0;
+    .metricItem {
+      flex: 0 0 125px;
+      width: 125px;
+    }
   }
   .metricItem {
     display: block;
+    width: max-content;
+    max-width: min(240px, 100%);
     min-width: 0;
     padding: 3px 7px;
     border-radius: 6px;
@@ -4095,74 +4130,8 @@
     font-size: 14px;
     font-weight: 500;
   }
-  @media (max-width: 1600px) {
-    .customerTable.metricsTable {
-      min-width: 1128px;
-    }
-    .customerTable.metricsTable.sceneTable {
-      min-width: 1514px;
-    }
-    .customerTable.metricsTable.sceneTable.opportunityTable:not(
-        .todayCustomerTable
-      ) {
-      min-width: 1569px;
-    }
-    .customerTable.metricsTable.sceneTable.completedTable {
-      min-width: 1489px;
-    }
-    .tasksLayout.business .customerTable.metricsTable {
-      min-width: 1128px;
-    }
-    .customerTable.metricsTable.sceneTable.todayTaskTable {
-      min-width: 1639px;
-    }
-    .tasksLayout.business .customerTable.metricsTable.todayTaskTable {
-      min-width: 1263px;
-    }
-    .customerTable.metricsTable .metricsCol {
-      width: 356px;
-    }
-    .metricGrid {
-      grid-template-columns: repeat(2, 156px);
-    }
-  }
-  @media (max-width: 1000px) {
-    .customerTable.metricsTable .metricsCol {
-      width: 190px;
-    }
-    .metricGrid {
-      grid-template-columns: 156px;
-    }
-  }
   .tasksLayout.business .customerTable.metricsTable.opportunityTable {
-    --business-metrics-width: 520px;
-    // 固定列合计 1028px，另预留 1px 表格边框，避免经营机会承受剩余宽度。
-    min-width: calc(1029px + var(--business-metrics-width));
-    th:first-child,
-    td:first-child {
-      width: 110px;
-    }
-    .opportunityCol,
-    .reason {
-      width: 260px;
-    }
-    th.opportunityCol {
-      white-space: nowrap;
-    }
-    th:nth-child(4),
-    td:nth-child(4) {
-      width: 135px;
-    }
-  }
-  @media (max-width: 1600px) {
-    .tasksLayout.business .customerTable.metricsTable.opportunityTable {
-      --business-metrics-width: 356px;
-    }
-  }
-  @media (max-width: 1000px) {
-    .tasksLayout.business .customerTable.metricsTable.opportunityTable {
-      --business-metrics-width: 190px;
-    }
+    min-width: 800px;
   }
   @media (max-width: 1250px) {
     .accountSwitcher .switcherTrigger {
@@ -4211,6 +4180,7 @@
 .root {
   .sceneFilterApplied {
     min-width: 0;
+    max-width: 180px;
     span {
       flex: 1;
       min-width: 0;

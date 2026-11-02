@@ -771,6 +771,11 @@ class HtmlPreviewClickStore:
             event_type="button_click",
         )
         list_key_expr = self._sql_list_key_expr()
+        # 无文件地址且无名单标识的工作台点击不属于 HTML 名单。
+        where_sql = self._append_sql_condition(
+            where_sql,
+            f"{list_key_expr} <> ''",
+        )
         customer_key_expr = self._sql_event_customer_key_expr()
         button_type_expr = self._sql_button_type_expr()
         valid_click_condition = (
@@ -942,6 +947,7 @@ class HtmlPreviewClickStore:
                 {event_where_with_valid_clicks}
             ) AS merged
             WHERE merged.list_key IS NOT NULL
+                AND merged.list_key <> ''
                 AND merged.customer_key IS NOT NULL
             GROUP BY merged.list_key
         """

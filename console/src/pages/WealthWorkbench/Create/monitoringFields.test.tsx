@@ -8,20 +8,46 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { MonitoringFields } from "./index";
-import { monitoringStorageKey, readMonitoring } from "../monitoring";
+import { defaultMonitoring } from "../monitoring";
+import { useWealthStore } from "../store";
 
-const storageKey = monitoringStorageKey("test-user", null);
+function Harness() {
+  const config = useWealthStore((state) => state.draft.items[0].monitoring);
+  const update = useWealthStore((state) => state.setItemMonitoring);
+  return (
+    <MonitoringFields
+      sceneName="经营场景"
+      config={config ?? defaultMonitoring()}
+      onChange={(patch) => update("scene", patch)}
+    />
+  );
+}
 const mount = () =>
   render(
     <MemoryRouter>
-      <MonitoringFields
-        sceneId="scene"
-        sceneName="经营场景"
-        storageKey={storageKey}
-      />
+      <Harness />
     </MemoryRouter>,
   );
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  useWealthStore.setState({
+    accountId: "president",
+    draft: {
+      name: "规划",
+      items: [
+        {
+          id: "scene",
+          sceneName: "经营场景",
+          categoryLabel: "基金",
+          categoryCode: "fund",
+          mcpRelations: [],
+          direction: "方向",
+          cycle: "本月",
+          schedule: { type: "daily" },
+        },
+      ],
+    },
+  });
+});
 afterEach(cleanup);
 
 it("完成率清空后可重新输入，不补前导零，留空失焦时显示0", () => {
@@ -32,7 +58,9 @@ it("完成率清空后可重新输入，不补前导零，留空失焦时显示0
   fireEvent.change(input, { target: { value: "7" } });
   fireEvent.change(input, { target: { value: "70" } });
   expect((input as HTMLInputElement).value).toBe("70");
-  expect(readMonitoring(storageKey).scene.expectedCompletionRate).toBe(70);
+  expect(
+    useWealthStore.getState().draft.items[0].monitoring!.expectedCompletionRate,
+  ).toBe(70);
   view.unmount();
   mount();
   const restored = screen.getByLabelText("经营场景预期完成率");
@@ -40,12 +68,18 @@ it("完成率清空后可重新输入，不补前导零，留空失焦时显示0
   fireEvent.change(restored, { target: { value: "" } });
   fireEvent.blur(restored);
   expect(restored).toHaveValue(0);
-  expect(readMonitoring(storageKey).scene.expectedCompletionRate).toBe(0);
+  expect(
+    useWealthStore.getState().draft.items[0].monitoring!.expectedCompletionRate,
+  ).toBe(0);
 });
 
-it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
+it("默认60%和每日11:00，编辑后重新挂载可正常回显", () => {
   const view = mount();
   expect(screen.getByLabelText("经营场景预期完成率")).toHaveValue(60);
+  expect(screen.getByText("督办推送时间")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "有效期内" }),
+  ).not.toBeInTheDocument();
   expect(
     within(screen.getByRole("group", { name: "经营场景监控周期" })).getByRole(
       "button",
@@ -53,8 +87,8 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
     ),
   ).toHaveAttribute("aria-pressed", "true");
   expect(
-    screen.getByRole("button", { name: "经营场景监控执行时刻" }),
-  ).toHaveTextContent("09:00");
+    screen.getByRole("button", { name: "经营场景督办推送时间" }),
+  ).toHaveTextContent("11:00");
   fireEvent.change(screen.getByLabelText("经营场景预期完成率"), {
     target: { value: "85" },
   });
@@ -73,7 +107,7 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
   const days = screen.getByRole("group", { name: "经营场景监控日" });
   fireEvent.click(within(days).getByRole("button", { name: "星期二" }));
   fireEvent.click(within(days).getByRole("button", { name: "星期一" }));
-  fireEvent.click(screen.getByRole("button", { name: "经营场景监控执行时刻" }));
+  fireEvent.click(screen.getByRole("button", { name: "经营场景督办推送时间" }));
   fireEvent.click(
     within(screen.getByLabelText("小时")).getByRole("button", {
       name: "12",
@@ -94,13 +128,15 @@ it("默认60%和每日09:00，编辑后重新挂载可正常回显", () => {
     ),
   ).toHaveAttribute("aria-pressed", "true");
   expect(
-    screen.getByRole("button", { name: "经营场景监控执行时刻" }),
+    screen.getByRole("button", { name: "经营场景督办推送时间" }),
   ).toHaveTextContent("12:30");
   expect(screen.getByRole("button", { name: "星期二" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  expect(readMonitoring(storageKey).scene.schedule.daysOfWeek).toEqual(["tue"]);
+  expect(
+    useWealthStore.getState().draft.items[0].monitoring!.schedule.daysOfWeek,
+  ).toEqual(["tue"]);
 });
 
 it("完成率限制在0至100之间，每周至少保留一个监控日", () => {

@@ -219,17 +219,19 @@ class TenantSourceInfoListResponse(BaseModel):
     "/tenants/by-source",
     response_model=TenantSourceInfoListResponse,
     summary="按来源查询租户列表",
-    description="运维模式下查询指定source_id下的所有租户信息",
+    description="运维模式下查询指定source_id下的租户信息，可按bbk_id精确过滤",
 )
 async def list_tenants_by_source(
     request: Request,
     source_id: Optional[str] = None,
+    bbk_id: Optional[str] = None,
 ) -> TenantSourceInfoListResponse:
     """按来源查询租户列表。
 
     Args:
         request: FastAPI请求对象
         source_id: 来源标识，如果不传则使用请求头中的X-Source-Id
+        bbk_id: 可选BBK标识，传入时在来源范围内精确过滤
 
     Returns:
         租户来源信息列表
@@ -261,6 +263,7 @@ async def list_tenants_by_source(
     rows = await store.get_by_source(
         source_id,
         include_templates=True,
+        bbk_id=bbk_id,
     )
     items = [
         TenantSourceInfo(

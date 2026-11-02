@@ -34,6 +34,7 @@ RUN_FIELDS = (
     *IDENTITY_FIELDS,
     "execution_id",
     "definition_version",
+    "enqueued_state_version",
     "status",
     "settled_status",
     "settled_error_code",
@@ -47,6 +48,9 @@ RUN_FIELDS = (
     "dispatch_attempt",
     "updated_at",
     "accepted_at",
+    "started_at",
+    "finished_at",
+    "settled_at",
     "history_execution_id",
 )
 
@@ -92,7 +96,8 @@ async def member_rows(db, receipt, *, lock=False, member_ids=None):
         + ",".join(f"r.{name}" for name in RUN_FIELDS)
         + ",m.member_id,m.version AS member_version,m.business_attempt,"
         "m.initial_execution_id,m.current_execution_id,m.member_role,m.dispatch_order AS member_order,"
-        "d.definition_version AS current_definition_version,d.management_owner,s.job_id AS current_state_job_id "
+        "d.definition_version AS current_definition_version,d.management_owner,s.job_id AS current_state_job_id,"
+        "s.queue_invalidation_version AS current_queue_invalidation_version "
         f"FROM {MEMBERS} m LEFT JOIN swe_cron_execution_runs r ON m.current_execution_id=r.execution_id AND {joins} "
         f"LEFT JOIN swe_cron_jobs_v2 d ON {definitions} LEFT JOIN swe_cron_job_states s ON {states} WHERE m.batch_id=%s"
         + selection

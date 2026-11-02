@@ -1688,7 +1688,7 @@ class QueryService:
         db = get_db_connection()
 
         # Build WHERE clause
-        conditions: List[str] = []
+        conditions: List[str] = ["e.is_final = 1"]
         sql_params: List = []
 
         if params.job_id:
@@ -1811,7 +1811,7 @@ class QueryService:
             ExecutionModel or None if not found
         """
         db = get_db_connection()
-        conditions = ["e.id = %s"]
+        conditions = ["e.id = %s", "e.is_final = 1"]
         sql_params: List = [execution_id]
 
         if source_id:
@@ -1863,7 +1863,7 @@ class QueryService:
         db = get_db_connection()
 
         # Build WHERE clause - 需要 JOIN jobs 表来支持 source_id 筛选
-        conditions: List[str] = []
+        conditions: List[str] = ["e.is_final = 1"]
         sql_params: List = []
 
         if job_id:
@@ -1985,7 +1985,7 @@ class QueryService:
                 GROUP BY c.cron_task_id, c.customer_id
             ) clicks ON clicks.cron_task_id = e.job_id
                 AND clicks.customer_id = s.custuid
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               {bbk_filter_sql}
               {source_filter_sql}
             ORDER BY e.actual_time DESC, e.id DESC, s.custuid
@@ -3372,7 +3372,7 @@ class QueryService:
                 ) AS error_count
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               {bbk_filter_sql}
@@ -3404,7 +3404,7 @@ class QueryService:
             SELECT COUNT(*) AS read_tasks
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND e.status = 'success'
               AND e.async_status = 'success'
               AND e.is_read = 1
@@ -3631,7 +3631,7 @@ class QueryService:
             SELECT DISTINCT j.bbk_id
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND j.bbk_id IS NOT NULL
@@ -3667,7 +3667,7 @@ class QueryService:
             SELECT DISTINCT j.bbk_id
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND j.bbk_id IS NOT NULL
@@ -3728,7 +3728,7 @@ class QueryService:
             SELECT COUNT(DISTINCT j.id) AS count
             FROM swe_cron_jobs j
             JOIN swe_cron_executions e ON e.job_id = j.id
-            WHERE j.deleted_at IS NULL
+            WHERE e.is_final = 1 AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
@@ -3785,7 +3785,7 @@ class QueryService:
             SELECT DISTINCT j.id
             FROM swe_cron_jobs j
             JOIN swe_cron_executions e ON e.job_id = j.id
-            WHERE j.deleted_at IS NULL
+            WHERE e.is_final = 1 AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
@@ -3845,7 +3845,7 @@ class QueryService:
                          OR (status = 'success' AND async_status = 'error')
                     THEN 1 ELSE 0 END) AS error_count
             FROM swe_cron_executions
-            WHERE actual_time >= %s AND actual_time <= %s
+            WHERE is_final = 1 AND actual_time >= %s AND actual_time <= %s
               AND job_id IN ({placeholders})
               {jkh_filter_sql}
         """
@@ -3948,7 +3948,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             {self._skill_binding_join("j", "s")}
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               {jkh_filter_sql}
               {source_where}
@@ -4225,7 +4225,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             JOIN swe_cron_subtasks s ON e.trace_id = s.trace_id
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND s.custuid IS NOT NULL
               {source_where}
@@ -4259,7 +4259,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             JOIN swe_cron_subtasks s ON e.trace_id = s.trace_id
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND s.custuid IS NOT NULL
               AND {skill_exists}
@@ -4322,7 +4322,7 @@ class QueryService:
             SELECT COUNT(DISTINCT j.tenant_id) AS manager_count
             FROM swe_cron_jobs j
             JOIN swe_cron_executions e ON e.job_id = j.id
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND j.deleted_at IS NULL
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND {skill_exists}
@@ -4353,7 +4353,7 @@ class QueryService:
             SELECT COUNT(DISTINCT j.tenant_id) AS manager_count
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND e.status = 'success'
               AND e.async_status = 'success'
@@ -4388,7 +4388,7 @@ class QueryService:
             SELECT COUNT(DISTINCT j.tenant_id) AS manager_count
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND e.status = 'success'
               AND e.async_status = 'success'
@@ -4849,7 +4849,7 @@ class QueryService:
                 COUNT(DISTINCT j.creator_user_id) AS affected_manager_count
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND (
                 e.status = 'error'
                 OR (e.status = 'success' AND e.async_status = 'error')
@@ -4909,7 +4909,7 @@ class QueryService:
                 ) AS affected_managers
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND j.deleted_at IS NULL
               AND j.status != 'deleted'
               {bbk_filter_sql}
@@ -4999,7 +4999,7 @@ class QueryService:
                 COUNT(*) AS count
             FROM swe_cron_executions e
             LEFT JOIN swe_cron_jobs j ON e.job_id = j.id
-            WHERE e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND e.actual_time >= %s AND e.actual_time <= %s
               AND (
                 e.status = 'error'
                 OR (e.status = 'success' AND e.async_status = 'error')
@@ -5180,7 +5180,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             {self._skill_binding_join("j", "s")}
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               {source_where}
         """
@@ -5372,7 +5372,7 @@ class QueryService:
             FROM swe_cron_jobs j
             JOIN swe_cron_executions e ON j.id = e.job_id
                 AND e.actual_time >= %s AND e.actual_time <= %s
-            WHERE j.bbk_id = %s AND j.deleted_at IS NULL AND j.status != 'deleted'
+            WHERE e.is_final = 1 AND j.bbk_id = %s AND j.deleted_at IS NULL AND j.status != 'deleted'
               AND {skill_exists}
               {jkh_filter_sql}
               {source_where}
@@ -5406,7 +5406,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             {self._skill_binding_join("j", "s")}
-            WHERE j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
               {jkh_filter_sql}
               {source_where}
             GROUP BY j.tenant_id
@@ -5441,7 +5441,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             JOIN swe_cron_subtasks s ON e.trace_id = s.trace_id
-            WHERE j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s AND e.actual_time >= %s AND e.actual_time <= %s
               AND s.custuid IS NOT NULL
               AND {skill_exists}
               {jkh_filter_sql}
@@ -5751,7 +5751,7 @@ class QueryService:
                 AND c.clicked_at >= %s AND c.clicked_at <= %s
                 AND (c.event_type = 'button_click' OR (c.event_type = 'preview_view' AND c.template_type = 'sub'))
                 {click_source_on}
-            WHERE j.bbk_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               AND {skill_expr} = %s
               {source_where}
@@ -5930,7 +5930,7 @@ class QueryService:
             FROM swe_cron_executions e
             JOIN swe_cron_jobs j ON e.job_id = j.id
             {self._skill_binding_join("j", "s")}
-            WHERE j.bbk_id = %s AND j.tenant_id = %s
+            WHERE e.is_final = 1 AND j.bbk_id = %s AND j.tenant_id = %s
               AND e.actual_time >= %s AND e.actual_time <= %s
               {source_where}
             GROUP BY s.skill_id

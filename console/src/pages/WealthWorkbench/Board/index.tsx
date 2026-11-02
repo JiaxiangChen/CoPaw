@@ -209,6 +209,7 @@ export default function Board() {
                   <th>经营方向</th>
                   <th>执行时间</th>
                   <th>执行频率</th>
+                  {account.id === "president" && <th>督办策略</th>}
                   <th>目标客户</th>
                   <th>已生成任务</th>
                   {/* <th>任务执行率</th> */}
@@ -254,6 +255,35 @@ export default function Board() {
                       <td>
                         <span className={styles.tag}>{planFrequency(p)}</span>
                       </td>
+                      {account.id === "president" && (
+                        <td className={styles.detailMonitoring}>
+                          {p.items?.map((item) => (
+                            <div key={item.id}>
+                              <strong>{item.sceneName}</strong>
+                              {item.monitoring ? (
+                                <>
+                                  <span>
+                                    监控周期：
+                                    {item.monitoring.cycle === "within7days"
+                                      ? "T+7日内"
+                                      : "当日"}
+                                  </span>
+                                  <span>
+                                    监控时间：
+                                    {scheduleLabel(item.monitoring.schedule)}
+                                  </span>
+                                  <span>
+                                    预期完成率：
+                                    {item.monitoring.expectedCompletionRate}%
+                                  </span>
+                                </>
+                              ) : (
+                                <span>未设置督办策略</span>
+                              )}
+                            </div>
+                          ))}
+                        </td>
+                      )}
                       <td>{customersText(p)}</td>
                       <td>{tasksText(p)}</td>
                       {/* <td>
@@ -302,7 +332,7 @@ export default function Board() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={10}>
+                    <td colSpan={account.id === "president" ? 10 : 9}>
                       <div className={styles.empty}>
                         当日暂无符合筛选条件的工作任务
                       </div>
@@ -547,7 +577,9 @@ export default function Board() {
             onViewCustomers={
               canAccessPage(account.id, "tasks")
                 ? (skillId) =>
-                    navigate(`/wealth/today?${new URLSearchParams({ skillId })}`)
+                    navigate(
+                      `/wealth/today?${new URLSearchParams({ skillId })}`,
+                    )
                 : undefined
             }
           />

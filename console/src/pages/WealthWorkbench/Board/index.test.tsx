@@ -385,4 +385,81 @@ describe("Board", () => {
       );
     }
   });
+  it.each(["president", "rm", "middle"] as const)(
+    "%s 的工作任务详情按角色展示后台督办策略",
+    (accountId) => {
+      const day = todayKey();
+      useWealthStore.setState({
+        accountId,
+        plansLoaded: true,
+        plans: [
+          {
+            id: "monitor-plan",
+            name: "督办规划",
+            source: "分行关注",
+            desc: "",
+            customers: 0,
+            tasks: 0,
+            rate: 0,
+            status: "已自动下发",
+            period: "今日",
+            start: day,
+            end: day,
+            items: [
+              {
+                id: "skill",
+                sceneName: "督办场景",
+                categoryCode: "fund",
+                categoryLabel: "基金",
+                direction: "经营",
+                mcpRelations: [],
+                cycle: "今日",
+                start: day,
+                end: day,
+                schedule: { type: "daily", hour: 9, minute: 0 },
+                monitoring: {
+                  cycle: "within7days",
+                  schedule: {
+                    type: "weekly",
+                    hour: 12,
+                    minute: 30,
+                    daysOfWeek: ["mon", "wed"],
+                  },
+                  expectedCompletionRate: 80,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "督办规划，1 个技能，点击查看详情",
+        }),
+      );
+      const detail = render(<>{useWealthStore.getState().dialog?.body}</>);
+      if (accountId === "president") {
+        expect(
+          within(detail.container).getByRole("columnheader", {
+            name: "督办策略",
+          }),
+        ).toBeInTheDocument();
+        expect(detail.container).toHaveTextContent("监控周期：T+7日内");
+        expect(detail.container).toHaveTextContent("12:30");
+        expect(detail.container).toHaveTextContent("预期完成率：80%");
+      } else {
+        expect(
+          within(detail.container).queryByRole("columnheader", {
+            name: "督办策略",
+          }),
+        ).not.toBeInTheDocument();
+        expect(detail.container).not.toHaveTextContent("预期完成率");
+      }
+    },
+  );
 });

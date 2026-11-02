@@ -78,7 +78,7 @@ describe("ScheduleEditor", () => {
     );
     const repeatRule = screen.getByLabelText("紧凑排程场景自定义重复规则");
     const time = screen.getByRole("button", {
-      name: "紧凑排程场景自定义执行时刻",
+      name: "紧凑排程场景自定义名单推送时间",
     });
     expect(repeatRule).toHaveValue(mode);
     expect(repeatRule.closest(`.${styles.customScheduleRow}`)).toContainElement(
@@ -260,29 +260,18 @@ describe("Create", () => {
     );
     const header = screen.getByText("经营场景 / 经营方向").parentElement!;
     expect(Array.from(header.children).map((node) => node.textContent)).toEqual(
-      [
-        "经营场景 / 经营方向",
-        "执行周期",
-        "督办策略",
-        "推送客户数（选填）",
-        "操作",
-      ],
+      ["经营场景 / 经营方向", "执行周期", "推送客户数（选填）", "操作"],
     );
     expect(
       screen.queryByText("经营方向", { exact: true }),
     ).not.toBeInTheDocument();
     const row = header.nextElementSibling!;
-    expect(row.children).toHaveLength(5);
+    expect(row.children).toHaveLength(4);
     expect(
       Array.from(row.children[1].children).map((node) =>
         node.getAttribute("data-label"),
       ),
     ).toEqual(["任务周期", "执行频率"]);
-    expect(
-      Array.from(row.children[2].children).map((node) =>
-        node.getAttribute("data-label"),
-      ),
-    ).toEqual(["监控周期", "监控时间", "预期完成率"]);
     expect(
       screen.queryByRole("button", { name: /^上移|^下移/ }),
     ).not.toBeInTheDocument();

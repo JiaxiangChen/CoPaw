@@ -54,9 +54,7 @@ const memberColumns: ColumnsType<ManagedBatchMember> = [
         <Tooltip title={`定时任务 ID：${item.job_id}`}>
           <span>{item.job_id}</span>
         </Tooltip>
-        <span>
-          第 {item.business_attempt} 次业务尝试 · {item.dispatch_attempt} 次投递
-        </span>
+        <span>重试次数：{Math.max(0, item.business_attempt - 1)}</span>
       </div>
     ),
   },

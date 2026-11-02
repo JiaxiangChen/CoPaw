@@ -43,7 +43,8 @@ async def create_subtask(
     Creates a new subtask record with trace_id, task_id, filename,
     and optional fields: task_type, custuid, cust_nm,
     notification_content_wplus, notification_content_zhaohu, need_notification,
-    status, and info. Status, when provided, must be SUC, FAIL, or TIMEOUT.
+    has_main_task, status, and info. Status, when provided, must be SUC, FAIL,
+    or TIMEOUT.
     The record defaults to status=NULL and info='', created_at=now(),
     updated_at=NULL.
 
@@ -66,6 +67,7 @@ async def create_subtask(
             notification_content_wplus=request.notification_content_wplus,
             notification_content_zhaohu=request.notification_content_zhaohu,
             need_notification=request.need_notification,
+            has_main_task=request.has_main_task,
             template_id=request.template_id,
             result_id=request.result_id,
             status=request.status,

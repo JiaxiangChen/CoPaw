@@ -19,6 +19,7 @@ from .swe_client import checked_base
 from .dispatch_events import append_run_event
 
 logger = logging.getLogger(__name__)
+DISPATCH_RETRY_DELAYS_SECONDS = (5, 10, 20, 30, 60)
 
 
 class ManagedSweExecutionClient:
@@ -367,7 +368,9 @@ class ExecutionDispatcher:
                 "dispatch_owner": "",
                 "dispatch_lease_until": self.clock()
                 + timedelta(
-                    seconds=min(60, 2 ** min(row["dispatch_attempt"], 6)),
+                    seconds=DISPATCH_RETRY_DELAYS_SECONDS[
+                        min(row["dispatch_attempt"] - 1, 4)
+                    ],
                 ),
                 "version": row["version"] + 1,
                 "updated_at": self.clock(),

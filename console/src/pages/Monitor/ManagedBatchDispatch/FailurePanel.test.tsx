@@ -128,4 +128,8 @@ it("失败预览展示原始错误说明，而不只是公开错误码", async (
   expect(
     screen.getByRole("columnheader", { name: "原始失败原因" }),
   ).toBeInTheDocument();
+  expect(
+    screen.getByRole("columnheader", { name: "重试次数" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("columnheader", { name: "业务尝试" })).toBeNull();
 });

@@ -24,6 +24,7 @@ EVENT_TYPES = frozenset(
         "retry_request",
         "retry_accepted",
         "retry_skipped",
+        "auto_retry_scheduled",
     },
 )
 STATUSES = frozenset(
@@ -69,6 +70,8 @@ DETAIL_FIELDS = frozenset(
 
 
 def failure_type(run):
+    if run.get("settled_error_code") == "cron_async_subtasks_timeout":
+        return "subtask_timeout"
     if run.get("settled_error_code") == "cron_async_subtasks_failed":
         return "subtask_failed"
     try:

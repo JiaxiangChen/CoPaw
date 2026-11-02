@@ -37,15 +37,10 @@ import {
   isValidCustNum,
 } from "../utils";
 import type { PlanItem, Scene } from "../types";
-import {
-  defaultMonitoring,
-  MONITORING_SAVE_ERROR,
-  monitoringScope,
-  monitoringStorageKey,
-  readMonitoring,
-  saveSceneMonitoring,
-  type SceneMonitoring,
-} from "../monitoring";
+import { defaultMonitoring, type SceneMonitoring } from "../monitoring";
+
+const PUSH_TIME_LABEL = "名单推送时间";
+const MONITORING_PUSH_TIME_LABEL = "督办推送时间";
 
 const STEP_DEFS = [
   {
@@ -282,14 +277,14 @@ export function ScheduleEditor({
       </div>
       {(type === "daily" || type === "weekly") && (
         <div className={styles.scheduleField}>
-          <span>执行时刻</span>
+          <span>{PUSH_TIME_LABEL}</span>
           <TimeField
             hour={schedule.hour ?? 9}
             minute={schedule.minute ?? 0}
             onChange={(hour, minute) =>
               updateSchedule(item.id, { hour, minute })
             }
-            ariaLabel={`${sceneName}执行时刻`}
+            ariaLabel={`${sceneName}${PUSH_TIME_LABEL}`}
           />
         </div>
       )}
@@ -349,14 +344,14 @@ export function ScheduleEditor({
               customConfig?.mode === "monthly" ||
               customConfig?.mode === "yearly") && (
               <div className={styles.scheduleField}>
-                <span>执行时刻</span>
+                <span>{PUSH_TIME_LABEL}</span>
                 <TimeField
                   hour={customConfig.hour}
                   minute={customConfig.minute}
                   onChange={(hour, minute) =>
                     updateCustomSchedule({ ...customConfig, hour, minute })
                   }
-                  ariaLabel={`${sceneName}自定义执行时刻`}
+                  ariaLabel={`${sceneName}自定义${PUSH_TIME_LABEL}`}
                 />
               </div>
             )}
@@ -591,28 +586,17 @@ export function TaskSchedule({
 }
 
 export function MonitoringFields({
-  sceneId,
   sceneName,
-  storageKey,
+  config,
+  onChange: update,
 }: {
-  sceneId: string;
   sceneName: string;
-  storageKey: string;
+  config: SceneMonitoring;
+  onChange: (patch: Partial<SceneMonitoring>) => void;
 }) {
-  const [config, setConfig] = useState<SceneMonitoring>(
-    () => readMonitoring(storageKey)[sceneId] ?? defaultMonitoring(),
-  );
   const [completionRateInput, setCompletionRateInput] = useState(() =>
     String(config.expectedCompletionRate),
   );
-  const toast = useWealthStore((state) => state.toast);
-  const update = (patch: Partial<SceneMonitoring>) => {
-    const next = { ...config, ...patch };
-    setConfig(next);
-    if (!saveSceneMonitoring(storageKey, sceneId, next)) {
-      toast(MONITORING_SAVE_ERROR);
-    }
-  };
   const { schedule } = config;
   return (
     <>
@@ -626,7 +610,6 @@ export function MonitoringFields({
             [
               ["today", "当日"],
               ["within7days", "T+7日内"],
-              ["validity", "有效期内"],
             ] as const
           ).map(([cycle, label]) => (
             <button
@@ -665,11 +648,11 @@ export function MonitoringFields({
           ))}
         </div>
         <div className={styles.scheduleField}>
-          <span>执行时刻</span>
+          <span>{MONITORING_PUSH_TIME_LABEL}</span>
           <TimeField
             hour={schedule.hour}
             minute={schedule.minute}
-            ariaLabel={`${sceneName}监控执行时刻`}
+            ariaLabel={`${sceneName}${MONITORING_PUSH_TIME_LABEL}`}
             onChange={(hour, minute) =>
               update({ schedule: { ...schedule, hour, minute } })
             }
@@ -750,8 +733,8 @@ export default function Create() {
   // 「保存草稿」功能暂缓上线，入口已注释；恢复时一并解开下方 saveDraft 与 savedAt
   // const savedAt = useWealthStore((s) => s.savedAt);
   const editingId = useWealthStore((s) => s.editingId);
-  const localMonitoringScope = useIframeStore(monitoringScope);
-  const monitoringKey = monitoringStorageKey(localMonitoringScope, editingId);
+  const canMonitor = account.id === "president";
+  const setItemMonitoring = useWealthStore((s) => s.setItemMonitoring);
   const toggleScene = useWealthStore((s) => s.toggleScene);
   const setItemDirection = useWealthStore((s) => s.setItemDirection);
   const setItemCustNum = useWealthStore((s) => s.setItemCustNum);
@@ -1056,12 +1039,17 @@ export default function Create() {
                 （{draft.items.length}）
               </span>
             </h3>
-            <div className={styles.selectedList}>
+            <div
+              className={cx(
+                styles.selectedList,
+                !canMonitor && styles.withoutMonitoring,
+              )}
+            >
               {draft.items.length > 0 && (
                 <div className={styles.selectedListHeader}>
                   <span>经营场景 / 经营方向</span>
                   <span>执行周期</span>
-                  <span>督办策略</span>
+                  {canMonitor && <span>督办策略</span>}
                   <span
                     className={styles.customerLimitHeader}
                     title="不填写则不限制推送客户数"
@@ -1114,14 +1102,16 @@ export default function Create() {
                       <div className={styles.configurationColumn}>
                         <TaskSchedule item={x} scene={display} />
                       </div>
-                      <div className={styles.configurationColumn}>
-                        <MonitoringFields
-                          key={`${monitoringKey}:${x.id}`}
-                          sceneId={x.id}
-                          sceneName={x.sceneName}
-                          storageKey={monitoringKey}
-                        />
-                      </div>
+                      {canMonitor && (
+                        <div className={styles.configurationColumn}>
+                          <MonitoringFields
+                            key={`${planFormVersion}:${x.id}`}
+                            sceneName={x.sceneName}
+                            config={x.monitoring ?? defaultMonitoring()}
+                            onChange={(patch) => setItemMonitoring(x.id, patch)}
+                          />
+                        </div>
+                      )}
                       <div
                         className={styles.customerLimitField}
                         data-label="推送客户数（选填）"

@@ -35,7 +35,8 @@ class QueryDb:
             );
             CREATE TABLE swe_cron_executions (
                 job_id TEXT, tenant_id TEXT, actual_time TEXT, status TEXT,
-                async_status TEXT, is_read INTEGER, trace_id TEXT
+                async_status TEXT, is_read INTEGER, trace_id TEXT,
+                is_final INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE swe_marketplace_skills (
                 source_id TEXT, skill_id TEXT, cn_name TEXT, skill_name TEXT,
@@ -54,6 +55,8 @@ class QueryDb:
         )
 
     async def fetch_all(self, sql, params=()):
+        if "swe_cron_executions" in sql:
+            assert "is_final = 1" in sql
         self.calls.append((sql, params))
         values = tuple(
             value.isoformat(" ") if isinstance(value, datetime) else value
@@ -136,7 +139,9 @@ def populated_db(db):
                     (job, user, user, branch, source),
                 )
                 db.connection.execute(
-                    "INSERT INTO swe_cron_executions VALUES (?, ?, "
+                    "INSERT INTO swe_cron_executions "
+                    "(job_id, tenant_id, actual_time, status, async_status, "
+                    "is_read, trace_id) VALUES (?, ?, "
                     "'2026-06-10 12:00:00', 'success', 'success', 1, ?)",
                     (job, user, job),
                 )
@@ -260,12 +265,16 @@ async def test_execution_stats_filters_executor_even_for_shared_job(
 ):
     job = "app-a-100-included"
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'excluded', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'excluded', "
         "'2026-06-10 12:00:00', 'success', 'success', 1, 'other-trace')",
         (job,),
     )
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'included', "
         "'2026-06-10 12:00:00', 'error', 'error', 1, 'failed-trace')",
         (job,),
     )
@@ -285,22 +294,30 @@ async def test_execution_stats_counts_execution_rows_without_trace_dedup(
 ):
     job = "app-a-100-included"
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'included', "
         "'2026-06-10 13:00:00', 'error', 'error', 0, 'retry-success')",
         (job,),
     )
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'included', "
         "'2026-06-10 14:00:00', 'success', 'success', 1, 'retry-success')",
         (job,),
     )
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'included', "
         "'2026-06-10 13:00:00', 'success', 'success', 1, 'retry-error')",
         (job,),
     )
     populated_db.connection.execute(
-        "INSERT INTO swe_cron_executions VALUES (?, 'included', "
+        "INSERT INTO swe_cron_executions "
+        "(job_id, tenant_id, actual_time, status, async_status, "
+        "is_read, trace_id) VALUES (?, 'included', "
         "'2026-06-10 14:00:00', 'error', 'error', 1, 'retry-error')",
         (job,),
     )

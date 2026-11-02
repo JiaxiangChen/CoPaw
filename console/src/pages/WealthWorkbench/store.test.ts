@@ -18,16 +18,26 @@ import type { Customer, Plan, PlanItem } from "./types";
 
 vi.mock("../../api/request", () => ({ request: vi.fn() }));
 
-// 统一记录两种传输，验证规划请求与原生名单请求的执行顺序。
+// 统一记录业务路径，验证规划与名单请求的执行顺序。
 const mockRequest =
   vi.fn<(path: string, options?: RequestInit) => Promise<unknown>>();
 
 afterEach(() => vi.unstubAllGlobals());
 
 function mockTransports() {
-  vi.mocked(request).mockImplementation(
-    (path, options) => mockRequest(path, options) as never,
-  );
+  vi.mocked(request).mockImplementation(async (path, options) => {
+    const pathname = path.split("?")[0].replace(/^\/agent\//, "/api/agent/");
+    const result = await mockRequest(pathname, options);
+    const { items, ...fields } = result as { items?: unknown[] };
+    return {
+      code: 200,
+      data: pathname.startsWith("/zt/wealth/plans")
+        ? result
+        : pathname === "/api/agent/workspace/skill-config/list"
+        ? items ?? []
+        : { ...fields, list: items ?? [] },
+    } as never;
+  });
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {

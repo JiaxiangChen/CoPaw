@@ -10,11 +10,23 @@ import { request } from "../../api/request";
 import { buildAuthHeaders } from "../../api/authHeaders";
 import { useIframeStore } from "../../stores/iframeStore";
 
-vi.mock("../../api/request", () => ({ request: vi.fn() }));
+vi.mock("../../api/request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/request")>();
+  return { ...actual, request: vi.fn(actual.request) };
+});
+vi.mock("../../api/config", () => ({
+  getApiUrl: (path: string) => `/api${path}`,
+  getApiToken: () => "",
+  clearAuthToken: vi.fn(),
+}));
+vi.mock("../../api/externalToken", () => ({
+  isExternalTokenEnabled: () => false,
+  clearExternalToken: vi.fn(),
+}));
 
 vi.mock("../../api/authHeaders", () => ({ buildAuthHeaders: vi.fn() }));
 
-// 统一记录两种传输，验证规划请求与原生名单请求的执行顺序。
+// 在 fetch 边界记录统一 request 发出的请求，验证规划与名单查询顺序。
 const mockRequest =
   vi.fn<(path: string, options?: RequestInit) => Promise<unknown>>();
 
@@ -24,9 +36,6 @@ afterEach(() => {
 });
 
 function mockTransports() {
-  vi.mocked(request).mockImplementation(
-    (path, options) => mockRequest(path, options) as never,
-  );
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path: string, options?: RequestInit) => {
@@ -35,10 +44,10 @@ function mockTransports() {
         items?: unknown[];
       };
       const { items, ...fields } = result;
-      return new Response(
+      return jsonResponse(
         JSON.stringify({
           code: 200,
-          data: pathname.startsWith("/zt/wealth/plans")
+          data: pathname.startsWith("/api/zt/wealth/plans")
             ? result
             : path === "/api/agent/workspace/skill-config/list"
             ? items ?? []
@@ -79,13 +88,14 @@ beforeEach(() => {
   useIframeStore.setState({ bbk: null, orgCode: null, positionId: null });
   mockTransports();
   vi.mocked(request).mockClear();
-  vi.mocked(buildAuthHeaders).mockClear();
+  vi.mocked(buildAuthHeaders).mockReset();
+  vi.mocked(buildAuthHeaders).mockReturnValue({});
   mockRequest.mockImplementation(async (path: unknown) => {
     const p = String(path);
     if (p.startsWith("/api/agent/workspace/name-list")) {
       return { items: NAME_LIST_FIXTURE };
     }
-    if (p.startsWith("/zt/wealth/plans")) {
+    if (p.startsWith("/api/zt/wealth/plans")) {
       return { items: [] };
     }
     throw new Error(`未 mock 的请求：${p}`);
@@ -111,7 +121,7 @@ describe("WealthWorkbench api", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("名单直接 fetch 外部契约，保留上下文和统计，使用默认同源凭证策略", async () => {
+  it("名单通过统一 request，保留上下文和统计", async () => {
     useIframeStore.setState({
       bbk: "755",
       orgCode: "755480",
@@ -124,7 +134,7 @@ describe("WealthWorkbench api", () => {
       unTouchedCount: 80,
     };
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(
+      jsonResponse(
         JSON.stringify({
           code: "200",
           data: {
@@ -145,7 +155,7 @@ describe("WealthWorkbench api", () => {
     expect(options).not.toHaveProperty("credentials");
     expect(options).toMatchObject({
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: expect.any(Headers),
     });
     expect(JSON.parse(String(options?.body))).toEqual({
       skillIds: [{ skillId: "a" }, { skillId: "b" }],
@@ -162,8 +172,8 @@ describe("WealthWorkbench api", () => {
       ...counts,
       allFields: [{ filedName: "age", filedNameCn: "年龄" }],
     });
-    expect(request).not.toHaveBeenCalled();
-    expect(buildAuthHeaders).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalled();
+    expect(buildAuthHeaders).toHaveBeenCalled();
   });
 
   it.each(["http", "business", "network", "json"])(
@@ -173,7 +183,7 @@ describe("WealthWorkbench api", () => {
         vi.mocked(fetch).mockRejectedValueOnce(new Error("offline"));
       else
         vi.mocked(fetch).mockResolvedValueOnce(
-          new Response(
+          jsonResponse(
             failure === "json"
               ? "invalid json"
               : JSON.stringify({
@@ -188,11 +198,11 @@ describe("WealthWorkbench api", () => {
       ).resolves.toEqual({
         items: [],
       });
-      expect(request).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalled();
     },
   );
 
-  it("名单查询四十五秒超时后中止，失败返回空列表", async () => {
+  it("名单查询六十秒超时后中止，失败返回空列表", async () => {
     vi.useFakeTimers();
     vi.mocked(fetch).mockImplementationOnce(
       (_path, options) =>
@@ -203,7 +213,7 @@ describe("WealthWorkbench api", () => {
         }),
     );
     const pending = api.fetchNameList([{ skillId: TASK.skillId }]);
-    await vi.advanceTimersByTimeAsync(44999);
+    await vi.advanceTimersByTimeAsync(59999);
     expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true);
@@ -264,7 +274,7 @@ describe("WealthWorkbench api", () => {
       "/api/agent/workspace/name-list",
       expect.objectContaining({
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: expect.any(Headers),
       }),
     );
     expect(JSON.parse(String(mockRequest.mock.calls[0][1]?.body))).toEqual({
@@ -406,10 +416,10 @@ describe("WealthWorkbench api", () => {
     });
   });
 
-  it("场景直接 POST 同源接口，传分行与分类并映射外部 data 数组", async () => {
+  it("场景通过统一 request POST，传分行与分类并映射外部 data 数组", async () => {
     useIframeStore.setState({ bbk: "755" });
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(
+      jsonResponse(
         JSON.stringify({
           code: "200",
           data: [
@@ -446,19 +456,19 @@ describe("WealthWorkbench api", () => {
       "/api/agent/workspace/skill-config/list",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: expect.any(Headers),
         body: JSON.stringify({ bbkId: "755", category: "finance" }),
         signal: expect.any(AbortSignal),
       },
     );
-    expect(request).not.toHaveBeenCalled();
-    expect(buildAuthHeaders).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalled();
+    expect(buildAuthHeaders).toHaveBeenCalled();
   });
 
   it.each([
-    ["HTTP", () => new Response("error", { status: 500 })],
-    ["业务", () => new Response(JSON.stringify({ code: 500, data: [] }))],
-    ["JSON", () => new Response("invalid json")],
+    ["HTTP", () => jsonResponse("error", { status: 500 })],
+    ["业务", () => jsonResponse(JSON.stringify({ code: 500, data: [] }))],
+    ["JSON", () => jsonResponse("invalid json")],
   ])("场景 %s 失败时列表为空，能力数保持未知", async (_label, response) => {
     vi.mocked(fetch).mockImplementation(async () => response());
     await expect(api.fetchScenesByCategory("finance")).resolves.toEqual([]);
@@ -494,12 +504,12 @@ describe("WealthWorkbench api", () => {
       bbkId: "",
       category: "",
     });
-    expect(request).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalled();
     mockRequest.mockRejectedValueOnce(new Error("boom"));
     await expect(api.fetchAvailableSceneCount()).resolves.toBeNull();
   });
 
-  it("规划统计直连同源路径，按 planId 映射乱序返回且不走后端", async () => {
+  it("规划统计通过统一 request，按 planId 映射乱序返回", async () => {
     document.cookie = "token=skill-stats-token; path=/";
     vi.mocked(buildAuthHeaders).mockReturnValue({
       "X-Bbk-Id": "100",
@@ -508,7 +518,7 @@ describe("WealthWorkbench api", () => {
       "x-header-cookie": "session=value",
     });
     const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
+      jsonResponse(
         JSON.stringify({
           code: "200",
           data: {
@@ -533,19 +543,16 @@ describe("WealthWorkbench api", () => {
       expect(path).toBe("/api/agent/workspace/skill-stats");
       expect(options).toMatchObject({
         method: "POST",
-        credentials: "include",
         signal: controller.signal,
       });
-      expect(options?.headers).toEqual({
-        "Content-Type": "application/json",
-        Authorization: "skill-stats-token",
-        "x-header-cookie": "session=value",
-        Cookie: "session=value",
-      });
+      expect(new Headers(options?.headers).get("X-User-Id")).toBe("rm-1");
+      expect(new Headers(options?.headers).get("Content-Type")).toBe(
+        "application/json",
+      );
       expect(JSON.parse(String(options?.body))).toEqual({
         planIds: ["p1", "p2"],
       });
-      expect(mockRequest).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalled();
 
       directFetch.mockClear();
       await expect(api.fetchSkillStats([])).resolves.toEqual({});
@@ -565,7 +572,7 @@ describe("WealthWorkbench api", () => {
         "X-Position-Id": positionId,
       });
       const directFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(
+        jsonResponse(
           JSON.stringify({
             code: 200,
             data: {
@@ -600,7 +607,7 @@ describe("WealthWorkbench api", () => {
         directFetch.mockRejectedValueOnce(new Error(failure));
       else
         directFetch.mockResolvedValueOnce(
-          new Response(JSON.stringify({ code: 500 }), {
+          jsonResponse(JSON.stringify({ code: 500 }), {
             status: failure === "http" ? 502 : 200,
           }),
         );
@@ -854,3 +861,10 @@ describe("WealthWorkbench api", () => {
     expect(await api.fetchScenesByCategory("")).toEqual([]);
   });
 });
+
+function jsonResponse(body: BodyInit | null, init: ResponseInit = {}) {
+  return new Response(body, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
+  });
+}

@@ -29,7 +29,7 @@ class HtmlPreviewClickEventCreate(BaseModel):
     bbk_id: Optional[str] = Field(default=None, max_length=128)
     cron_task_id: Optional[str] = Field(default=None, max_length=128)
     cron_task_name: Optional[str] = Field(default=None, max_length=255)
-    file_url: str = Field(..., min_length=1, max_length=4096)
+    file_url: str = Field(default="", max_length=4096)
     file_name: Optional[str] = Field(default=None, max_length=512)
     list_key: Optional[str] = Field(default=None, max_length=1024)
     list_name: Optional[str] = Field(default=None, max_length=512)

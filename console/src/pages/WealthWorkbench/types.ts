@@ -5,6 +5,7 @@
  * 规划来自 /zt/wealth/plans，id 均为字符串，排程与控制台定时任务同模型。
  */
 import type { CronParts } from "@/utils/parseCron";
+import type { SceneMonitoring } from "./monitoring";
 import type { WealthRole } from "./permissions";
 
 /** 工作台角色对应的登录账户（mock 期的角色预览身份） */
@@ -61,6 +62,8 @@ export interface PlanItem {
   end?: string;
   /** 执行排程：与控制台定时任务同一模型（hourly/daily/weekly/custom） */
   schedule: CronParts;
+  /** 行长督办策略，随规划接口保存和回显。 */
+  monitoring?: SceneMonitoring;
 }
 
 /** 工作规划（看板展示模型，由后端 PlanView 映射而来） */
@@ -106,6 +109,10 @@ export interface SkillStat {
   name: string;
   /** 所属机构名称（可能为空） */
   orgName: string;
+  /** 接收人所属分行编码，人员接口 branchID。 */
+  bbkId?: string;
+  /** 接收人所属支行编码，人员接口 subBranchID。 */
+  bbkOrgId?: string;
 }
 
 /** 客户 / 触达记录 */

@@ -206,8 +206,8 @@ export default function FailurePanel({
                 ellipsis: true,
               },
               {
-                title: "业务尝试",
-                dataIndex: "business_attempt",
+                title: "重试次数",
+                render: (_, item) => Math.max(0, item.business_attempt - 1),
                 width: 90,
               },
               {

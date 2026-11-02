@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""只在显式人工请求中增加业务尝试，运输恢复仍复用原执行身份。"""
+"""批成员业务重试共用入队，运输恢复仍复用原执行身份。"""
 
 import json
 import logging
@@ -33,11 +33,14 @@ logger = logging.getLogger(__name__)
 class BatchRetryGrant:
     """授权只来自已锁定批成员，不制造目标用户的管理员身份。"""
 
-    def __init__(self, key):
+    def __init__(self, key, *, require_manager=True):
         self.key = key
+        self.require_manager = require_manager
 
     async def authorize(self, db, caller, job_id):
-        if not caller.is_manager or caller.job_key(job_id) != self.key:
+        if (self.require_manager and not caller.is_manager) or caller.job_key(
+            job_id,
+        ) != self.key:
             raise PermissionError("cron_batch_retry_forbidden")
         where = " AND ".join(
             f"d.{name}=%s AND d.{name} COLLATE utf8mb4_bin=%s"
@@ -253,14 +256,23 @@ class BatchRetryService:
         return None
 
     @staticmethod
-    async def _enqueue(tx, caller, row, batch_id, digest):
+    async def _enqueue(
+        tx,
+        caller,
+        row,
+        batch_id,
+        digest,
+        *,
+        grant=None,
+        retry_at=None,
+    ):
         key = tuple(row[name] for name in IDENTITY_FIELDS)
         target = replace(
             caller,
             tenant_id=row["tenant_id"],
             agent_id=row["agent_id"],
         )
-        store = ExecutionStore(tx, grant=BatchRetryGrant(key))
+        store = ExecutionStore(tx, grant=grant or BatchRetryGrant(key))
         current = await store.grant.authorize(tx, target, row["job_id"])
         from .executions import _ready
 
@@ -269,7 +281,7 @@ class BatchRetryService:
             request_hash([digest, row["member_id"]]),
             scheduled_at=_utc(row["scheduled_fire_at"]),
             expected_definition_version=row["current_definition_version"],
-            not_before_at=datetime.now(timezone.utc),
+            not_before_at=retry_at or datetime.now(timezone.utc),
             dispatch_meta={
                 "batch_id": batch_id,
                 "batch_member_id": row["member_id"],

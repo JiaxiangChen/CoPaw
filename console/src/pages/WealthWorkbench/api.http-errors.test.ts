@@ -9,9 +9,22 @@ import * as api from "./api";
 import { request } from "../../api/request";
 import type { Account, DistributeTarget } from "./types";
 
-vi.mock("../../api/request", () => ({ request: vi.fn() }));
+vi.mock("../../api/request", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/request")>();
+  return { ...actual, request: vi.fn(actual.request) };
+});
+vi.mock("../../api/config", () => ({
+  getApiUrl: (path: string) => `/api${path}`,
+  getApiToken: () => "",
+  clearAuthToken: vi.fn(),
+}));
+vi.mock("../../api/externalToken", () => ({
+  isExternalTokenEnabled: () => false,
+  clearExternalToken: vi.fn(),
+}));
 
 const mockRequest = vi.mocked(request);
+vi.mock("../../api/authHeaders", () => ({ buildAuthHeaders: () => ({}) }));
 
 const RM_ACCOUNT: Account = {
   id: "rm",
@@ -36,15 +49,13 @@ async function publishWithDefaults() {
 }
 
 describe("WealthWorkbench api 错误传播", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async (path: string, options?: RequestInit) =>
-          new Response(JSON.stringify(await mockRequest(path, options))),
-      ),
+    const actual = await vi.importActual<typeof import("../../api/request")>(
+      "../../api/request",
     );
+    mockRequest.mockImplementation(actual.request);
+    vi.stubGlobal("fetch", vi.fn());
     api.resetMockDb();
   });
 
@@ -61,6 +72,50 @@ describe("WealthWorkbench api 错误传播", () => {
 
     await expect(api.removePlan("plan-1")).rejects.toMatchObject({
       status: 403,
+    });
+  });
+
+  it.each([
+    { status: 404, errorStatus: 404, payload: { detail: "plan not found" } },
+    { status: 500, errorStatus: 500, payload: { detail: "plan not found" } },
+    {
+      status: 200,
+      errorStatus: 404,
+      payload: { code: 404, message: "plan not found" },
+    },
+    {
+      status: 200,
+      errorStatus: 500,
+      payload: { code: 500, message: "plan not found" },
+    },
+  ])(
+    "removePlan：规划不存在时提示刷新页面：%j",
+    async ({ status, errorStatus, payload }) => {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        jsonResponse(JSON.stringify(payload), { status }),
+      );
+
+      await expect(api.removePlan("plan-1")).rejects.toMatchObject({
+        message: "该规划已被删除，请刷新页面后重试",
+        status: errorStatus,
+        data: payload,
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { status: 404, detail: "route not found" },
+    { status: 403, detail: "无权限移除该规划" },
+    { status: 409, detail: "规划发布中，请稍后再移除" },
+  ])("removePlan：其他错误保留原文：%j", async ({ status, detail }) => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(JSON.stringify({ detail }), { status }),
+    );
+
+    await expect(api.removePlan("plan-1")).rejects.toMatchObject({
+      message: detail,
+      status,
     });
   });
 
@@ -97,3 +152,10 @@ describe("WealthWorkbench api 错误传播", () => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+function jsonResponse(body: BodyInit | null, init: ResponseInit = {}) {
+  return new Response(body, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init.headers },
+  });
+}

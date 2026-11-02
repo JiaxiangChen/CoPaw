@@ -34,8 +34,8 @@ npm run typecheck
 NODE_OPTIONS=--max-old-space-size=8192 npm run build
 ```
 
-浏览器检查覆盖创建页普通/自定义周期、多种频率、长场景名、监控配置本地回显、客户数、删除和空状态，以及看板和任务页的 1280、1440、1920 宽度、隐藏头部、键盘焦点、弹窗及缺少 Popover API 的 Toast。模拟禁用新能力只能验证对应分支，不能替代原生 Windows 360 Chromium 108 的基线验证；本次整改尚未执行原生 360 复测。
+浏览器检查覆盖创建页普通/自定义周期、多种频率、长场景名、督办策略接口回显、客户数、删除和空状态，以及看板和任务页的 1280、1440、1920 宽度、隐藏头部、键盘焦点、弹窗及缺少 Popover API 的 Toast。模拟禁用新能力只能验证对应分支，不能替代原生 Windows 360 Chromium 108 的基线验证；本次整改尚未执行原生 360 复测。
 
 兼容数据参考：[MDN 浏览器兼容数据](https://github.com/mdn/browser-compat-data)、[Chrome 117 的 subgrid](https://developer.chrome.com/blog/new-in-chrome-117/)。
 
-监控配置的本地存储结构、用户与规划隔离及发布关联见 [监控配置维护记录](../../../../analysis/playbook/wealth-scene-monitoring.md)。
+督办策略的接口字段、角色限制及规划回显见 [监控配置维护记录](../../../../analysis/playbook/wealth-scene-monitoring.md)。

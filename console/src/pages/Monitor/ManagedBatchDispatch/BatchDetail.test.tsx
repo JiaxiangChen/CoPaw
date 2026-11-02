@@ -54,6 +54,8 @@ it("详情不展示任务数说明行，成员保留子任务状态文案", asyn
     />,
   );
   await screen.findByText("日报任务");
+  expect(screen.getByText("重试次数：0")).toBeInTheDocument();
+  expect(screen.queryByText(/次投递|业务尝试/)).toBeNull();
   expect(screen.queryByText(/主执行状态与异步收敛状态分别展示/)).toBeNull();
   expect(screen.queryByText(/任务数.*含父任务/)).toBeNull();
   expect(screen.getByRole("tab", { name: "执行成员 (1)" })).toBeInTheDocument();
@@ -93,7 +95,7 @@ it("父任务模型和错误说明沿用旧版展示，不展示Owner或优先JS
         error_message: "子任务执行失败: 报告生成失败",
         dispatch_priority: { basis: "user", user_rank: 1, branch_id: "100" },
         viewer_heat_score: 8,
-        business_attempt: 1,
+        business_attempt: 3,
         dispatch_attempt: 1,
       },
     ],
@@ -108,6 +110,8 @@ it("父任务模型和错误说明沿用旧版展示，不展示Owner或优先JS
     />,
   );
   await screen.findByText("子任务报告");
+  expect(screen.getByText("重试次数：2")).toBeInTheDocument();
+  expect(screen.queryByText(/次投递|业务尝试/)).toBeNull();
   expect(
     screen.getByText("frozen-provider / frozen-model"),
   ).toBeInTheDocument();

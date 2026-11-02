@@ -34,6 +34,15 @@ class SubtaskModel(BaseModel):
     )
     custuid: Optional[str] = Field(default=None, description="任务中客户ID")
     cust_nm: Optional[str] = Field(default=None, description="任务中客户名称")
+    bbk_org_id: Optional[str] = Field(
+        default=None,
+        description="客户归属二级分行ID",
+    )
+    template_id: Optional[int] = Field(
+        default=None,
+        description="模板ID，用于html渲染",
+    )
+    result_id: Optional[str] = Field(default=None, description="es数据doc_id")
     notification_content_wplus: Optional[str] = Field(
         default=None,
         description="W+渠道通知消息内容",
@@ -47,6 +56,12 @@ class SubtaskModel(BaseModel):
         ge=0,
         le=1,
         description="是否需要通知: 0-否, 1-是",
+    )
+    has_main_task: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="是否有关联主任务: 0-否, 1-是",
     )
     status: Optional[str] = Field(
         default=None,
@@ -119,6 +134,12 @@ class SubtaskCreateRequest(BaseModel):
         ge=0,
         le=1,
         description="是否需要通知: 0-否, 1-是",
+    )
+    has_main_task: int = Field(
+        default=1,
+        ge=0,
+        le=1,
+        description="是否有关联主任务: 0-否, 1-是",
     )
     template_id: Optional[int] = Field(
         default=None,
@@ -197,5 +218,4 @@ class FailedExecutionRerunRequest(BaseModel):
 class FailedExecutionRerunResponse(BaseModel):
     """Result of rerunning failed cron executions."""
 
-    rerun_count: int = Field(default=0, description="发起重跑成功的任务数量")
-    failed_count: int = Field(default=0, description="发起重跑失败的任务数量")
+    rerun_count: int = Field(default=0, description="已提交后台重跑的任务数量")
