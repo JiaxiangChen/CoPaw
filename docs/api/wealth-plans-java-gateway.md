@@ -47,14 +47,14 @@ Java 必须将这些身份字段与可信登录态校验一致；前端传入 ro
 | POST/PUT 规划 JSON | sapId/creatorName=真实操作人；role=middle；bbkId/bbkOrgId=目标分行根；sourceLabel=分行关注；sourceId/agentId 保留原值 |
 | DELETE 规划 JSON | `{sapId: "80008888", role: "middle", bbkId: "所选分行编码"}`；普通模式仍仅传 sapId |
 | 场景池 JSON | bbkId=目标分行，category 沿用原值 |
-| 机构树 JSON | 根 mmOrgCode=目标分行、mmOrgLvl=登录上下文 orgLvl、sysId 沿用真实上下文；选择下级后使用返回条目的编码与级别 |
+| 机构树 JSON | 根 mmOrgCode=目标分行、mmOrgLvl=30、sysId 沿用真实上下文；选择下级后使用返回条目的编码与级别 |
 | 人员 JSON | bbkOrgId=目标分行、mmOrgCode/mmOrgLvl=所选机构编码与级别 |
 | 分发目标 | targets[].sapId/name/bbkId/bbkOrgId 沿用所选客户经理返回值 |
 | 统计 | 沿用所选分行规划的 planIds，不增加身份覆盖字段 |
 
 Java 必须通过可信登录态联合校验白名单、目标分行与 role，保留真实创建人并按目标分行存储、分发。返回的 `editable=true` 必须仅表示当前真实操作人可管理的本人代建规划，PUT/DELETE 再次校验归属和业务范围；他人规划即使可见也不能被修改或删除。前端对运维规划缺失的 editable 按只读处理。
 
-机构接口对接方还需确认测试分行用户的 orgLvl 可用于目标分行根查询，以及 bbkOrgId 使用目标分行编码符合其机构模型。前端沿用现有中台参数约定，没有编造机构级别。未经外部服务确认及联调，不能将前端验证通过当作跨分行生产授权已完成。
+运维模式业务上下文的 orgLvl 固定为 "30"，根机构和根人员查询的 mmOrgLvl 传数字 30；普通模式仍使用真实登录层级，下级机构仍使用接口返回的 mOrgLvl。机构接口对接方还需确认 bbkOrgId 使用目标分行编码符合其机构模型。未经外部服务确认及联调，不能将前端验证通过当作跨分行生产授权已完成。
 
 ## 字段及错误处理
 
