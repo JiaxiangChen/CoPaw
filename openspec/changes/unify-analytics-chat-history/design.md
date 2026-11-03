@@ -51,7 +51,7 @@ user_id 指定查看对象；映射、详情和归档保持相同目标工作区
 
 保留 `ReadOnlySessionChat` 的独立状态，不使用 Chat 的全局 session 状态或直接绑定 Chat 的 MessageList。调用 `tracingApi.getUserChatHistory`；详情转换按需复用 `convertMessagesForSession`，归档复用 `convertArchivedPage`、`mergeHistoryResponses` 和已有边界卡片。已有私有 helper 仅在确有必要时以小范围导出，不复制其实现。
 
-本次推荐顶部可键盘操作的“加载更早历史”入口，每次加载一页，沿用 Chat 的边界语义、去重规则和错误反馈。暂不复制主 Chat 的自动补页、生成态刷新等复杂机制；内容一致性的定义是可逐页读取同一完整存档，不要求滚动触发策略完全相同。初次仅请求当前详情，有归档时才展示入口；即使当前消息为空但存在 archive.has_more，也可继续加载。
+2026-11-03 用户要求对齐 Chat 的历史浏览交互：复用 `useHistoryPreload` 和 `HistoryLoadStatus`，采用与 Chat 相同的倒序滚动容器；初始显示最近 10 张卡片，先每批展开 10 张本地记录，全部展开后再按 limit=20 读取归档。上滚进入距顶部 240px 的区域或初始内容不足一屏时自动推进，一轮最多三步；保留“加载更早消息”和失败重试入口。所有归档仍走看板专用接口；不接入 Chat 的实时流或生成态刷新，不修改共享 Hook/组件算法。
 
 分页状态按 source / targetUserId / Agent / chatId 隔离：cursor、has_more、loading、error、generation 和已加载消息/边界。关闭弹窗、改变用户/会话或上下文时重置，旧响应不得写入新状态。请求串行，has_more=true 却缺少新游标视为失败，防止无限重复加载。
 
@@ -86,4 +86,4 @@ user_id 指定查看对象；映射、详情和归档保持相同目标工作区
 ## Confirmed Scope
 
 - 权限：沿用既有外部平台/网关控制，不新增 SWE 角色/范围校验。
-- 完整历史不受排行榜日期截断；沿用既有 Agent 定位；顶部按页加载；只读持久化快照。
+- 完整历史不受排行榜日期截断；沿用既有 Agent 定位；历史加载交互对齐 Chat；只读持久化快照。

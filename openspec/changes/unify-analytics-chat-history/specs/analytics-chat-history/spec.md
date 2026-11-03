@@ -79,3 +79,22 @@ The change SHALL preserve Monitor ranking and session filters. Selecting a match
 #### Scenario: History unavailable
 - **WHEN** a trace session has no ChatSpec mapping or its history request fails
 - **THEN** the viewer SHALL show an appropriate unavailable or error state instead of presenting it as a successfully loaded empty conversation
+
+
+### Requirement: Analytics history progression matches Chat
+
+The analytics viewer SHALL reuse Chat's history preload hook and status component without changing their implementation. It SHALL initially render the latest 10 historical cards, reveal earlier local cards in batches of 10, and only request archive pages after local exhaustion. It SHALL use the same reverse-scroll convention, 240px preload distance and maximum three advances per scroll action, explicit action or initial viewport fill. Every converted archive page SHALL be rendered in full. The target-user analytics endpoints and read-only cards SHALL remain unchanged.
+
+#### Scenario: Local history precedes network paging
+- **WHEN** older cards remain available in the loaded current snapshot
+- **THEN** upward scrolling or the load-earlier action SHALL reveal local batches without an archive request or network loading indicator
+
+#### Scenario: Scroll or short viewport advances history
+- **WHEN** the reader scrolls upward near the visual start or initial content does not fill the viewport
+- **THEN** the shared hook SHALL advance available history within the three-step budget and stop on overflow during initial filling, leaving the preload region, exhaustion or error
+- **AND** the accessible load-earlier action SHALL remain available while more history exists
+
+#### Scenario: Error recovery keeps target identity and cursor
+- **WHEN** automatic archive loading fails
+- **THEN** automatic advancement SHALL stop and the shared retry status SHALL allow retrying the same target-user cursor
+- **AND** closing or switching targets SHALL invalidate the prior progression and its pending responses

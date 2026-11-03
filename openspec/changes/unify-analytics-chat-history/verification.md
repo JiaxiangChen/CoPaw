@@ -45,3 +45,14 @@
 - 待确认、已提交计划的回归测试先复现内容缺失，再验证单份完整快照且无按钮。看板、归档合并、Chat 计划及 sessionApi 共 **139 passed / 8 files**；TypeScript typecheck、修改文件 ESLint 和 Prettier check 通过。
 - Chrome 156 使用真实看板只读组件及模拟接口验证当前消息、归档、任务分组中的计划：三场景均只有一个计划 region、零操作按钮、无 pageerror；1280×720、1440×900、1920×1080 均无横向溢出。截图 `/tmp/analytics-plan-{current,archive,task}.png`；临时页面已清理。
 - 仍未验证真实 Chromium 108/360 和生产网关/共享存储；本次不扩大部署范围。
+
+## 2026-11-03 历史加载交互对齐 Chat
+
+- 看板直接复用未修改的 `useHistoryPreload` 和 `HistoryLoadStatus`；倒序容器/最新 10 张卡片/本地每批 10 张/归档每页 20 条，与 Chat 一致。先展开本地卡片，再请求看板专用目标用户归档接口。
+- 上滚距顶部 240px 内或内容不足一屏时自动推进；共享 Hook 每轮最多三步，保留“加载更早消息”作为兜底。错误停止自动请求，重试使用原游标；没有更多归档时根据详情/分页元信息显示终态，避免多余空查询。
+- 改动仅在看板、相关测试/局部样式及方案文档；普通 Chat、共享 Hook/状态组件、后端和 Monitor 查询均无修改。持续只读，不新增生成态同步，也不解决首次详情请求的后端耗时问题。
+- 定向 Vitest **239 passed / 16 files**，覆盖看板、本地分批、真实共享 Hook 接线、三步预算、初始补页、错误停止与同游标重试、切换目标时废弃自动加载、归档回答拼接、原 Chat 计划和历史回归。少量原有 jsdom 伪元素 getComputedStyle 提示不影响结果。
+- typecheck、修改范围 ESLint、Prettier check、OpenSpec strict validate、git diff --check 通过；8GB Node heap 下生产构建完成，保留已有 chunk size 警告。
+- Playwright + Chrome 156.0.8078.80，固定模拟接口下验证真实只读组件：35 张本地卡片初始仅渲染 10 张，上滚逐批展开为 20/30/35，期间归档请求为零；之后一页新增 20 条，显示共 55 张。三次本地展开的锚点偏移均 **0px**。
+- 短列表首轮自动请求 **3 页**后停止，兜底操作继续并在最后一页立即显示终态；注入首轮 503 后没有自动重试，键盘重试保持原游标。无 pageerror，接口请求均为 `/api/tracing/chats/...`。
+- 1280×720、1440×900、1920×1080 均无页面横向溢出，使用 hideMenu=true 预览参数。截图 `/tmp/analytics-progressive-{1280,1440,1920}.png`。真实 Chromium 108/360、生产网关及存储验收仍待对应环境；临时 QA 页面和服务已清理。

@@ -452,7 +452,7 @@ document.body.appendChild(frame);
 - 列表与统计来自 Monitor `/api/monitor/tracing/sessions`，不以会话存档作为统计来源；日期/分行/资源筛选决定入选会话，不截断已选会话的聊天正文。
 - 目标用户映射、详情、压缩归档入口在 `src/swe/app/routers/tracing.py`：`GET /api/tracing/chats?user_id=…`、`GET /api/tracing/chats/{chat_id}?user_id=…`、`GET /api/tracing/chats/{chat_id}/history?user_id=…&before=…&limit=20`。详情共用 Chat 的 `_build_chat_history(non_blocking=True)`，归档共用 `_archive_page`；不要改用当前用户的 `/api/chats` 接口。
 - 权限沿用外部平台/网关现有运营看板访问控制，SWE 不新增角色或分行授权。部署须让新增归档路径经过与看板详情相同的规则；`user_id` 用于目标工作区定位，详情/归档还校验聊天归属及已有 source/Agent 元信息。
-- 前端入口为 `console/src/pages/Analytics/BusinessOverview/components/UserDetailModal/ReadOnlySessionChat.tsx`。顶部“加载更早历史”按页读取，保留阅读位置；空当前快照但有归档时仍可加载。请求/分页状态按 source、目标 user、Agent、session/chat 隔离，只读，不订阅运行中流。
+- 前端入口为 `console/src/pages/Analytics/BusinessOverview/components/UserDetailModal/ReadOnlySessionChat.tsx`。复用 Chat 的 useHistoryPreload 和 HistoryLoadStatus：初始显示最近 10 张卡片，先按每批 10 张展开本地历史，再按 20 条读取归档；倒序滚动容器进入顶部 240px 区域或内容不足一屏时自动推进，每轮最多三步，保留“加载更早消息”兜底入口及阅读位置。空当前快照但有归档时也会自动尝试补页。请求/分页状态按 source、目标 user、Agent、session/chat 隔离，只读，不订阅运行中流。
 - 初始快照经 Chat 转换后必须由看板调用方补 `history: true`（含归档边界卡片），再交给 `mergeHistoryResponses` 合并。公共转换函数不自动加标记；遗漏时，跨压缩边界的一次回答会拆成两张卡。回归见 `ReadOnlySessionChat.archive.test.tsx`，使用真实共享转换/合并函数覆盖归档工具调用与当前工具结果的拼接。
 - 计划历史只读展示：看板回答 renderer 保留原始 planReviewCard 供 PlanReviewSnapshot 展示，但传给 RuntimeResponseCard 的副本移除该字段以禁用交互。独立 PlanInteraction 保持为空避免双份计划；不得修改共享组件或把计划摘要/步骤一并隐藏。当前消息、归档页、任务分组均走该局部配置。
 - “有会话卡片但无正文”先核对 Monitor 的 session_id 是否存在对应 ChatSpec，再核对目标 source/user/Agent 工作区和共享存储。映射缺失、详情失败和正常空内容使用不同反馈；归档失败保留当前消息和游标，可重试。Kubernetes 各实例必须访问同一持久化会话与 dialog 存档；已清理的文件不能通过本接口恢复。
