@@ -1,3 +1,5 @@
+@import "../../styles/scrollbar.less";
+
 .composerActions {
   display: flex;
   flex: 1;
@@ -61,27 +63,7 @@
 .chatMessagesArea
   :global(.swe-chat-anywhere-message-list .swe-bubble-list-scroll) {
   /* Override the runtime's hidden WebKit scrollbar on Chromium 108 too. */
-  &::-webkit-scrollbar {
-    display: block;
-    width: 4px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
-    border-radius: 4px;
-  }
-
-  &::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 0, 0, 0.28);
-  }
-
-  &::-webkit-scrollbar-corner {
-    background: transparent;
-  }
+  .thin-scrollbar();
 
   /* Dark mode scrollbar */
   :global(.dark-mode) & {
@@ -93,10 +75,6 @@
       background: rgba(255, 255, 255, 0.28);
     }
   }
-
-  /* Firefox scrollbar */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 
   :global(.dark-mode) & {
     scrollbar-color: rgba(255, 255, 255, 0.12) transparent;

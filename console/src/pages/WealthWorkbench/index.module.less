@@ -10,6 +10,8 @@
  * 已按需求裁剪：业绩分析页与「今日完成率」圆环（.completion / .ring）相关样式不移植。
  */
 
+@import "../../styles/scrollbar.less";
+
 @keyframes wealth-scroll {
   from {
     transform: translateX(0);
@@ -54,6 +56,11 @@
   // 原型依赖文档滚动，这里让 .root 成为滚动容器；fixed 的顶栏/侧栏/跑马灯不受影响。
   height: 100vh;
   overflow: auto;
+
+  &,
+  * {
+    .thin-scrollbar();
+  }
 
   * {
     box-sizing: border-box;
@@ -3073,9 +3080,6 @@
       overflow-x: auto;
       overflow-y: hidden;
       white-space: nowrap;
-      &::-webkit-scrollbar {
-        height: 8px;
-      }
       &::before {
         content: attr(data-label);
         flex: 0 0 72px;
