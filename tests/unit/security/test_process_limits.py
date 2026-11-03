@@ -14,6 +14,50 @@ from swe.config.context import tenant_context
 from swe.config.utils import save_config
 
 
+def test_process_limit_policy_uses_root_config_for_all_tenants(
+    tmp_path: Path,
+) -> None:
+    from swe.security.process_limits import (
+        resolve_current_process_limit_policy,
+    )
+
+    save_config(
+        Config.model_validate(
+            {
+                "security": {
+                    "process_limits": {
+                        "cpu_time_limit_seconds": 11,
+                        "memory_max_mb": 512,
+                        "mcp_stdio": True,
+                        "shell_max_concurrent": 7,
+                        "shell_acquire_timeout_seconds": 1.5,
+                    },
+                },
+            },
+        ),
+        tmp_path / "config.json",
+    )
+    _write_tenant_config(tmp_path, "tenant-a", enabled=False)
+    _write_tenant_config(
+        tmp_path,
+        "tenant-b",
+        enabled=True,
+        cpu_time_limit_seconds=2,
+    )
+    with patch("swe.config.utils.WORKING_DIR", tmp_path):
+        for tenant in ("tenant-a", "tenant-b"):
+            with tenant_context(tenant_id=tenant):
+                for scope in ("shell", "mcp_stdio"):
+                    policy = resolve_current_process_limit_policy(scope)
+                    assert policy.tenant_id == tenant
+                    assert policy.enabled is True
+                    assert policy.cpu_time_limit_seconds == 11
+                    assert policy.memory_max_mb == 512
+                    if scope == "shell":
+                        assert policy.shell_max_concurrent == 7
+                        assert policy.shell_acquire_timeout_seconds == 1.5
+
+
 def _write_tenant_config(
     base_dir: Path,
     tenant_id: str,
@@ -129,64 +173,6 @@ def test_process_limits_config_rejects_zero_shell_acquire_timeout() -> None:
         )
 
 
-def test_resolve_current_process_limit_policy_uses_current_tenant_config(
-    tmp_path: Path,
-) -> None:
-    from swe.security.process_limits import (
-        resolve_current_process_limit_policy,
-    )
-
-    _write_tenant_config(
-        tmp_path,
-        "tenant-a",
-        enabled=True,
-        cpu_time_limit_seconds=2,
-        memory_max_mb=128,
-        shell_max_concurrent=7,
-        shell_acquire_timeout_seconds=1.5,
-    )
-    _write_tenant_config(
-        tmp_path,
-        "tenant-b",
-        enabled=True,
-        shell=False,
-        cpu_time_limit_seconds=4,
-        memory_max_mb=256,
-    )
-
-    with (
-        patch("swe.constant.WORKING_DIR", tmp_path),
-        patch(
-            "swe.config.utils.WORKING_DIR",
-            tmp_path,
-        ),
-    ):
-        with tenant_context(tenant_id="tenant-b"):
-            shell_policy = resolve_current_process_limit_policy("shell")
-            mcp_policy = resolve_current_process_limit_policy("mcp_stdio")
-
-    assert shell_policy.enabled is False
-    assert mcp_policy.enabled is True
-    assert mcp_policy.tenant_id == "tenant-b"
-    assert mcp_policy.cpu_time_limit_seconds == 4
-    assert mcp_policy.memory_max_bytes == 256 * 1024 * 1024
-    assert mcp_policy.shell_max_concurrent is None
-    assert mcp_policy.diagnostic is None
-
-    with (
-        patch("swe.constant.WORKING_DIR", tmp_path),
-        patch(
-            "swe.config.utils.WORKING_DIR",
-            tmp_path,
-        ),
-    ):
-        with tenant_context(tenant_id="tenant-a"):
-            shell_policy = resolve_current_process_limit_policy("shell")
-
-    assert shell_policy.shell_max_concurrent == 7
-    assert shell_policy.shell_acquire_timeout_seconds == 1.5
-
-
 def test_resolved_policy_builds_unix_preexec_fn(tmp_path: Path) -> None:
     from swe.security.process_limits import (
         resolve_current_process_limit_policy,
@@ -194,7 +180,7 @@ def test_resolved_policy_builds_unix_preexec_fn(tmp_path: Path) -> None:
 
     _write_tenant_config(
         tmp_path,
-        "tenant-a",
+        ".",
         enabled=True,
         cpu_time_limit_seconds=3,
         memory_max_mb=64,
@@ -231,7 +217,7 @@ def test_shell_policy_skips_memory_rlimit_on_macos(tmp_path: Path) -> None:
 
     _write_tenant_config(
         tmp_path,
-        "tenant-a",
+        ".",
         enabled=True,
         cpu_time_limit_seconds=3,
         memory_max_mb=64,
@@ -268,7 +254,7 @@ def test_resolved_policy_reports_unsupported_platform(tmp_path: Path) -> None:
 
     _write_tenant_config(
         tmp_path,
-        "tenant-a",
+        ".",
         enabled=True,
         cpu_time_limit_seconds=2,
         memory_max_mb=32,

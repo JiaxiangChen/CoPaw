@@ -41,8 +41,6 @@ def _write_process_limit_config(
     cpu_time_limit_seconds: int | None = None,
     memory_max_mb: int | None = None,
 ) -> None:
-    tenant_dir = base_dir / tenant_id
-    tenant_dir.mkdir(parents=True, exist_ok=True)
     save_config(
         Config.model_validate(
             {
@@ -57,7 +55,7 @@ def _write_process_limit_config(
                 },
             },
         ),
-        tenant_dir / "config.json",
+        base_dir / "config.json",
     )
 
 

@@ -1638,7 +1638,7 @@ class SkillScannerConfig(BaseModel):
 
 
 class ProcessLimitsConfig(BaseModel):
-    """Tenant-scoped subprocess process-limit policy."""
+    """Global process-limit policy for tenant-scoped subprocesses."""
 
     enabled: bool = True
     shell: bool = True
