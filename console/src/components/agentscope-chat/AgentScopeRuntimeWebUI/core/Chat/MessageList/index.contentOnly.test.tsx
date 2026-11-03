@@ -229,6 +229,109 @@ vi.mock("antd", () => ({
 }));
 
 describe("MessageList content-only composition", () => {
+  it("continues toward a user message after the first page moves the viewport away from the top", async () => {
+    mocks.messages = [{ id: "online-message", history: true }];
+    apiMocks.getChatHistory
+      .mockResolvedValueOnce({
+        messages: [{ id: "fragment", role: "assistant" }],
+        boundaries: [],
+        has_more: true,
+        next_cursor: "next",
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: "question", role: "user" }],
+        boundaries: [],
+        has_more: false,
+        next_cursor: null,
+      });
+    const rendered = render(<MessageList onSubmit={vi.fn()} />);
+    const list = screen.getByTestId("bubble-list");
+    list.scrollTop = -380;
+    fireEvent.scroll(list);
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(1),
+    );
+    list.scrollTop = -100;
+    rendered.rerender(<MessageList onSubmit={vi.fn()} />);
+    await flushHistoryLayout();
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.messages.some((message) => message.id === "question")).toBe(
+      true,
+    );
+  });
+
+  it("continues past a user already present in the current history", async () => {
+    mocks.messages = [{ id: "question", role: "user", history: true }];
+    apiMocks.getChatHistory
+      .mockResolvedValueOnce({
+        messages: [{ id: "question", role: "user" }],
+        boundaries: [],
+        has_more: true,
+        next_cursor: "next",
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: "older", role: "user" }],
+        boundaries: [],
+        has_more: false,
+        next_cursor: null,
+      });
+    const rendered = render(<MessageList onSubmit={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(1),
+    );
+    rendered.rerender(<MessageList onSubmit={vi.fn()} />);
+    await flushHistoryLayout();
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.messages.some((message) => message.id === "older")).toBe(true);
+  });
+
+  it("keeps the first page and retries from its cursor when the next page fails", async () => {
+    mocks.messages = [{ id: "online-message", history: true }];
+    apiMocks.getChatHistory
+      .mockResolvedValueOnce({
+        messages: [{ id: "fragment", role: "assistant" }],
+        boundaries: [],
+        has_more: true,
+        next_cursor: "next",
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        messages: [{ id: "question", role: "user" }],
+        boundaries: [],
+        has_more: false,
+        next_cursor: null,
+      });
+    const rendered = render(<MessageList onSubmit={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(1),
+    );
+    rendered.rerender(<MessageList onSubmit={vi.fn()} />);
+    await flushHistoryLayout();
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("历史消息加载失败"),
+    );
+    expect(mocks.messages.some((message) => message.id === "fragment")).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重试加载历史消息" }));
+    await waitFor(() =>
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(3),
+    );
+    expect(apiMocks.getChatHistory).toHaveBeenLastCalledWith(
+      "chat-real-1",
+      "next",
+      20,
+    );
+    expect(mocks.messages.some((message) => message.id === "question")).toBe(
+      true,
+    );
+  });
   it("binds the replacement scroll node after loading with the same message count", async () => {
     mocks.messages = [{ id: "online-message", history: true }];
     apiMocks.getChatHistory.mockResolvedValue({
@@ -274,10 +377,13 @@ describe("MessageList content-only composition", () => {
     await flushHistoryLayout();
     await flushHistoryLayout();
     await flushHistoryLayout();
-    expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(3);
-    fireEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+    await flushHistoryLayout();
+    expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(5);
+    fireEvent.click(
+      screen.getByRole("button", { name: "本轮内容较多，继续加载更早消息" }),
+    );
     await waitFor(() =>
-      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(4),
+      expect(apiMocks.getChatHistory).toHaveBeenCalledTimes(6),
     );
   });
 
@@ -1030,6 +1136,24 @@ describe("MessageList content-only composition", () => {
 
     await flushHistoryLayout();
     await waitFor(() => expect(bubbleList).toHaveTextContent("25"));
+    expect(apiMocks.getChatHistory).not.toHaveBeenCalled();
+  });
+
+  it("continues through hidden local cards to a user after the anchor moves", async () => {
+    mocks.messages = Array.from({ length: 25 }, (_, index) => ({
+      id: `local-${index}`,
+      role: index === 3 ? "user" : "assistant",
+      history: true,
+    }));
+    const rendered = render(<MessageList onSubmit={vi.fn()} />);
+    const list = screen.getByTestId("bubble-list");
+    list.scrollTop = -380;
+    fireEvent.scroll(list);
+    await waitFor(() => expect(list).toHaveTextContent("20"));
+    list.scrollTop = -100;
+    rendered.rerender(<MessageList onSubmit={vi.fn()} />);
+    await flushHistoryLayout();
+    await waitFor(() => expect(list).toHaveTextContent("25"));
     expect(apiMocks.getChatHistory).not.toHaveBeenCalled();
   });
 

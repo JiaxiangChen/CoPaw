@@ -8,6 +8,7 @@ interface HistoryLoadStatusProps {
   onRetry: () => void;
   onLoadMore?: () => void;
   advancing?: boolean;
+  limitReached?: boolean;
 }
 
 const useStyles = createStyles(({ css, token }) => ({
@@ -102,6 +103,7 @@ export default function HistoryLoadStatus({
   onRetry,
   onLoadMore,
   advancing = false,
+  limitReached = false,
 }: HistoryLoadStatusProps) {
   const { cx, styles } = useStyles();
   const isRetrying = state === "loading" && retrying;
@@ -122,7 +124,7 @@ export default function HistoryLoadStatus({
             onClick={onLoadMore}
             type="button"
           >
-            加载更早消息
+            {limitReached ? "本轮内容较多，继续加载更早消息" : "加载更早消息"}
           </button>
         ) : null
       ) : (
