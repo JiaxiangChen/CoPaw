@@ -14,6 +14,7 @@ import {
 import { formatListTime } from "../../listTimeFormat";
 import TaskActionMenu from "../TaskActionMenu";
 import TaskNextRunTooltip from "../TaskNextRunTooltip";
+import TaskTitle from "../TaskTitle";
 
 function ToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
@@ -119,9 +120,10 @@ export default function ChatTaskList(props: ChatTaskListProps) {
               {sidebarMeta.unreadCount > 99 ? "99+" : sidebarMeta.unreadCount}
             </span>
           )}
-          <span className="chat-task-list-item-title">
-            {task.name || task.id}
-          </span>
+          <TaskTitle
+            className="chat-task-list-item-title"
+            title={task.name || task.id}
+          />
           {(sidebarMeta.canPause ||
             sidebarMeta.canRun ||
             sidebarMeta.canResume ||
