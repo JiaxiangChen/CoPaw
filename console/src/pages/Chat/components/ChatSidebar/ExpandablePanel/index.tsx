@@ -22,6 +22,7 @@ import {
 } from "../historySessions";
 import TaskActionMenu from "../../TaskActionMenu";
 import TaskNextRunTooltip from "../../TaskNextRunTooltip";
+import TaskTitle from "../../TaskTitle";
 import { HistoryInfiniteScrollTrigger } from "../HistoryInfiniteScrollTrigger";
 
 export interface ExpandablePanelProps {
@@ -198,9 +199,10 @@ function TasksContent({
         tabIndex={0}
       >
         <div className="expandable-panel-task-title-row">
-          <span className="expandable-panel-task-title">
-            {task.name || task.id}
-          </span>
+          <TaskTitle
+            className="expandable-panel-task-title"
+            title={task.name || task.id}
+          />
           {(sidebarMeta.unreadCount > 0 ||
             sidebarMeta.canPause ||
             sidebarMeta.canRun ||

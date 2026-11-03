@@ -499,3 +499,9 @@ NODE_OPTIONS=--max-old-space-size=8192 npm run build
 ```
 
 专项用例：`operations.test.ts`、`operations.api.test.ts`、`operations.ui.test.tsx`。真实浏览器使用模拟接口验证，不将其视为 Java 联调；Chromium 108 / Windows 360 仍需目标环境复测。
+
+## 聊天「我的任务」标题省略与提示
+
+- 常驻任务列表 `console/src/pages/Chat/components/ChatTaskList/index.tsx` 和侧栏展开面板 `console/src/pages/Chat/components/ChatSidebar/ExpandablePanel/index.tsx` 共用 `TaskTitle.tsx`。
+- 标题保留各自的单行省略样式，仅在 `scrollWidth > clientWidth` 时提供完整内容 Tooltip；初次渲染、内容变化及 ResizeObserver 通知时测量，悬停不重复测量，不能用标题字符数判断是否省略。
+- 回归入口：`console/src/pages/Chat/components/TaskTitle.test.tsx`，覆盖完整显示、宽度相等、溢出提示、尺寸及内容变化和点击透传。DOM 测量单测不替代真实 Chromium 108 与嵌入模式验收。
