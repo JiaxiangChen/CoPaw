@@ -90,8 +90,8 @@ logs/
 *.log
 
 # vibe coding
-AGENTS.md
-CLAUDE.md
+# AGENTS.md
+# CLAUDE.md
 .claude
 .codex
 !.claude/

@@ -100,6 +100,15 @@ CLI / HTTP / Channel Request
 - 部署与安装资源位于 `deploy/` 和 `scripts/`
 - 长文档设计稿位于 `docs/superpowers/specs/`
 
+### 前端浏览器兼容要求
+
+- 前端新增与修改功能必须兼容 **360 浏览器极速模式的 Chromium 108 内核**，已知现场版本为 `108.0.5359.95`；以 Chromium 内核版本判断兼容性，不能仅按 360 产品版本或最新版 Chrome 的表现判断。适用范围包括聊天、侧栏、管理页面、财富工作台和嵌入式页面。
+- 开发时先核实 CSS 属性、选择器、JavaScript 方法及浏览器原生 Web API 在 Chromium 108 中的支持情况；禁止直接依赖该版本不支持的新属性、新方法实现必要布局或核心交互。确需使用时，必须提供并验证兼容回退，通过 `@supports` 或 API 能力检测选择实现。
+- 典型注意项：`subgrid`、Popover API 不得无回退使用；滚动条不能只依赖 `scrollbar-width`、`scrollbar-color`，还须给实际滚动容器提供 `::-webkit-scrollbar` 系列样式，并检查是否被隐藏规则覆盖。
+- 区分 JavaScript 语法转译、CSS 支持和原生 API 支持；Vite 的 `target`、`cssTarget` 不会自动补齐所有 CSS 回退或 Web API polyfill，构建成功不代表 Chromium 108 兼容。
+- 修改后应在真实 Chromium 108 或对应 360 内核与当前浏览器中验证受影响布局、滚动及核心交互，并覆盖适用的 `hideMenu=true` 嵌入场景。仅修改 User-Agent 或在新浏览器中模拟 API 缺失不能代替真实基线验收；环境不可用时须明确报告未验证项。
+- 详细规范见 [console/DESIGN.md 的 Browser Compatibility 与 Verification](console/DESIGN.md#browser-compatibility)。更新或替换 `AGENTS.md`、`CLAUDE.md` 时须保留本节，并同步维护两个文件中的兼容要求。
+
 ### 多用户并发支持
 
 Swe 支持多用户并发，并通过请求级目录实现隔离：
