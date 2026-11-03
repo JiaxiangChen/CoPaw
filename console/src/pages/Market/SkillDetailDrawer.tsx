@@ -758,7 +758,7 @@ export function SkillDetailDrawer(
                   使用用户明细
                 </Title>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Tooltip title="累计调用次数（所有用户总调用）">
+                  <Tooltip title="本月调用次数（按对话去重，统计范围与技能列表一致）">
                     <Tag
                       bordered={false}
                       style={{
@@ -771,7 +771,7 @@ export function SkillDetailDrawer(
                       {formatMetricValue(skill.call_count)}
                     </Tag>
                   </Tooltip>
-                  <Tooltip title="使用用户数（至少调用过一次的用户）">
+                  <Tooltip title="本月使用用户数（统计范围与技能列表一致）">
                     <Tag
                       bordered={false}
                       style={{

@@ -2294,3 +2294,47 @@ async def test_publish_mcp_admin_zip_source_user_empty(tmp_path):
     assert snap["source_user_name"] == ""
     assert snap["source_user_version"] == "v0.0.0"
     assert snap["created_by"] == "admin_id"
+
+
+@pytest.mark.asyncio
+async def test_detail_stats_use_skill_identity_and_request_branch(tmp_path):
+    from market.marketplace.models import MarketItem
+
+    svc = _make_service(tmp_path)
+    svc.market_skill_registry.get_market_skill = AsyncMock(
+        return_value=MarketItem(
+            item_id="item-1",
+            name="search",
+            skill_id="new",
+            creator_id="u1",
+        ),
+    )
+    svc._get_stats = AsyncMock(return_value=(2, 1))
+    svc._get_user_stats = AsyncMock(return_value=[])
+    detail = await svc.get_skill_detail("src_a", "item-1", "110")
+    assert detail.call_count == 2
+    svc._get_stats.assert_awaited_once_with("search", "src_a", "new", "110")
+    svc._get_user_stats.assert_awaited_once_with(
+        "search",
+        "src_a",
+        "new",
+        "110",
+    )
+
+
+@pytest.mark.asyncio
+async def test_detail_user_and_summary_queries_share_month_branch_and_id(
+    tmp_path,
+):
+    svc = _make_service(tmp_path)
+    await svc._get_stats("search", "src_a", "new", "110")
+    await svc._get_user_stats("search", "src_a", "new", "110")
+    summary_sql, summary_params = svc.db.fetch_one.await_args.args
+    users_sql, users_params = svc.db.fetch_all.await_args.args
+    for sql in (summary_sql, users_sql):
+        assert "COUNT(DISTINCT trace_id)" in sql
+        assert "start_time >= %s AND start_time < %s" in sql
+        assert "bbk_id = %s" in sql
+        assert "COALESCE(skill_id, '') = %s" in sql
+    assert summary_params == users_params
+    assert summary_params[-2:] == ("search", "new")
