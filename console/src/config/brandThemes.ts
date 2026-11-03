@@ -1,8 +1,6 @@
 /**
  * ============================================================
- * 品牌主题配置
- * Author: Kun He
- * Date: 2026-04-07
+ * 注意！！！！！此文件需要单独对比合并
  * ============================================================
  *
  * 根据 iframe 传入的 source 参数加载不同的品牌主题配置
@@ -48,7 +46,7 @@ export interface BrandThemeConfig {
  */
 export const DEFAULT_THEME: BrandThemeConfig = {
   source: "default",
-  // TODO
+  // TODO：需要修改
   brandName: "SWE",
   logo: "/logo.png",
   darkLogo: "/logo.png",
@@ -58,6 +56,7 @@ export const DEFAULT_THEME: BrandThemeConfig = {
 };
 
 /**
+ * 注意：！！！！需要修改
  * 品牌主题配置映射
  *
  * 添加新品牌：
@@ -66,10 +65,10 @@ export const DEFAULT_THEME: BrandThemeConfig = {
  */
 export const BRAND_THEMES: Record<string, BrandThemeConfig> = {
   default: DEFAULT_THEME,
-
+  // TODO：需要修改
   ruice: {
     source: "ruice",
-    brandName: "睿策Claw版",
+    brandName: "睿Claw版",
     logo: "/logo.png",
     darkLogo: "/logo.png",
     primaryColor: "#3769FC", //睿策
@@ -92,18 +91,80 @@ export const BRAND_THEMES: Record<string, BrandThemeConfig> = {
     brandName: "智像Claw",
     logo: "/logo.png",
     darkLogo: "/logo.png",
-    primaryColor: "#3769FC", // 智像
+    primaryColor: "#3769FC",
     favicon: "/swe-symbol.png",
     avatar: "/logo.png",
   },
-
-  copilotClaw: {
-    source: "copilotClaw",
-    brandName: "数据赋能CLAW",
+  "UPPCLAW-BETA": {
+    source: "UPPCLAW-BETA",
+    brandName: "智像Claw",
     logo: "/logo.png",
     darkLogo: "/logo.png",
-    primaryColor: "#3769FC", // 数据赋能
-    favicon: "/swe-symbol.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  copilotClaw: {
+    source: "copilotClaw",
+    brandName: "赋能CLAW",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  SZLS: {
+    source: "SZLS",
+    brandName: "数智CLAW",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  privatebanking: {
+    source: "privatebanking",
+    brandName: "私CLAW",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  WDYT: {
+    source: "WDYT",
+    brandName: "网点CLAW",
+    logo: "",
+    darkLogo: "",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "",
+  },
+  rtauto: {
+    source: "rtauto",
+    brandName: "实时数据研发自动化",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  bcpcmktui: {
+    source: "bcpcmktui",
+    brandName: "市拓",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
+    avatar: "/logo.png",
+  },
+  DATATAGCLAW: {
+    source: "DATATAGCLAW",
+    brandName: "标签CLAW",
+    logo: "/logo.png",
+    darkLogo: "/logo.png",
+    primaryColor: "#3769FC",
+    favicon: "/logo.png",
     avatar: "/logo.png",
   },
 };

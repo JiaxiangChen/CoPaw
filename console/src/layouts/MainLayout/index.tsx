@@ -133,7 +133,7 @@ export default function MainLayout() {
     (state) => state.loadEffectiveConfig,
   );
   const hideGlobalShell = hideMenu || showContentOnly;
-  const hideHeader = hideGlobalShell || activeSourceId === "ruice";
+  const hideHeader = hideGlobalShell || activeSourceId === "ruice" || activeSourceId === "pfmind";
 
   useEffect(() => {
     loadEffectiveConfig(activeSourceId);
