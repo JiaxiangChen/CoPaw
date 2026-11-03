@@ -135,6 +135,12 @@ Blue is the current reference emphasis across management and conversation surfac
 
 `console/src/config/consoleDesignTokens.ts` is the normal palette-edit entry point. Change semantic token values there, keep role names stable, update this table, and verify affected surfaces. Do not tune the theme by scattering hexadecimal colors across page styles.
 
+### Scrollbars
+
+- Chat and the Wealth Workbench reuse `console/src/styles/scrollbar.less` for thin, rounded gray scrollbars with transparent tracks and darker thumbs on hover. The WebKit fallback uses 4px width and height; modern browsers also receive `scrollbar-width: thin` and `scrollbar-color`.
+- Apply the mixin to actual scroll containers. The Wealth Workbench scopes it to its root and descendants, including tables, filters, and dialogs; do not extend it globally or into embedded documents as a side effect.
+- Keep the Chromium 108 WebKit fallback alongside standard properties and preserve sufficient selector specificity to override chat runtime scrollbar hiding.
+
 ### Spacing
 
 Use a 4px base rhythm. Preferred steps: `4, 8, 12, 16, 20, 24, 32, 40`.
