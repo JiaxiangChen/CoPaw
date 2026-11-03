@@ -109,7 +109,7 @@ export default function useHistoryPreload(options: UseHistoryPreloadOptions) {
             (typeof result === "boolean" &&
               (step + 1 >= MAX_HISTORY_ADVANCE_STEPS || !canContinue())) ||
             (typeof result !== "boolean" &&
-              (result.foundUser ||
+              ((!fillingViewport && result.foundUser) ||
                 archiveSteps >= 5 ||
                 !readingOlder ||
                 latest.current.disabled)) ||
