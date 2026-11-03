@@ -34,7 +34,7 @@ const OPERATION_GUIDE_BBK = "121";
 const OPERATION_GUIDE_SOURCE = "RMASSIST";
 // 临时占位链接，待操作指南正式地址确认后替换。
 const OPERATION_GUIDE_URL = "https://example.com";
-const SPECIAL_SOURCE = "ruice";
+const SPECIAL_SOURCE = new Set(["ruice", "pfmind"]);
 
 /** Extended session type with additional backend fields */
 interface ExtendedHistorySession extends HistorySession {
@@ -150,7 +150,7 @@ export default function ChatSidebar(props: ChatSidebarProps) {
   const isOriginY = useIframeStore((state) => state.isOriginY);
   const isOperationGuideContext =
     bbk === OPERATION_GUIDE_BBK && source === OPERATION_GUIDE_SOURCE;
-  const isHeaderHidden = source === SPECIAL_SOURCE;
+  const isHeaderHidden = SPECIAL_SOURCE.has(source ?? "");
 
   const currentChatId = location.pathname.match(/^\/chat\/(.+)$/)?.[1] || null;
   const currentChatIdRef = useRef<string | null>(currentChatId);
