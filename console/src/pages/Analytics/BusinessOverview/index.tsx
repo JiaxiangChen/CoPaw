@@ -1792,6 +1792,7 @@ export default function BusinessOverviewPage() {
         skillDisplayName={selectedSkillDisplayName ?? undefined}
         startDate={startDateText}
         endDate={endDateText}
+        bbkIds={effectiveBbkIds?.join(",")}
         onClose={() => {
           setSkillModalOpen(false);
           setSelectedSkillName("");

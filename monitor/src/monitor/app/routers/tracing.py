@@ -950,6 +950,7 @@ async def get_skill_traces(
         description="开始日期 (YYYY-MM-DD)",
     ),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    bbk_ids: Optional[str] = Query(None, description="分行 ID，逗号分隔"),
 ) -> dict:
     """获取指定技能调用的对话列表（分页）.
 
@@ -959,6 +960,7 @@ async def get_skill_traces(
         page_size: 每页数量
         start_date: 开始日期筛选
         end_date: 结束日期筛选
+        bbk_ids: 分行筛选
 
     Returns:
         分页的对话列表
@@ -976,6 +978,7 @@ async def get_skill_traces(
         page_size,
         start,
         end,
+        bbk_ids,
     )
     return {
         "items": [t.model_dump() for t in traces],

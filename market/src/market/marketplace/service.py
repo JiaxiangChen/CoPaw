@@ -55,6 +55,7 @@ from .fs import (
     save_mcp_config,
     normalize_skill_name,
 )
+from .skill_statistics import build_skill_stats_filter
 from .skill_registry import SkillRegistry
 from .market_skill_registry import MarketSkillRegistry
 from .mcp_market_registry import MCPMarketRegistry
@@ -204,24 +205,19 @@ _BINARY_PREVIEW_SUFFIXES = {
 }
 
 _TRACING_STATS_SQL = """
-    SELECT
-        COUNT(*) AS call_count,
-        COUNT(DISTINCT user_id) AS user_count
+    SELECT COUNT(DISTINCT trace_id) AS call_count,
+           COUNT(DISTINCT user_id) AS user_count
     FROM swe_tracing_spans
-    WHERE event_type = 'skill_invocation'
-      AND skill_name = %s
-      AND source_id = %s
+    WHERE {where}
+      AND skill_name = %s AND COALESCE(skill_id, '') = %s
 """
 
 _TRACING_USER_STATS_SQL = """
-    SELECT
-        user_id,
-        MAX(COALESCE(user_name, '')) AS user_name,
-        COUNT(*) AS call_count
+    SELECT user_id, MAX(COALESCE(user_name, '')) AS user_name,
+           COUNT(DISTINCT trace_id) AS call_count
     FROM swe_tracing_spans
-    WHERE event_type = 'skill_invocation'
-      AND skill_name = %s
-      AND source_id = %s
+    WHERE {where}
+      AND skill_name = %s AND COALESCE(skill_id, '') = %s
     GROUP BY user_id
     ORDER BY call_count DESC
     LIMIT 100
@@ -3154,6 +3150,8 @@ class MarketplaceService:
             call_count, user_count = await self._get_stats(
                 item.name,
                 source_id,
+                item.skill_id,
+                user_bbk_id,
             )
             result.append(
                 MarketSkillResponse(
@@ -3207,8 +3205,18 @@ class MarketplaceService:
         ):
             return None
 
-        call_count, user_count = await self._get_stats(item.name, source_id)
-        user_stats = await self._get_user_stats(item.name, source_id)
+        call_count, user_count = await self._get_stats(
+            item.name,
+            source_id,
+            item.skill_id,
+            user_bbk_id,
+        )
+        user_stats = await self._get_user_stats(
+            item.name,
+            source_id,
+            item.skill_id,
+            user_bbk_id,
+        )
 
         return MarketSkillDetail(
             item_id=item.item_id,
@@ -3683,13 +3691,16 @@ class MarketplaceService:
         self,
         skill_name: str,
         source_id: str,
+        skill_id: str,
+        user_bbk_id: str,
     ) -> tuple[int, int]:
         if not self.db.is_connected:
             return 0, 0
+        where, params = build_skill_stats_filter(source_id, user_bbk_id)
         try:
             row = await self.db.fetch_one(
-                _TRACING_STATS_SQL,
-                (skill_name, source_id),
+                _TRACING_STATS_SQL.format(where=where),
+                (*params, skill_name, skill_id or ""),
             )
             if row:
                 return int(row.get("call_count", 0)), int(
@@ -3703,13 +3714,16 @@ class MarketplaceService:
         self,
         skill_name: str,
         source_id: str,
+        skill_id: str,
+        user_bbk_id: str,
     ) -> list[SkillUserStat]:
         if not self.db.is_connected:
             return []
+        where, params = build_skill_stats_filter(source_id, user_bbk_id)
         try:
             rows = await self.db.fetch_all(
-                _TRACING_USER_STATS_SQL,
-                (skill_name, source_id),
+                _TRACING_USER_STATS_SQL.format(where=where),
+                (*params, skill_name, skill_id or ""),
             )
             return [
                 SkillUserStat(

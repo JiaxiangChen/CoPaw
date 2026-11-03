@@ -22,22 +22,22 @@ from ...marketplace.schemas import (
     MarketBrowseResponse,
     MarketSkillResponse,
 )
+from ...marketplace.skill_statistics import build_skill_stats_filter
 from ..deps import require_source_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _BROWSE_STATS_CHUNK_SIZE = 500
-
 _BROWSE_SKILL_STATS_SQL = """
-    SELECT
-        skill_name AS item_key,
-        COUNT(*) AS call_count,
-        COUNT(DISTINCT user_id) AS user_count
+    SELECT skill_name AS item_key,
+           MAX(NULLIF(skill_id, '')) AS skill_id,
+           COUNT(DISTINCT trace_id) AS call_count,
+           COUNT(DISTINCT user_id) AS user_count
     FROM swe_tracing_spans
-    WHERE event_type = 'skill_invocation'
-      AND source_id = %s
+    WHERE {where}
       AND skill_name IN ({placeholders})
-    GROUP BY skill_name
+    GROUP BY skill_name,
+        COALESCE(NULLIF(skill_id, ''), CONCAT('__NAME__:', skill_name))
 """
 
 _BROWSE_MCP_STATS_SQL = """
@@ -182,7 +182,8 @@ async def _load_batch_stats(
     source_id: str,
     resource_type: str,
     items: list,
-) -> dict[str, tuple[int, int]]:
+    user_bbk_id: str,
+) -> dict[str | tuple[str, str], tuple[int, int]]:
     keys = _stats_keys(resource_type, items)
     if not keys:
         return {}
@@ -192,6 +193,7 @@ async def _load_batch_stats(
             source_id,
             resource_type,
             keys,
+            user_bbk_id,
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.warning("Failed to load browse stats: %s", exc)
@@ -203,8 +205,9 @@ async def _fetch_batch_stats(
     source_id: str,
     resource_type: str,
     keys: list[str],
-) -> dict[str, tuple[int, int]]:
-    stats: dict[str, tuple[int, int]] = {}
+    user_bbk_id: str,
+) -> dict[str | tuple[str, str], tuple[int, int]]:
+    stats: dict[str | tuple[str, str], tuple[int, int]] = {}
     for start in range(0, len(keys), _BROWSE_STATS_CHUNK_SIZE):
         chunk = keys[start : start + _BROWSE_STATS_CHUNK_SIZE]
         stats.update(
@@ -213,6 +216,7 @@ async def _fetch_batch_stats(
                 source_id,
                 resource_type,
                 chunk,
+                user_bbk_id,
             ),
         )
     return stats
@@ -223,19 +227,34 @@ async def _fetch_batch_stats_chunk(
     source_id: str,
     resource_type: str,
     keys: list[str],
-) -> dict[str, tuple[int, int]]:
+    user_bbk_id: str,
+) -> dict[str | tuple[str, str], tuple[int, int]]:
     placeholders = ", ".join(["%s"] * len(keys))
     sql_template = (
         _BROWSE_SKILL_STATS_SQL
         if resource_type == "skill"
         else _BROWSE_MCP_STATS_SQL
     )
+    params: tuple = (source_id, *keys)
+    if resource_type == "skill":
+        where, filter_params = build_skill_stats_filter(source_id, user_bbk_id)
+        sql_template = sql_template.format(
+            where=where,
+            placeholders=placeholders,
+        )
+        params = (*filter_params, *keys)
+    else:
+        sql_template = sql_template.format(placeholders=placeholders)
     rows = await request.app.state.marketplace.db.fetch_all(
-        sql_template.format(placeholders=placeholders),
-        (source_id, *keys),
+        sql_template,
+        params,
     )
     return {
-        str(row.get("item_key") or ""): (
+        (
+            (str(row["item_key"]), row.get("skill_id") or "")
+            if resource_type == "skill"
+            else str(row["item_key"])
+        ): (
             int(row.get("call_count", 0)),
             int(row.get("user_count", 0)),
         )
@@ -258,10 +277,13 @@ def _stats_keys(resource_type: str, items: list) -> list[str]:
 def _browse_item_dict(
     item,
     resource_type: str,
-    stats: dict[str, tuple[int, int]],
+    stats: dict[str | tuple[str, str], tuple[int, int]],
 ) -> dict:
     if resource_type == "skill":
-        call_count, user_count = stats.get(item.name, (0, 0))
+        call_count, user_count = stats.get(
+            (item.name, item.skill_id or ""),
+            (0, 0),
+        )
         return MarketSkillResponse(
             item_id=item.item_id,
             name=item.name,
@@ -303,7 +325,7 @@ def _browse_item_dict(
 def _browse_item_dicts(
     items: list,
     resource_type: str,
-    stats: dict[str, tuple[int, int]],
+    stats: dict[str | tuple[str, str], tuple[int, int]],
 ) -> list[dict]:
     return [_browse_item_dict(item, resource_type, stats) for item in items]
 
@@ -405,6 +427,7 @@ async def browse_market(
         source_id,
         resource_type,
         result_items,
+        user_bbk_id,
     )
     return MarketBrowseResponse(
         resource_type=resource_type,

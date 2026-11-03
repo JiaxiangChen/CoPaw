@@ -3426,6 +3426,7 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
         page_size: int = 20,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        bbk_ids: Optional[str] = None,
     ) -> tuple[list[TraceListItem], int]:
         """获取指定技能调用的对话列表（分页）."""
         method_start = time.time()
@@ -3467,6 +3468,13 @@ class TracingQueryService:  # pylint: disable=too-many-public-methods
                 end_date,
                 skill_name,
             ]
+
+        bbk_filter_sql, bbk_filter_params = build_bbk_in_filter(bbk_ids)
+        base_where += bbk_filter_sql.replace(
+            " AND bbk_id IN",
+            " AND s.bbk_id IN",
+        )
+        count_params.extend(bbk_filter_params)
 
         # 查询总数
         count_query = f"""

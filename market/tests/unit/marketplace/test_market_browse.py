@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -216,6 +217,7 @@ def test_skill_browse_uses_batch_stats_without_per_item_queries(tmp_path):
             [
                 {
                     "item_key": "tdsql-skill",
+                    "skill_id": "skill-1",
                     "call_count": 7,
                     "user_count": 3,
                 },
@@ -237,6 +239,73 @@ def test_skill_browse_uses_batch_stats_without_per_item_queries(tmp_path):
     assert item_data["user_count"] == 3
     svc.market_skill_registry.list_market_skills.assert_not_awaited()
     svc._get_stats.assert_not_awaited()  # noqa: SLF001
+
+    stats_sql, stats_params = (
+        app.state.marketplace.db.fetch_all.await_args_list[1].args
+    )
+    assert "COUNT(DISTINCT trace_id) AS call_count" in stats_sql
+    assert "start_time >= %s AND start_time < %s" in stats_sql
+    assert "bbk_id = %s" not in stats_sql
+    assert "user_id != 'default'" in stats_sql
+    assert "include_in_statistics = 1" in stats_sql
+    assert "skill_name NOT IN" in stats_sql
+    assert "NOT EXISTS" in stats_sql
+    month_start, month_end = stats_params[1:3]
+    assert month_start.day == month_end.day == 1
+    assert (month_end.year, month_end.month) > (
+        month_start.year,
+        month_start.month,
+    )
+    assert stats_params[-1:] == ("tdsql-skill",)
+    assert "100" not in stats_params
+    assert "V00" not in stats_params
+
+
+def test_skill_browse_stats_filter_specific_request_bbk_id(tmp_path):
+    from market.app.routers.market_browse import _fetch_batch_stats_chunk
+
+    app = _make_app(tmp_path)
+    request = SimpleNamespace(app=app)
+
+    asyncio.run(
+        _fetch_batch_stats_chunk(
+            request,
+            "src_a",
+            "skill",
+            ["tdsql-skill"],
+            "110",
+        ),
+    )
+
+    stats_sql, stats_params = (
+        app.state.marketplace.db.fetch_all.await_args.args
+    )
+    assert "AND bbk_id = %s" in stats_sql
+    assert stats_params[3] == "110"
+    assert stats_params[-1] == "tdsql-skill"
+
+
+def test_skill_browse_stats_do_not_filter_hq_or_virtual_bbk_id(tmp_path):
+    from market.app.routers.market_browse import _fetch_batch_stats_chunk
+
+    app = _make_app(tmp_path)
+    request = SimpleNamespace(app=app)
+
+    for bbk_id in ("100", "V00"):
+        asyncio.run(
+            _fetch_batch_stats_chunk(
+                request,
+                "src_a",
+                "skill",
+                ["tdsql-skill"],
+                bbk_id,
+            ),
+        )
+
+    for call in app.state.marketplace.db.fetch_all.await_args_list:
+        assert "bbk_id" not in call.args[0]
+        assert "100" not in call.args[1]
+        assert "V00" not in call.args[1]
 
 
 def test_skill_browse_falls_back_when_batch_stats_query_fails(tmp_path):
@@ -316,6 +385,7 @@ def test_skill_browse_chunks_batch_stats_queries(tmp_path, monkeypatch):
             [
                 {
                     "item_key": "tdsql-skill-0",
+                    "skill_id": "skill-0",
                     "call_count": 7,
                     "user_count": 3,
                 },
@@ -323,6 +393,7 @@ def test_skill_browse_chunks_batch_stats_queries(tmp_path, monkeypatch):
             [
                 {
                     "item_key": "tdsql-skill-2",
+                    "skill_id": "skill-2",
                     "call_count": 5,
                     "user_count": 2,
                 },
@@ -796,3 +867,56 @@ def test_selected_facets_keep_independent_all_totals(tmp_path):
     assert data["total"] == 1
     assert data["category_total"] == 2
     assert data["branch_total"] == 2
+
+
+def test_skill_stats_keep_same_name_ids_separate(tmp_path):
+    from market.app.routers.market_browse import (
+        _browse_item_dict,
+        _fetch_batch_stats_chunk,
+    )
+    from market.marketplace.models import MarketItem
+
+    app = _make_app(tmp_path)
+    app.state.marketplace.db.fetch_all = AsyncMock(
+        return_value=[
+            {
+                "item_key": "search",
+                "skill_id": "old",
+                "call_count": 2,
+                "user_count": 1,
+            },
+            {
+                "item_key": "search",
+                "skill_id": "new",
+                "call_count": 5,
+                "user_count": 3,
+            },
+            {
+                "item_key": "search",
+                "skill_id": None,
+                "call_count": 1,
+                "user_count": 1,
+            },
+        ],
+    )
+    stats = asyncio.run(
+        _fetch_batch_stats_chunk(
+            SimpleNamespace(app=app),
+            "src_a",
+            "skill",
+            ["search"],
+            "110",
+        ),
+    )
+    for skill_id, expected in [("old", 2), ("new", 5), ("", 1)]:
+        item = MarketItem(
+            item_id=skill_id or "legacy",
+            name="search",
+            skill_id=skill_id,
+            creator_id="u1",
+        )
+        assert (
+            _browse_item_dict(item, "skill", stats)["call_count"] == expected
+        )
+    sql = app.state.marketplace.db.fetch_all.await_args.args[0]
+    assert "COALESCE(NULLIF(skill_id, '')," in sql
