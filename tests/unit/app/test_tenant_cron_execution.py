@@ -1089,8 +1089,6 @@ def test_execute_exposes_tenant_process_limit_policy_inside_cron_context(
     job = _build_text_job("/tmp/tenant-a/workspaces/alpha")
 
     scope_id = encode_scope_id("tenant-a", "source-a")
-    tenant_dir = tmp_path / scope_id
-    tenant_dir.mkdir(parents=True, exist_ok=True)
     save_config(
         Config.model_validate(
             {
@@ -1104,7 +1102,7 @@ def test_execute_exposes_tenant_process_limit_policy_inside_cron_context(
                 },
             },
         ),
-        tenant_dir / "config.json",
+        tmp_path / "config.json",
     )
 
     async def fake_execute_job(

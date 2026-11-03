@@ -498,7 +498,11 @@ export default function MessageList(props: {
           reconcileHistoryLayers(archiveMessages, current),
         );
         setHistoryLoadState(page.has_more ? "idle" : "exhausted");
-        return true;
+        return {
+          progressed: true,
+          foundUser: uniqueOlder.some((message) => message.role === "user"),
+          archive: true,
+        };
       } catch {
         if (generation === historyGenerationRef.current) {
           setHistoryLoadState("error");
@@ -529,12 +533,20 @@ export default function MessageList(props: {
 
   const advanceHistory = React.useCallback(async () => {
     if (hasHiddenLocalHistory) {
+      const historical = safeMessages.filter(isHistoricalMessage);
+      const nextCount = Math.min(
+        visibleHistoryCount + CURRENT_HISTORY_BATCH_SIZE,
+        historicalMessageCount,
+      );
+      const foundUser = historical
+        .slice(visibleHistoryCount, nextCount)
+        .some((message) => message.role === "user");
       captureVisibleHistoryAnchor();
       isPrependingHistoryRef.current = true;
       setVisibleHistoryCount((current) =>
         Math.min(current + CURRENT_HISTORY_BATCH_SIZE, historicalMessageCount),
       );
-      return true;
+      return { progressed: true, foundUser, archive: false };
     }
 
     setArchivePagingStarted(true);
@@ -543,6 +555,8 @@ export default function MessageList(props: {
     captureVisibleHistoryAnchor,
     hasHiddenLocalHistory,
     historicalMessageCount,
+    safeMessages,
+    visibleHistoryCount,
     loadOlderHistory,
   ]);
 
@@ -789,6 +803,7 @@ export default function MessageList(props: {
               : undefined
           }
           advancing={historyPreload.isAdvancing}
+          limitReached={historyPreload.limitReached}
         />
       }
     />

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tenant-scoped subprocess process-limit helpers."""
+"""Process-limit helpers for tenant-scoped subprocesses."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover - non-Unix import guard
     resource = None  # type: ignore[assignment]
 
 from swe.config.context import get_current_effective_tenant_id
-from swe.config.utils import get_tenant_config_path, load_config
+from swe.config.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +103,9 @@ class CurrentProcessLimitPolicy:
 def resolve_current_process_limit_policy(
     scope: ProcessLimitScope,
 ) -> CurrentProcessLimitPolicy:
-    """Resolve the current tenant's process-limit policy for one scope."""
+    """Resolve global process limits while retaining the current tenant identity."""
     tenant_id = get_current_effective_tenant_id()
-    config = load_config(get_tenant_config_path(tenant_id))
+    config = load_config()
     process_limits = config.security.process_limits
     scope_enabled = (
         process_limits.shell if scope == "shell" else process_limits.mcp_stdio

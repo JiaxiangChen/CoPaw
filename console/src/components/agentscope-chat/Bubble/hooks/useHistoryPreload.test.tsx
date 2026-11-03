@@ -85,6 +85,48 @@ describe("useHistoryPreload", () => {
     expect(onNearStart).toHaveBeenCalledTimes(1);
   });
 
+  it("continues initial filling after finding a user while the viewport remains short", async () => {
+    const onNearStart = vi.fn().mockResolvedValue({
+      progressed: true,
+      foundUser: true,
+      archive: false,
+    });
+    const { element } = setup(onNearStart, {}, 300);
+    await act(async () => {});
+    await settle();
+    expect(onNearStart).toHaveBeenCalledTimes(2);
+    Object.defineProperty(element, "scrollHeight", { value: 500 });
+    await settle();
+    expect(onNearStart).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops explicit history advancement when a user is found", async () => {
+    const onNearStart = vi.fn().mockResolvedValue({
+      progressed: true,
+      foundUser: true,
+      archive: false,
+    });
+    const { scroll } = setup(onNearStart);
+    await scroll(-380);
+    await settle();
+    expect(onNearStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds initial filling when each short batch contains a user", async () => {
+    const onNearStart = vi.fn().mockResolvedValue({
+      progressed: true,
+      foundUser: true,
+      archive: false,
+    });
+    setup(onNearStart, {}, 300);
+    await act(async () => {});
+    await settle();
+    await settle();
+    await settle();
+    await settle();
+    expect(onNearStart).toHaveBeenCalledTimes(3);
+  });
+
   it("continues at the top after layout settles without requiring a downward scroll", async () => {
     const { onNearStart, scroll } = setup();
     await scroll(-380);
