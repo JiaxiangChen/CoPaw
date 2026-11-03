@@ -14,6 +14,16 @@ const api = vi.hoisted(() => ({
   getUserChat: vi.fn(),
   getUserChatHistory: vi.fn(),
 }));
+vi.mock("@/components/agentscope-chat/Bubble/hooks/useHistoryPreload", () => ({
+  default: (options: {
+    onNearStart: () => Promise<boolean>;
+    onRetry: () => Promise<boolean>;
+  }) => ({
+    isAdvancing: false,
+    loadMore: () => void options.onNearStart(),
+    retry: () => void options.onRetry(),
+  }),
+}));
 vi.mock("../../../../../api/modules/tracing", () => ({ tracingApi: api }));
 vi.mock("../../../../Chat/components/RuntimeRequestCard", () => ({
   default: () => null,
@@ -92,7 +102,7 @@ it("joins an archived tool call and retained result using the unchanged Chat con
       targetUserId="target"
     />,
   );
-  fireEvent.click(await screen.findByText("加载更早历史"));
+  fireEvent.click(await screen.findByText("加载更早消息"));
   await screen.findByText("已到达会话开始处");
   await waitFor(() => {
     const messages = JSON.parse(screen.getByTestId("messages").textContent!);

@@ -26,6 +26,19 @@ const htmlPreviewTrackingValues = vi.hoisted(
   () => [] as Array<{ disableEventRecording?: boolean }>,
 );
 
+// Component tests drive individual advances; the shared hook's own suite covers
+// scroll thresholds, initial filling, cancellation and its three-step budget.
+vi.mock("@/components/agentscope-chat/Bubble/hooks/useHistoryPreload", () => ({
+  default: (options: {
+    onNearStart: () => Promise<boolean>;
+    onRetry: () => Promise<boolean>;
+  }) => ({
+    isAdvancing: false,
+    loadMore: () => void options.onNearStart(),
+    retry: () => void options.onRetry(),
+  }),
+}));
+
 vi.mock("../../../../../api/modules/tracing", () => ({
   tracingApi: tracingApiMock,
 }));
@@ -169,7 +182,7 @@ it("loads archive-only history and advances cursor; retries without losing messa
       has_more: false,
     });
   render(<ReadOnlySessionChat {...props} />);
-  fireEvent.click(await screen.findByText("加载更早历史"));
+  fireEvent.click(await screen.findByText("加载更早消息"));
   await waitFor(() =>
     expect(screen.getByTestId("bubble-list")).toHaveTextContent("1"),
   );
@@ -179,8 +192,10 @@ it("loads archive-only history and advances cursor; retries without losing messa
     null,
     20,
   );
-  fireEvent.click(screen.getByText("加载更早历史"));
-  fireEvent.click(await screen.findByText("重试加载历史"));
+  fireEvent.click(screen.getByText("加载更早消息"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "重试加载历史消息" }),
+  );
   await screen.findByText("已到达会话开始处");
   expect(tracingApiMock.getUserChatHistory).toHaveBeenLastCalledWith(
     "target",
@@ -202,7 +217,7 @@ it("rejects a non-advancing cursor", async () => {
     next_cursor: null,
   });
   render(<ReadOnlySessionChat {...props} />);
-  fireEvent.click(await screen.findByText("加载更早历史"));
+  fireEvent.click(await screen.findByText("加载更早消息"));
   await screen.findByRole("alert");
   expect(screen.getByTestId("bubble-list")).toHaveTextContent("0");
 });
@@ -219,7 +234,7 @@ it("ignores old archive responses after switching target and prevents concurrent
     }),
   );
   const { rerender } = render(<ReadOnlySessionChat {...props} />);
-  const load = await screen.findByText("加载更早历史");
+  const load = await screen.findByText("加载更早消息");
   const initialCalls = tracingApiMock.getUserChatHistory.mock.calls.length;
   fireEvent.click(load);
   fireEvent.click(load);
@@ -317,4 +332,47 @@ it("resets the viewer when the selected Agent changes", async () => {
     expect(tracingApiMock.getUserChat).toHaveBeenCalledTimes(count + 1),
   );
   act(() => useAgentStore.getState().setSelectedAgent("default"));
+});
+
+it("reveals local history in batches of ten before requesting an archive", async () => {
+  tracingApiMock.getUserChat.mockResolvedValue({
+    messages: Array.from({ length: 25 }, (_, index) =>
+      archived(`local-${index}`),
+    ),
+    archive: { has_more: true },
+  });
+  tracingApiMock.getUserChatHistory.mockResolvedValue({
+    messages: [archived("old")],
+    has_more: false,
+  });
+  render(<ReadOnlySessionChat {...props} />);
+  expect(await screen.findByTestId("bubble-list")).toHaveTextContent("10");
+  expect(screen.getByTestId("conversation-quick-nav")).toHaveTextContent("10");
+  expect(tracingApiMock.getUserChatHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("加载更早消息"));
+  await waitFor(() =>
+    expect(screen.getByTestId("bubble-list")).toHaveTextContent("20"),
+  );
+  expect(tracingApiMock.getUserChatHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("加载更早消息"));
+  await waitFor(() =>
+    expect(screen.getByTestId("bubble-list")).toHaveTextContent("25"),
+  );
+  expect(tracingApiMock.getUserChatHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("加载更早消息"));
+  await screen.findByText("已到达会话开始处");
+  expect(tracingApiMock.getUserChatHistory).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("bubble-list")).toHaveTextContent("26");
+});
+
+it("reveals local batches without archive calls when all history is local", async () => {
+  tracingApiMock.getUserChat.mockResolvedValue({
+    messages: Array.from({ length: 12 }, (_, index) => archived(String(index))),
+  });
+  render(<ReadOnlySessionChat {...props} />);
+  expect(await screen.findByTestId("bubble-list")).toHaveTextContent("10");
+  fireEvent.click(screen.getByText("加载更早消息"));
+  await screen.findByText("已到达会话开始处");
+  expect(screen.getByTestId("bubble-list")).toHaveTextContent("12");
+  expect(tracingApiMock.getUserChatHistory).not.toHaveBeenCalled();
 });
