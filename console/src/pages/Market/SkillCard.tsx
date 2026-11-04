@@ -16,9 +16,10 @@ interface SkillCardProps {
   isInstalled?: boolean;
   isFeatured?: boolean;
   categoryName?: string;
+  statsStatus?: "loading" | "ready" | "error";
 }
 
-export function SkillCard({ skill, onClick, onDistribute, onLookupOwners, onUnpublish, onDelete, isManager, isInstalled, isFeatured, categoryName }: SkillCardProps) {
+export function SkillCard({ skill, onClick, onDistribute, onLookupOwners, onUnpublish, onDelete, isManager, isInstalled, isFeatured, categoryName, statsStatus = "ready" }: SkillCardProps) {
   const formatMetricValue = (value: number | null): string => {
     if (value === null) return "0";
     if (value >= 100000000) return `${(value / 100000000).toFixed(1)}亿`;
@@ -275,7 +276,7 @@ export function SkillCard({ skill, onClick, onDistribute, onLookupOwners, onUnpu
             )}
           </div>
           {/* Stats badges */}
-          <div style={{ marginLeft: 12, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+          <div aria-busy={statsStatus === "loading"} title={statsStatus === "loading" ? "统计加载中" : statsStatus === "error" ? "统计暂不可用，刷新可重试" : undefined} style={{ marginLeft: 12, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
             <div
               style={{
                 display: "inline-flex",
@@ -292,7 +293,7 @@ export function SkillCard({ skill, onClick, onDistribute, onLookupOwners, onUnpu
               <PhoneCall size={12} />
               <span style={{ fontSize: 11, color: "#6a7fa5" }}>调用</span>
               <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                {formatMetricValue(skill.call_count)}
+                {statsStatus === "ready" ? formatMetricValue(skill.call_count) : "—"}
               </span>
             </div>
             <div
@@ -311,7 +312,7 @@ export function SkillCard({ skill, onClick, onDistribute, onLookupOwners, onUnpu
               <Users size={12} />
               <span style={{ fontSize: 11, color: "#4c8669" }}>用户</span>
               <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                {formatMetricValue(skill.user_count)}
+                {statsStatus === "ready" ? formatMetricValue(skill.user_count) : "—"}
               </span>
             </div>
           </div>

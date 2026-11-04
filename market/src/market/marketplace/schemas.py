@@ -601,6 +601,7 @@ class MarketBrowseResponse(BaseModel):
     """统一市场浏览结果及两侧 facet 统计."""
 
     resource_type: str
+    stats_available: bool = True
     items: list[dict] = Field(default_factory=list)
     total: int = 0
     category_total: int = 0

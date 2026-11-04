@@ -85,6 +85,7 @@ export function MarketSkills({
     categories,
     skills,
     loading: skillsLoading,
+    statsStatus,
     selectedCategory,
     setSelectedCategory,
     selectedBbkId,
@@ -886,6 +887,7 @@ export function MarketSkills({
                         <SkillCard
                           key={skill.item_id}
                           skill={skill}
+                          statsStatus={statsStatus}
                           categoryName={catName}
                           onClick={() => openSkillDetail(skill.item_id)}
                           onDistribute={

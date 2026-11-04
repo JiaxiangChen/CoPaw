@@ -183,7 +183,7 @@ async def _load_batch_stats(
     resource_type: str,
     items: list,
     user_bbk_id: str,
-) -> dict[str | tuple[str, str], tuple[int, int]]:
+) -> dict[str | tuple[str, str], tuple[int, int]] | None:
     keys = _stats_keys(resource_type, items)
     if not keys:
         return {}
@@ -197,7 +197,7 @@ async def _load_batch_stats(
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.warning("Failed to load browse stats: %s", exc)
-        return {}
+        return None
 
 
 async def _fetch_batch_stats(
@@ -338,6 +338,7 @@ async def browse_market(
     bbk_id: Optional[str] = None,
     uncategorized: bool = False,
     orphaned: bool = False,
+    include_stats: bool = True,
     x_source_id: Optional[str] = Header(default=None, alias="X-Source-Id"),
     x_bbk_id: Optional[str] = Header(default=None, alias="X-Bbk-Id"),
 ) -> MarketBrowseResponse:
@@ -422,16 +423,21 @@ async def browse_market(
         orphaned,
         known_category_ids,
     )
-    stats = await _load_batch_stats(
-        request,
-        source_id,
-        resource_type,
-        result_items,
-        user_bbk_id,
+    stats = (
+        await _load_batch_stats(
+            request,
+            source_id,
+            resource_type,
+            result_items,
+            user_bbk_id,
+        )
+        if include_stats
+        else {}
     )
     return MarketBrowseResponse(
         resource_type=resource_type,
-        items=_browse_item_dicts(result_items, resource_type, stats),
+        items=_browse_item_dicts(result_items, resource_type, stats or {}),
+        stats_available=include_stats and stats is not None,
         total=len(result_items),
         category_total=len(branch_items),
         branch_total=len(category_items),

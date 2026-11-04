@@ -237,6 +237,7 @@ def test_skill_browse_uses_batch_stats_without_per_item_queries(tmp_path):
     item_data = response.json()["items"][0]
     assert item_data["call_count"] == 7
     assert item_data["user_count"] == 3
+    assert response.json()["stats_available"] is True
     svc.market_skill_registry.list_market_skills.assert_not_awaited()
     svc._get_stats.assert_not_awaited()  # noqa: SLF001
 
@@ -348,6 +349,7 @@ def test_skill_browse_falls_back_when_batch_stats_query_fails(tmp_path):
     item_data = response.json()["items"][0]
     assert item_data["call_count"] == 0
     assert item_data["user_count"] == 0
+    assert response.json()["stats_available"] is False
 
 
 def test_skill_browse_chunks_batch_stats_queries(tmp_path, monkeypatch):
@@ -920,3 +922,27 @@ def test_skill_stats_keep_same_name_ids_separate(tmp_path):
         )
     sql = app.state.marketplace.db.fetch_all.await_args.args[0]
     assert "COALESCE(NULLIF(skill_id, '')," in sql
+
+
+def test_browse_can_skip_statistics_query(tmp_path):
+    from market.marketplace.models import MarketItem
+
+    app = _make_app(tmp_path)
+    app.state.marketplace.list_market_metadata = AsyncMock(
+        return_value=[
+            MarketItem(
+                item_id="item-1",
+                name="search",
+                skill_id="new",
+                creator_id="u1",
+            ),
+        ],
+    )
+    response = TestClient(app).get(
+        "/api/market/browse?resource_type=skill&include_stats=false",
+        headers={"X-Source-Id": "src_a", "X-Bbk-Id": "110"},
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["item_id"] == "item-1"
+    assert response.json()["stats_available"] is False
+    assert app.state.marketplace.db.fetch_all.await_count == 1
