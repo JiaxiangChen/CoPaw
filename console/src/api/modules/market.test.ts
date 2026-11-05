@@ -7,6 +7,15 @@ vi.mock("../request", () => ({
 }));
 
 describe("marketApi.browseMarket", () => {
+  it("can request metadata without waiting for statistics", async () => {
+    window.__env__ = { systemCode: "", systemSect: "" };
+    const { marketApi } = await import("./market");
+    await marketApi.browseMarket("source-a", "skill", { includeStats: false });
+    expect(requestMock).toHaveBeenLastCalledWith(
+      "/market/browse?resource_type=skill&include_stats=false",
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+  });
   it("sends the uncategorized filter without a fake category id", async () => {
     window.__env__ = {
       systemCode: "",

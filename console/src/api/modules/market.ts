@@ -165,6 +165,7 @@ export interface MarketBrowseBranch {
 }
 
 export interface MarketBrowseResponse {
+  stats_available?: boolean;
   resource_type: "skill" | "mcp";
   items: Array<MarketSkill | MarketMCPItem>;
   total: number;
@@ -418,6 +419,7 @@ export const marketApi = {
       bbkId?: string | null;
       uncategorized?: boolean;
       orphaned?: boolean;
+      includeStats?: boolean;
     },
   ): Promise<MarketBrowseResponse> => {
     const params = new URLSearchParams({ resource_type: resourceType });
@@ -432,6 +434,9 @@ export const marketApi = {
     }
     if (options?.orphaned) {
       params.set("orphaned", "true");
+    }
+    if (options?.includeStats !== undefined) {
+      params.set("include_stats", String(options.includeStats));
     }
     return request<MarketBrowseResponse>(
       `/market/browse?${params.toString()}`,
