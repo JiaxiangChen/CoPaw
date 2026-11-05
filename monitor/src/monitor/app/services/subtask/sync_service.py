@@ -200,6 +200,7 @@ class SyncService:
     def _parse_action_error(body: dict, status: str) -> tuple:
         """Extract the first failed action's type and complete reason."""
         actions = body.get("actionResults")
+        error_type = None
         if status == "SUC" or not isinstance(actions, list):
             return None, None
         for action in actions:
@@ -208,8 +209,15 @@ class SyncService:
             result = action.get("result")
             if not isinstance(result, str):
                 continue
-            match = re.search(r"【([^】]*)】", result)
-            return match.group(1) if match else None, result
+            if "模型错误" in result:
+                error_type = "Prompt"
+            elif "HTTP请求出错" in result:
+                error_type = "HTTP"
+            elif "调用代码节点错误" in result:
+                error_type = "Code"
+            else:
+                error_type = "Unknown"
+            return error_type, result
         return None, None
 
     async def _query_task_status(
