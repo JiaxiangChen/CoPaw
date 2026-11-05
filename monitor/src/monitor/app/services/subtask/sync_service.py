@@ -217,7 +217,7 @@ class SyncService:
                 error_type = "Code"
             else:
                 error_type = "Unknown"
-            return error_type, result
+            return error_type, result[:1024]
         return None, None
 
     async def _query_task_status(
