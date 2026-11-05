@@ -1470,6 +1470,12 @@ async def extract_customer_names(
     # 解析日期（BETWEEN 两边界均包含，end_date 设为当天结束时间）
     start_date = None
     end_date = None
+    if not body.start_date and not body.end_date:
+        today = datetime.now().date()
+        start_date = datetime.combine(today, datetime.min.time())
+        end_date = datetime.combine(today, datetime.max.time()).replace(
+            microsecond=0,
+        )
     if body.start_date:
         try:
             start_date = datetime.strptime(body.start_date, "%Y-%m-%d")
