@@ -202,7 +202,7 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, has_main_task, status, info,
+                   need_notification, has_main_task, status, info, error_type, error_reason,
                    bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE trace_id = %s AND task_id = %s
@@ -224,6 +224,8 @@ class QueryService:
             need_notification=row.get("need_notification", 1),
             has_main_task=row.get("has_main_task", 1),
             status=row.get("status"),
+            error_type=row.get("error_type"),
+            error_reason=row.get("error_reason"),
             info=row.get("info") or "",
             bbk_org_id=row.get("bbk_org_id"),
             template_id=row.get("template_id"),
@@ -250,7 +252,7 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, has_main_task, status, info,
+                   need_notification, has_main_task, status, info, error_type, error_reason,
                    bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE status IS NULL OR status = ''
@@ -276,6 +278,8 @@ class QueryService:
                 need_notification=row.get("need_notification", 1),
                 has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
+                error_type=row.get("error_type"),
+                error_reason=row.get("error_reason"),
                 info=row.get("info") or "",
                 bbk_org_id=row.get("bbk_org_id"),
                 template_id=row.get("template_id"),
@@ -307,7 +311,7 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, has_main_task, status, info,
+                   need_notification, has_main_task, status, info, error_type, error_reason,
                    bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE status IS NULL OR status = ''
@@ -333,6 +337,8 @@ class QueryService:
                 need_notification=row.get("need_notification", 1),
                 has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
+                error_type=row.get("error_type"),
+                error_reason=row.get("error_reason"),
                 info=row.get("info") or "",
                 bbk_org_id=row.get("bbk_org_id"),
                 template_id=row.get("template_id"),
@@ -361,7 +367,7 @@ class QueryService:
         query = """
             SELECT id, trace_id, task_id, filename, task_type, custuid, cust_nm,
                    notification_content_wplus, notification_content_zhaohu,
-                   need_notification, has_main_task, status, info,
+                   need_notification, has_main_task, status, info, error_type, error_reason,
                    bbk_org_id, template_id, result_id, created_at, updated_at
             FROM swe_cron_subtasks
             WHERE trace_id = %s
@@ -385,6 +391,8 @@ class QueryService:
                 need_notification=row.get("need_notification", 1),
                 has_main_task=row.get("has_main_task", 1),
                 status=row.get("status"),
+                error_type=row.get("error_type"),
+                error_reason=row.get("error_reason"),
                 info=row.get("info") or "",
                 bbk_org_id=row.get("bbk_org_id"),
                 template_id=row.get("template_id"),
@@ -401,6 +409,8 @@ class QueryService:
         trace_id: str,
         status: str,
         error_msg: str,
+        error_type: Optional[str] = None,
+        error_reason: Optional[str] = None,
     ) -> bool:
         """Update subtask status.
 
@@ -418,13 +428,22 @@ class QueryService:
 
         query = """
             UPDATE swe_cron_subtasks
-            SET status = %s, updated_at = %s, info = %s
+            SET status = %s, updated_at = %s, info = %s,
+                error_type = %s, error_reason = %s
             WHERE task_id = %s AND trace_id = %s
         """
         now = datetime.now()
         await self.db.execute(
             query,
-            (status, now, error_msg, task_id, trace_id),
+            (
+                status,
+                now,
+                error_msg,
+                error_type,
+                error_reason,
+                task_id,
+                trace_id,
+            ),
         )
 
         logger.debug(
@@ -1470,36 +1489,55 @@ class QueryService:
 
         # 更新 error：有 error 子任务且没有 pending 子任务
         # 同时设置 need_notification 同上逻辑
-        error_query = f"""
-            UPDATE swe_cron_executions e
-            SET
-                async_status = 'error',
-                need_notification = COALESCE(
-                    (
-                        SELECT s.need_notification
-                        FROM swe_cron_subtasks s
-                        WHERE s.trace_id = e.trace_id
-                        AND s.task_type = 'list'
+        failed_subtasks = await self.db.fetch_all(
+            f"""
+                SELECT e.id AS execution_id, s.error_type,
+                    COALESCE((
+                        SELECT n.need_notification
+                        FROM swe_cron_subtasks n
+                        WHERE n.trace_id = e.trace_id AND n.task_type = 'list'
                         LIMIT 1
-                    ),
-                    1
-                )
-            WHERE (e.async_status IS NULL OR e.async_status = '')
-            AND e.id IN ({execution_placeholders})
-            AND EXISTS (
-                SELECT 1 FROM swe_cron_subtasks s
-                WHERE s.trace_id = e.trace_id
+                    ), 1) AS need_notification
+                FROM swe_cron_executions e
+                JOIN swe_cron_subtasks s ON s.trace_id = e.trace_id
+                WHERE e.id IN ({execution_placeholders})
+                AND (e.async_status IS NULL OR e.async_status = '')
                 AND s.status IN ('FAIL', 'PART_SUC', 'TIMEOUT')
-            )
-            AND NOT EXISTS (
-                SELECT 1 FROM swe_cron_subtasks s
-                WHERE s.trace_id = e.trace_id
-                AND (s.status IS NULL OR s.status = '')
-            )
-        """
-        error_count = await self.db.execute(
-            error_query,
+                AND NOT EXISTS (
+                    SELECT 1 FROM swe_cron_subtasks pending
+                    WHERE pending.trace_id = e.trace_id
+                    AND (pending.status IS NULL OR pending.status = '')
+                )
+            """,
             tuple(execution_ids),
+        )
+        failures = {}
+        for row in failed_subtasks:
+            failure = failures.setdefault(
+                row["execution_id"],
+                {
+                    "types": set(),
+                    "need_notification": row["need_notification"],
+                },
+            )
+            error_type = (row["error_type"] or "").strip()
+            if error_type:
+                failure["types"].add(error_type)
+        error_count = await self.db.execute_many(
+            """
+                UPDATE swe_cron_executions
+                SET async_status = 'error', error_type = %s,
+                    need_notification = %s
+                WHERE id = %s AND (async_status IS NULL OR async_status = '')
+            """,
+            [
+                (
+                    ",".join(sorted(failure["types"])) or None,
+                    failure["need_notification"],
+                    execution_id,
+                )
+                for execution_id, failure in failures.items()
+            ],
         )
         (
             indexed_count,

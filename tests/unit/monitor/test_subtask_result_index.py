@@ -10,6 +10,7 @@ from monitor.app.services.subtask.query_service import QueryService
 
 class FakeDb:
     def __init__(self):
+        self.failed_subtasks = []
         self.fetch_all_calls = []
         self.execute_calls = []
         self.execute_many_calls = []
@@ -50,6 +51,8 @@ class FakeDb:
         ]
 
     async def fetch_all(self, sql, params=None):
+        if "SELECT e.id AS execution_id, s.error_type" in sql:
+            return self.failed_subtasks
         self.fetch_all_calls.append((sql, params))
         return self.fetch_all_results.pop(0)
 
@@ -94,10 +97,10 @@ def test_batch_update_indexes_success_execution_results():
     assert "AND e.id IN (%s)" in success_update_sql
     assert db.execute_calls[0][1] == (42,)
 
-    error_update_sql = db.execute_calls[1][0]
+    error_update_sql, error_params = db.execute_many_calls[0]
     assert "async_status = 'error'" in error_update_sql
-    assert "AND e.id IN (%s)" in error_update_sql
-    assert db.execute_calls[1][1] == (42,)
+    assert "WHERE id = %s" in error_update_sql
+    assert error_params == []
 
     insert_calls = _result_index_batch_insert_calls(db)
     assert len(insert_calls) == 1
@@ -132,6 +135,9 @@ def test_batch_update_indexes_success_execution_results():
 
 def test_batch_update_indexes_successful_subtasks_for_failed_execution():
     db = FakeDb()
+    db.failed_subtasks = [
+        {"execution_id": 42, "error_type": "Prompt", "need_notification": 1},
+    ]
     db.execute = _execute_with_error_result(db)
 
     success_count, error_count, indexed_count, _ = asyncio.run(

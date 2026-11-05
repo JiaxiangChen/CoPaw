@@ -156,6 +156,7 @@ def test_standalone_success_writes_index_and_status_in_one_transaction():
 def test_invalid_info_skips_index_and_preserves_info():
     db = FakeDb()
     subtask = _standalone_subtask("not-json")
+    subtask.created_at = datetime.now()
 
     indexed = asyncio.run(
         QueryService(db=db).complete_standalone_success_subtask(subtask),
@@ -203,8 +204,10 @@ def test_index_failure_rolls_back_without_updating_status():
 def test_sync_success_uses_standalone_index_path():
     query_service = AsyncMock()
     service = SyncService(query_service=query_service)
+    service._is_configured = lambda: True
     service._query_task_status = AsyncMock(return_value=("SUC", None))
     subtask = _standalone_subtask("not-json")
+    subtask.created_at = datetime.now()
 
     detail = asyncio.run(
         service._process_pending_subtask(AsyncMock(), subtask, datetime.now()),
@@ -220,8 +223,10 @@ def test_sync_success_uses_standalone_index_path():
 def test_sync_success_keeps_existing_main_task_path():
     query_service = AsyncMock()
     service = SyncService(query_service=query_service)
+    service._is_configured = lambda: True
     service._query_task_status = AsyncMock(return_value=("SUC", None))
     subtask = _standalone_subtask("not-json")
+    subtask.created_at = datetime.now()
     subtask.has_main_task = 1
 
     detail = asyncio.run(
@@ -234,5 +239,7 @@ def test_sync_success_keeps_existing_main_task_path():
         subtask.trace_id,
         "SUC",
         "",
+        error_type=None,
+        error_reason=None,
     )
     query_service.complete_standalone_success_subtask.assert_not_awaited()

@@ -67,6 +67,8 @@ class SubtaskModel(BaseModel):
         default=None,
         description="子任务状态: SUC/FAIL/PART_SUC/TIMEOUT",
     )
+    error_type: Optional[str] = Field(default=None, description="错误类型")
+    error_reason: Optional[str] = Field(default=None, description="错误原因")
     info: str = Field(default="", description="预留扩展信息")
     created_at: Optional[datetime] = Field(
         default=None,

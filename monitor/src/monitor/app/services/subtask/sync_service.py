@@ -8,6 +8,7 @@ Provides methods for:
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -195,10 +196,27 @@ class SyncService:
 
         return status, None
 
+    @staticmethod
+    def _parse_action_error(body: dict, status: str) -> tuple:
+        """Extract the first failed action's type and complete reason."""
+        actions = body.get("actionResults")
+        if status == "SUC" or not isinstance(actions, list):
+            return None, None
+        for action in actions:
+            if not isinstance(action, dict) or action.get("status") != "FAIL":
+                continue
+            result = action.get("result")
+            if not isinstance(result, str):
+                continue
+            match = re.search(r"【([^】]*)】", result)
+            return match.group(1) if match else None, result
+        return None, None
+
     async def _query_task_status(
         self,
         client: httpx.AsyncClient,
         task_id: str,
+        subtask: Optional[SubtaskModel] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         """Query task status from external API.
 
@@ -224,7 +242,13 @@ class SyncService:
             if api_response.status_code != 200:
                 return None, f"API returned {api_response.status_code}"
 
-            return self._parse_api_response(api_response.json())
+            data = api_response.json()
+            status, error = self._parse_api_response(data)
+            if subtask is not None and status:
+                subtask.error_type, subtask.error_reason = (
+                    self._parse_action_error(data.get("body") or {}, status)
+                )
+            return status, error
 
         except httpx.TimeoutException:
             return None, "API timeout"
@@ -327,7 +351,11 @@ class SyncService:
             detail.error = "API not configured"
             return detail
 
-        status, error = await self._query_task_status(client, subtask.task_id)
+        status, error = await self._query_task_status(
+            client,
+            subtask.task_id,
+            subtask,
+        )
         if status:
             if status == "SUC" and subtask.has_main_task == 0:
                 await self.query_service.complete_standalone_success_subtask(
@@ -339,6 +367,8 @@ class SyncService:
                     subtask.trace_id,
                     status,
                     error or "",
+                    error_type=subtask.error_type,
+                    error_reason=subtask.error_reason,
                 )
             detail.new_status = status
             logger.info(
